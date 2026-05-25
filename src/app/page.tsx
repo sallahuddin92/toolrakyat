@@ -1,65 +1,160 @@
-import Image from "next/image";
+import Link from "next/link";
 
-export default function Home() {
+import { Container } from "@/components/layout/Container";
+import { HomeHero } from "@/components/marketing/HomeHero";
+import { ToolCard } from "@/components/tools/ToolCard";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { getPopularTools, tools } from "@/lib/tools/registry";
+import { TOOL_CATEGORIES } from "@/lib/tools/types";
+
+export default function HomePage() {
+  const popular = getPopularTools(9);
+  const byCategory = TOOL_CATEGORIES.map((c) => ({
+    ...c,
+    count: tools.filter((t) => t.categoryId === c.id).length,
+  }));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div>
+      <HomeHero />
+
+      <section className="bg-white">
+        <Container className="py-12">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+                Popular tools
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Fast essentials people use every day.
+              </p>
+            </div>
+            <Button asChild variant="secondary" className="rounded-2xl">
+              <Link href="/tools">View all</Link>
+            </Button>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {popular.map((tool) => (
+              <ToolCard key={tool.id} tool={tool} />
+            ))}
+          </div>
+        </Container>
+      </section>
+
+      <section className="bg-gradient-to-b from-white to-slate-50">
+        <Container className="py-12">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Tool categories
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Everything organized for quick access.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {byCategory.map((c) => (
+              <Card key={c.id} className="rounded-2xl">
+                <CardHeader>
+                  <CardTitle className="text-base">{c.label}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-600">
+                  <div>{c.count} tools</div>
+                  <Button asChild className="rounded-2xl">
+                    <Link href={`/tools/${c.id}`}>Browse {c.label}</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </Container>
+      </section>
+
+      <section className="bg-white">
+        <Container className="py-12">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">Privacy-first promise</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-slate-600">
+                <p>
+                  ToolRakyat processes files temporarily for the tool you choose.
+                  We do not permanently store your files by default, and tools
+                  should never send your files to third parties unless clearly
+                  stated.
+                </p>
+                <Separator className="my-4" />
+                <div className="flex gap-2">
+                  <Button asChild variant="secondary" className="rounded-2xl">
+                    <Link href="/privacy">Read privacy policy</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">Why ToolRakyat</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-slate-600">
+                <ul className="space-y-2">
+                  <li>One website for daily PDF, image, and business tasks</li>
+                  <li>Clean modern UI that stays out of your way</li>
+                  <li>Built for students, SMEs, and freelancers</li>
+                  <li>Honest limitations: no fake “AI results”</li>
+                </ul>
+                <Separator className="my-4" />
+                <Button asChild className="rounded-2xl">
+                  <Link href="/tools">Start with tools</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </Container>
+      </section>
+
+      <section className="bg-gradient-to-b from-white to-slate-50">
+        <Container className="py-12">
+          <div className="max-w-3xl">
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              FAQ
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Quick answers about privacy and usage.
+            </p>
+          </div>
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <Card className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Do you store my uploaded files?
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-slate-600">
+                By default, no. Tools use temporary processing and clean up
+                after results are generated.
+              </CardContent>
+            </Card>
+            <Card className="rounded-2xl">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Are the tools free?
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-slate-600">
+                Core practical tools are free. Some advanced tools may require
+                provider setup (e.g., AI features) and will be clearly labeled.
+              </CardContent>
+            </Card>
+          </div>
+        </Container>
+      </section>
     </div>
   );
 }
+
