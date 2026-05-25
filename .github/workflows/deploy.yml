@@ -1,0 +1,29 @@
+name: Deploy SmartPDF
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Build Docker images
+        run: docker-compose build
+      
+      - name: Run backend tests
+        run: |
+          cd backend
+          pip install -r requirements.txt pytest
+          pytest test_services.py -v
+      
+      - name: Push to registry
+        env:
+          REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+        run: |
+          docker tag smartpdf-frontend:latest $REGISTRY/smartpdf-frontend:latest
+          docker tag smartpdf-backend:latest $REGISTRY/smartpdf-backend:latest
+          docker push $REGISTRY/smartpdf-frontend:latest
+          docker push $REGISTRY/smartpdf-backend:latest
