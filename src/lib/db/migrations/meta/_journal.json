@@ -8,6 +8,13 @@
       "when": 1779771166295,
       "tag": "0000_faithful_blockbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779784537863,
+      "tag": "0001_add_status_and_import_hash",
+      "breakpoints": true
     }
   ]
 }

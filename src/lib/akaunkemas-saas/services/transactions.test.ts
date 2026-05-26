@@ -29,6 +29,8 @@ function makeInput(
     isReconciled: false,
     notes: "",
     source: "manual",
+    status: "draft" as const,
+    importHash: null,
     ...overrides,
   };
 }
@@ -316,9 +318,9 @@ describe("TransactionService", () => {
   describe("bulkCreate()", () => {
     it("creates multiple transactions", () => {
       const results = service.bulkCreate(TENANT_A, BUSINESS_A, [
-        { date: "2026-01-10", description: "Tx 1", debit: 100, credit: 0, categorySlug: "rent", notes: "", balance: null, isReconciled: false, source: "manual" as const },
-        { date: "2026-01-15", description: "Tx 2", debit: 0, credit: 200, categorySlug: "sales", notes: "", balance: null, isReconciled: false, source: "manual" as const },
-        { date: "2026-01-20", description: "Tx 3", debit: 50, credit: 0, categorySlug: "utilities", notes: "", balance: null, isReconciled: false, source: "manual" as const },
+        { date: "2026-01-10", description: "Tx 1", debit: 100, credit: 0, categorySlug: "rent", notes: "", balance: null, isReconciled: false, source: "manual" as const, status: "draft" as const, importHash: null },
+        { date: "2026-01-15", description: "Tx 2", debit: 0, credit: 200, categorySlug: "sales", notes: "", balance: null, isReconciled: false, source: "manual" as const, status: "draft" as const, importHash: null },
+        { date: "2026-01-20", description: "Tx 3", debit: 50, credit: 0, categorySlug: "utilities", notes: "", balance: null, isReconciled: false, source: "manual" as const, status: "draft" as const, importHash: null },
       ]);
 
       expect(results).toHaveLength(3);

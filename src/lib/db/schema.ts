@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Helper: current ISO timestamp
@@ -159,6 +160,10 @@ export const transactions = sqliteTable(
     isReconciled: integer("is_reconciled").notNull().default(0),
     notes: text("notes").notNull().default(""),
     source: text("source").notNull().default("manual"),
+    status: text("status", { enum: ["draft", "reviewed", "locked"] })
+      .notNull()
+      .default("draft"),
+    importHash: text("import_hash"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => ts()),
@@ -175,6 +180,9 @@ export const transactions = sqliteTable(
     tenantBusinessCategoryIdx: index(
       "idx_transactions_tenant_business_category",
     ).on(table.tenantId, table.businessId, table.categorySlug),
+    uniqueImportHash: uniqueIndex("ux_transactions_tenant_business_import_hash")
+      .on(table.tenantId, table.businessId, table.importHash)
+      .where(sql`${table.importHash} IS NOT NULL`),
   }),
 );
 
@@ -199,6 +207,9 @@ export const receipts = sqliteTable(
     serviceCharge: real("service_charge").notNull().default(0),
     notes: text("notes").notNull().default(""),
     imageRef: text("image_ref"),
+    status: text("status", { enum: ["draft", "reviewed"] })
+      .notNull()
+      .default("draft"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => ts()),
