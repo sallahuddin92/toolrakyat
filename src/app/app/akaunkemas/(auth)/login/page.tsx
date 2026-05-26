@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { loginAction } from "./actions";
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -28,18 +29,23 @@ type LoginFormData = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const [formData, setFormData] = useState<LoginFormData>({
-    email: "",
+    email: process.env.NEXT_PUBLIC_DEMO_MODE === "true" ? "demo@akaunkemas.my" : "",
     password: "",
   });
   const [errors, setErrors] = useState<Partial<Record<keyof LoginFormData, string>>>({});
+  const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
   function handleChange(field: keyof LoginFormData) {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
       setFormData((prev) => ({ ...prev, [field]: e.target.value }));
-      // Clear the error for this field on change
       if (errors[field]) {
         setErrors((prev) => ({ ...prev, [field]: undefined }));
+      }
+      if (serverError) {
+        setServerError(null);
       }
     };
   }
@@ -47,7 +53,9 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setServerError(null);
 
+    // Client-side validation
     const result = loginSchema.safeParse(formData);
     if (!result.success) {
       const fieldErrors: Partial<Record<keyof LoginFormData, string>> = {};
@@ -62,30 +70,56 @@ export default function LoginPage() {
       return;
     }
 
-    // DEV-ONLY: No real authentication backend exists yet.
-    // In production this would call an API route that creates a server-side session.
-    console.warn(
-      "[DEV-ONLY] Login submitted with email:",
-      result.data.email,
-      "— no real auth check performed."
-    );
+    // Submit via Server Action
+    try {
+      const fd = new FormData();
+      fd.set("email", result.data.email);
+      fd.set("password", result.data.password);
 
-    // Simulate a brief network delay for realistic UX.
-    await new Promise((resolve) => setTimeout(resolve, 800));
+      const actionResult = await loginAction(fd);
+      if (actionResult && actionResult.error) {
+        setServerError(actionResult.error);
+        setSubmitting(false);
+      }
+      // If no error returned, the Server Action performed a redirect
+    } catch {
+      setServerError("An unexpected error occurred. Please try again.");
+      setSubmitting(false);
+    }
+  }
 
-    // DEV-ONLY: Redirect to the main app without real session creation.
-    router.push("/app/akaunkemas");
+  // DEV-ONLY: quick demo login
+  async function handleDemoLogin() {
+    setSubmitting(true);
+    setServerError(null);
+
+    const fd = new FormData();
+    fd.set("email", "demo@akaunkemas.my");
+    fd.set("password", "demo1234");
+
+    try {
+      const actionResult = await loginAction(fd);
+      if (actionResult && actionResult.error) {
+        setServerError(actionResult.error);
+        setSubmitting(false);
+      }
+    } catch {
+      setServerError("An unexpected error occurred. Please try again.");
+      setSubmitting(false);
+    }
   }
 
   return (
     <div className="relative">
       {/* DEV-ONLY badge */}
-      <Badge
-        variant="secondary"
-        className="absolute -top-3 left-1/2 -translate-x-1/2 border-yellow-600/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-xs"
-      >
-        Dev-only demo login — no real authentication
-      </Badge>
+      {isDemoMode && (
+        <Badge
+          variant="secondary"
+          className="absolute -top-3 left-1/2 -translate-x-1/2 border-yellow-600/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-xs"
+        >
+          Dev-only demo login
+        </Badge>
+      )}
 
       <Card size="sm" className="w-full max-w-md mx-auto mt-6">
         <CardHeader className="text-center">
@@ -126,10 +160,33 @@ export default function LoginPage() {
               )}
             </div>
 
+            {serverError && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md p-2">
+                {serverError}
+              </p>
+            )}
+
             <Button type="submit" className="w-full mt-2" disabled={submitting}>
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+
+          {isDemoMode && (
+            <div className="mt-4 rounded-md border border-yellow-600/20 bg-yellow-500/5 p-3">
+              <p className="text-xs text-muted-foreground mb-2">
+                Demo credentials: <code className="bg-muted px-1 py-0.5 rounded">demo@akaunkemas.my</code> / <code className="bg-muted px-1 py-0.5 rounded">demo1234</code>
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                disabled={submitting}
+                onClick={handleDemoLogin}
+              >
+                Quick demo login
+              </Button>
+            </div>
+          )}
 
           <p className="text-center text-sm text-muted-foreground mt-4">
             Don&apos;t have an account?{" "}
