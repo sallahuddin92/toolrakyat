@@ -1,32 +1,77 @@
-import { GitMerge } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCurrentUser } from "@/lib/auth/dal";
+import { createMatchRepository } from "@/lib/akaunkemas-saas/services/receipt-matches-db";
+import { MatchingClient } from "../_components/MatchingClient";
 
-export default function MatchingPage() {
+export const dynamic = "force-dynamic";
+
+export default async function MatchingPage() {
+  const session = await getCurrentUser();
+  const { tenantId, businessId } = session;
+
+  const matchRepo = createMatchRepository();
+  const matches = matchRepo.getMatches(tenantId, businessId);
+
+  // Load unmatched transactions and receipts
+  const { createDbTransactionService } = await import(
+    "@/lib/akaunkemas-saas/services/transactions-db"
+  );
+  const { createDbReceiptService } = await import(
+    "@/lib/akaunkemas-saas/services/receipts-db"
+  );
+
+  const txService = createDbTransactionService();
+  const receiptService = createDbReceiptService();
+
+  const allTransactions = txService.list(tenantId, businessId);
+  const allReceipts = receiptService.list(tenantId, businessId);
+
+  const matchRows = matchRepo.getMatchRows(tenantId, businessId);
+  const matchedTxIds = new Set(matchRows.map((m) => m.transactionId));
+  const matchedReceiptIds = new Set(matchRows.map((m) => m.receiptId));
+
+  const matched = matches.map((m) => ({
+    transaction: {
+      id: m.transaction.id,
+      date: m.transaction.date,
+      description: m.transaction.description,
+      debit: m.transaction.debit,
+      credit: m.transaction.credit,
+      amount: m.transaction.amount,
+    },
+    receipt: {
+      id: m.receipt.id,
+      date: m.receipt.date,
+      merchant: m.receipt.merchant,
+      amount: m.receipt.amount,
+    },
+    matchType: m.match.matchType,
+  }));
+
+  const unmatchedTxs = allTransactions
+    .filter((tx) => !matchedTxIds.has(tx.id))
+    .map((tx) => ({
+      id: tx.id,
+      date: tx.date,
+      description: tx.description,
+      debit: tx.debit,
+      credit: tx.credit,
+      amount: tx.amount,
+    }));
+
+  const unmatchedReceipts = allReceipts
+    .filter((r) => !matchedReceiptIds.has(r.id))
+    .map((r) => ({
+      id: r.id,
+      date: r.date,
+      merchant: r.merchant,
+      amount: r.amount,
+    }));
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Receipt Matching</h1>
-        <p className="text-sm text-slate-500">
-          Match receipts to bank transactions automatically.
-        </p>
-      </div>
-
-      <Card className="rounded-2xl">
-        <CardHeader>
-          <CardTitle className="text-base">Match Receipts</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4 py-12">
-          <div className="flex size-16 items-center justify-center rounded-2xl bg-slate-100">
-            <GitMerge className="size-8 text-slate-400" />
-          </div>
-          <div className="text-center">
-            <p className="text-sm font-medium text-slate-900">No data to match</p>
-            <p className="text-xs text-slate-500">
-              Upload bank transactions and receipts to run matching.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <MatchingClient
+      initialMatched={matched}
+      initialUnmatchedTxs={unmatchedTxs}
+      initialUnmatchedReceipts={unmatchedReceipts}
+    />
   );
 }
