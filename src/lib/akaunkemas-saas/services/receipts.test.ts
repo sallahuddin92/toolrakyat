@@ -17,6 +17,7 @@ const RECEIPT_BASE: Omit<CreateReceiptInput, "tenantId" | "businessId"> = {
   serviceCharge: 0,
   notes: "stationery",
   imageRef: null,
+  status: "draft" as const,
 };
 
 function makeInput(

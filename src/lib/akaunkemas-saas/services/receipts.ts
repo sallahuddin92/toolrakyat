@@ -17,6 +17,7 @@ export interface SavedReceipt {
   serviceCharge: number;
   notes: string;
   imageRef: string | null;
+  status: "draft" | "reviewed";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +40,7 @@ export const CreateReceiptInputSchema = z.object({
   serviceCharge: z.number().min(0).default(0),
   notes: z.string().max(1000).default(""),
   imageRef: z.string().nullable().default(null),
+  status: z.enum(["draft", "reviewed"]).default("draft"),
 });
 
 export type CreateReceiptInput = z.infer<typeof CreateReceiptInputSchema>;
@@ -70,6 +72,7 @@ export interface ReceiptService {
       merchant?: string; // search, case-insensitive substring
       dateFrom?: string;
       dateTo?: string;
+      status?: "draft" | "reviewed";
       limit?: number;
       offset?: number;
     },
@@ -151,6 +154,11 @@ export function createReceiptService(): ReceiptService {
       // Filter by dateTo (inclusive)
       if (options?.dateTo) {
         results = results.filter((r) => r.date <= options.dateTo!);
+      }
+
+      // Filter by status
+      if (options?.status) {
+        results = results.filter((r) => r.status === options.status);
       }
 
       // Pagination

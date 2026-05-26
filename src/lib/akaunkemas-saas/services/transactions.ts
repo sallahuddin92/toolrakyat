@@ -19,6 +19,8 @@ export interface SavedTransaction {
   isReconciled: boolean;
   notes: string;
   source: "csv_import" | "manual" | "receipt_match";
+  status: "draft" | "reviewed" | "locked";
+  importHash?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +41,8 @@ export const CreateTransactionInputSchema = z.object({
   isReconciled: z.boolean().default(false),
   notes: z.string().max(1000).default(""),
   source: z.enum(["csv_import", "manual", "receipt_match"]).default("manual"),
+  status: z.enum(["draft", "reviewed", "locked"]).default("draft"),
+  importHash: z.string().nullable().default(null),
 });
 
 export type CreateTransactionInput = z.infer<typeof CreateTransactionInputSchema>;
@@ -75,6 +79,7 @@ export interface TransactionService {
       categorySlug?: string;
       isReconciled?: boolean;
       source?: string;
+      status?: "draft" | "reviewed" | "locked";
       dateFrom?: string;
       dateTo?: string;
       search?: string;
@@ -132,6 +137,8 @@ export function createTransactionService(): TransactionService {
       isReconciled: parsed.isReconciled,
       notes: parsed.notes,
       source: parsed.source,
+      status: parsed.status,
+      importHash: parsed.importHash,
       createdAt: now,
       updatedAt: now,
     };
@@ -178,6 +185,7 @@ export function createTransactionService(): TransactionService {
       categorySlug?: string;
       isReconciled?: boolean;
       source?: string;
+      status?: "draft" | "reviewed" | "locked";
       dateFrom?: string;
       dateTo?: string;
       search?: string;
@@ -195,6 +203,7 @@ export function createTransactionService(): TransactionService {
       if (options?.categorySlug !== undefined && r.categorySlug !== options.categorySlug) return false;
       if (options?.isReconciled !== undefined && r.isReconciled !== options.isReconciled) return false;
       if (options?.source !== undefined && r.source !== options.source) return false;
+      if (options?.status !== undefined && r.status !== options.status) return false;
       if (options?.dateFrom !== undefined && r.date < options.dateFrom) return false;
       if (options?.dateTo !== undefined && r.date > options.dateTo) return false;
       if (options?.search !== undefined) {
@@ -260,6 +269,7 @@ export function createTransactionService(): TransactionService {
       isReconciled: parsed.isReconciled ?? record.isReconciled,
       notes: newNotes,
       source: parsed.source ?? record.source,
+      status: parsed.status ?? record.status,
       updatedAt: new Date(),
     };
 
