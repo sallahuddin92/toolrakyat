@@ -1,5 +1,7 @@
 import { cache } from "react";
 import { decrypt, getSessionCookie, type SessionPayload } from "./session";
+import { db, schema } from "@/lib/db";
+import { eq } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Demo mode
@@ -81,4 +83,31 @@ export async function requireRole(...roles: string[]): Promise<SessionPayload> {
     );
   }
   return session;
+}
+
+// ---------------------------------------------------------------------------
+// User profile lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Get a user's profile from the database.
+ *
+ * Falls back to a demo stub when NEXT_PUBLIC_DEMO_MODE is enabled.
+ */
+export async function getUserProfile(userId: string) {
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === "true") {
+    return { id: userId, email: "demo@akaunkemas.my", name: "Demo User" };
+  }
+
+  const user = db
+    .select({
+      id: schema.users.id,
+      email: schema.users.email,
+      name: schema.users.name,
+    })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  return user ?? null;
 }
