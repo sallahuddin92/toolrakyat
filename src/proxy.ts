@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { LIMITS } from "@/lib/limits";
+import { decrypt } from "@/lib/auth/session";
 
 /**
  * Simple in-memory rate limiter for ToolRakyat production.
@@ -54,9 +55,41 @@ function getRateLimit(ip: string) {
   return { ok: false, remaining: 0 };
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "127.0.0.1";
   const { pathname } = request.nextUrl;
+
+  // -----------------------------------------------------------------------
+  // AkaunKemas SaaS route protection
+  // -----------------------------------------------------------------------
+  const akaunkemasAuthPaths = ["/app/akaunkemas/login", "/app/akaunkemas/register"];
+  const isAkaunKemasAuthPage = akaunkemasAuthPaths.some(
+    (p) => pathname === p || pathname.startsWith(p + "/")
+  );
+
+  if (
+    pathname.startsWith("/app/akaunkemas") &&
+    !isAkaunKemasAuthPage &&
+    process.env.NEXT_PUBLIC_DEMO_MODE !== "true"
+  ) {
+    const cookie = request.cookies.get("ak_session");
+    if (cookie) {
+      const session = await decrypt(cookie.value);
+      if (!session || new Date() > session.expiresAt) {
+        const loginUrl = new URL("/app/akaunkemas/login", request.nextUrl);
+        loginUrl.searchParams.set("redirect", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+    } else {
+      const loginUrl = new URL("/app/akaunkemas/login", request.nextUrl);
+      loginUrl.searchParams.set("redirect", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Tool API rate limiting
+  // -----------------------------------------------------------------------
 
   // Only apply to tool API routes
   if (pathname.startsWith("/api/tools/")) {
@@ -89,5 +122,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: "/api/tools/:path*",
+  matcher: ["/api/tools/:path*", "/app/akaunkemas/:path*"],
 };
