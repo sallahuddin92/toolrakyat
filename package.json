@@ -23,6 +23,7 @@
     "dompurify": "^3.4.1",
     "file-type": "^21.3.4",
     "framer-motion": "^12.38.0",
+    "jose": "^6.2.3",
     "jszip": "^3.10.1",
     "lucide-react": "^1.9.0",
     "marked": "^18.0.2",
