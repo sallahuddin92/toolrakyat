@@ -12,13 +12,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeftRight, Upload, Pencil, Trash2, X, Check, Search } from "lucide-react";
+import { ArrowLeftRight, Upload, Pencil, Trash2, X, Check, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import {
   updateTransaction,
   deleteTransaction,
+  bulkUpdateCategories,
 } from "../transactions/actions";
-import { CATEGORIES } from "@/lib/akaunkemas/categories";
+import { suggestCategory } from "@/lib/akaunkemas-saas/category-suggestions";
+import { CATEGORIES, getCategoryLabel } from "@/lib/akaunkemas/categories";
+import type { CategorySlug } from "@/lib/akaunkemas/types";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +49,8 @@ export interface TransactionRow {
 interface Props {
   initialTransactions: TransactionRow[];
 }
+
+type QuickFilter = "all" | "uncategorised" | "needs_review" | "this_month";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,7 +182,12 @@ export function TransactionsClient({ initialTransactions }: Props) {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkApplying, setBulkApplying] = useState(false);
+
+  // Current month for "this month" filter
+  const currentMonth = new Date().toISOString().slice(0, 7); // "2026-05"
 
   // Filters
   const filtered = transactions.filter((tx) => {
@@ -185,11 +195,30 @@ export function TransactionsClient({ initialTransactions }: Props) {
       const s = search.toLowerCase();
       if (!tx.description.toLowerCase().includes(s)) return false;
     }
+    // Quick filters
+    if (quickFilter === "uncategorised") {
+      if (tx.categorySlug !== "uncategorised") return false;
+    }
+    if (quickFilter === "needs_review") {
+      if (tx.categorySlug !== "uncategorised" && tx.status !== "draft") return false;
+    }
+    if (quickFilter === "this_month") {
+      if (!tx.date.startsWith(currentMonth)) return false;
+    }
+
     if (categoryFilter !== "all" && tx.categorySlug !== categoryFilter) return false;
     if (statusFilter !== "all" && tx.status !== statusFilter) return false;
     if (sourceFilter !== "all" && tx.source !== sourceFilter) return false;
     return true;
   });
+
+  // Counts for filter chips
+  const uncategorisedCount = transactions.filter(
+    (tx) => tx.categorySlug === "uncategorised",
+  ).length;
+  const needsReviewCount = transactions.filter(
+    (tx) => tx.categorySlug === "uncategorised" || tx.status === "draft",
+  ).length;
 
   // Inline save
   const handleSave = useCallback(async (id: string, data: Record<string, unknown>) => {
@@ -222,6 +251,43 @@ export function TransactionsClient({ initialTransactions }: Props) {
     setDeletingId(null);
   }, []);
 
+  // Bulk apply high-confidence suggestions to uncategorised transactions
+  const handleBulkCategorise = useCallback(async () => {
+    const uncategorised = transactions.filter(
+      (tx) => tx.categorySlug === "uncategorised" && tx.status !== "locked",
+    );
+
+    if (uncategorised.length === 0) return;
+
+    // Compute suggestions, only apply high-confidence ones
+    const updates: Array<{ id: string; categorySlug: string }> = [];
+    for (const tx of uncategorised) {
+      const suggestion = suggestCategory(tx.description);
+      if (suggestion.confidence === "high") {
+        updates.push({ id: tx.id, categorySlug: suggestion.suggestedCategorySlug });
+      }
+    }
+
+    if (updates.length === 0) {
+      alert("No high-confidence suggestions found for uncategorised transactions.");
+      return;
+    }
+
+    setBulkApplying(true);
+    const result = await bulkUpdateCategories(updates);
+    if (result.success) {
+      // Update local state
+      const updateMap = new Map(updates.map((u) => [u.id, u.categorySlug]));
+      setTransactions((prev) =>
+        prev.map((tx) => {
+          const newCat = updateMap.get(tx.id);
+          return newCat ? { ...tx, categorySlug: newCat } : tx;
+        }),
+      );
+    }
+    setBulkApplying(false);
+  }, [transactions]);
+
   // Click outside to cancel editing
   useEffect(() => {
     if (!editingId) return;
@@ -234,9 +300,6 @@ export function TransactionsClient({ initialTransactions }: Props) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [editingId]);
-
-  const getCategoryLabel = (slug: string) =>
-    CATEGORIES.find((c) => c.slug === slug)?.label ?? slug;
 
   if (transactions.length === 0) {
     return (
@@ -289,12 +352,63 @@ export function TransactionsClient({ initialTransactions }: Props) {
             {transactions.length} transaction{transactions.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Link href="/app/akaunkemas/import-bank-csv">
-          <Button className="gap-2">
-            <Upload className="size-4" />
-            Import CSV
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          {uncategorisedCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkCategorise}
+              disabled={bulkApplying}
+              className="gap-1.5"
+            >
+              <Sparkles className="size-3.5" />
+              {bulkApplying ? "Applying..." : "Auto-categorise"}
+            </Button>
+          )}
+          <Link href="/app/akaunkemas/import-bank-csv">
+            <Button className="gap-2">
+              <Upload className="size-4" />
+              Import CSV
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Quick filter chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {([
+          { key: "all", label: "All", count: transactions.length },
+          { key: "uncategorised", label: "Uncategorised", count: uncategorisedCount },
+          { key: "needs_review", label: "Needs review", count: needsReviewCount },
+          { key: "this_month", label: "This month", count: null },
+        ] as const).map((chip) => (
+          <button
+            key={chip.key}
+            onClick={() => {
+              setQuickFilter(chip.key as QuickFilter);
+              setCategoryFilter("all");
+              setStatusFilter("all");
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors border",
+              quickFilter === chip.key
+                ? "bg-sky-50 border-sky-300 text-sky-700"
+                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50",
+            )}
+          >
+            {chip.label}
+            {chip.count !== null && (
+              <span className={cn(
+                "inline-flex size-4 items-center justify-center rounded-full text-[10px]",
+                quickFilter === chip.key
+                  ? "bg-sky-200 text-sky-700"
+                  : "bg-slate-100 text-slate-500",
+              )}>
+                {chip.count > 99 ? "99+" : chip.count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* Filters */}
@@ -309,7 +423,7 @@ export function TransactionsClient({ initialTransactions }: Props) {
               className="pl-8 h-9 text-sm"
             />
           </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setQuickFilter("all"); }}>
             <SelectTrigger className="h-9 w-[160px] text-sm">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
@@ -377,6 +491,7 @@ export function TransactionsClient({ initialTransactions }: Props) {
                 key={tx.id}
                 className={cn(
                   "grid grid-cols-12 gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50",
+                  tx.categorySlug === "uncategorised" && "bg-amber-50/50",
                   tx.isReconciled && "opacity-70",
                 )}
               >
@@ -404,7 +519,16 @@ export function TransactionsClient({ initialTransactions }: Props) {
                   {formatCurrency(tx.amount)}
                 </div>
                 <div className="col-span-2 self-center">
-                  <span className="text-xs text-slate-600">{getCategoryLabel(tx.categorySlug)}</span>
+                  <span
+                    className={cn(
+                      "text-xs",
+                      tx.categorySlug === "uncategorised"
+                        ? "text-amber-700 font-medium"
+                        : "text-slate-600",
+                    )}
+                  >
+                    {getCategoryLabel(tx.categorySlug as CategorySlug)}
+                  </span>
                 </div>
                 <div className="col-span-1 self-center">
                   <Badge

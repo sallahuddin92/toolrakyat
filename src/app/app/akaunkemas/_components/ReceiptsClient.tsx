@@ -13,14 +13,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Receipt, Plus, Pencil, Trash2, X, Search, Download } from "lucide-react";
+import { Receipt, Plus, Pencil, Trash2, X, Search, Download, Sparkles, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   createReceipt,
   updateReceipt,
   deleteReceipt,
 } from "../receipts/actions";
-import { CATEGORIES } from "@/lib/akaunkemas/categories";
+import { suggestCategory } from "@/lib/akaunkemas-saas/category-suggestions";
+import { CATEGORIES, getCategoryLabel } from "@/lib/akaunkemas/categories";
+import type { CategorySlug } from "@/lib/akaunkemas/types";
+import type { CategorySuggestion } from "@/lib/akaunkemas-saas/category-suggestions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,14 +92,61 @@ function ReceiptModal({
   onClose,
   onSave,
   initial,
+  existingReceipts,
 }: {
   open: boolean;
   onClose: () => void;
   onSave: (data: Record<string, string>) => Promise<void>;
   initial?: ReceiptRow;
+  existingReceipts: ReceiptRow[];
 }) {
   const [saving, setSaving] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [merchant, setMerchant] = useState(initial?.merchant ?? "");
+  const [amount, setAmount] = useState(initial?.amount?.toString() ?? "");
+  const [date, setDate] = useState(initial?.date ?? "");
+  const [categorySuggestion, setCategorySuggestion] = useState<CategorySuggestion | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState(initial?.categorySlug ?? "uncategorised");
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const isEdit = !!initial;
+
+  // Auto-suggest category when merchant changes
+  function handleMerchantChange(value: string) {
+    setMerchant(value);
+    if (value.trim().length >= 2) {
+      const suggestion = suggestCategory(value);
+      setCategorySuggestion(suggestion);
+      if (suggestion.confidence === "high" && !initial) {
+        setSelectedCategory(suggestion.suggestedCategorySlug);
+      }
+    } else {
+      setCategorySuggestion(null);
+    }
+  }
+
+  // Check for duplicates when merchant, amount, or date changes
+  function checkDuplicate(m: string, a: string, d: string) {
+    setDuplicateWarning(null);
+    if (!m || !a || !d) return;
+
+    const amt = parseFloat(a);
+    if (isNaN(amt)) return;
+
+    const month = d.slice(0, 7); // "2026-05"
+    const similar = existingReceipts.filter((r) => {
+      if (initial && r.id === initial.id) return false;
+      const rMonth = r.date.slice(0, 7);
+      const merchantMatch = r.merchant.toLowerCase() === m.toLowerCase();
+      const amountClose = Math.abs(r.amount - amt) < 0.02;
+      return merchantMatch && amountClose && rMonth === month;
+    });
+
+    if (similar.length > 0) {
+      setDuplicateWarning(
+        `A receipt from "${similar[0]!.merchant}" for ${formatCurrency(similar[0]!.amount)} already exists this month.`,
+      );
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -106,6 +156,8 @@ function ReceiptModal({
     form.forEach((v, k) => {
       data[k] = v as string;
     });
+    // Ensure categorySlug override is included
+    data.categorySlug = selectedCategory;
     await onSave(data);
     setSaving(false);
     onClose();
@@ -115,7 +167,7 @@ function ReceiptModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">
             {isEdit ? "Edit Receipt" : "Add Receipt"}
@@ -134,7 +186,11 @@ function ReceiptModal({
               <Input
                 name="date"
                 type="date"
-                defaultValue={initial?.date ?? ""}
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  checkDuplicate(merchant, amount, e.target.value);
+                }}
                 required
                 className="h-9 text-sm"
               />
@@ -146,7 +202,11 @@ function ReceiptModal({
                 type="number"
                 step="0.01"
                 min="0.01"
-                defaultValue={initial?.amount ?? ""}
+                value={amount}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  checkDuplicate(merchant, e.target.value, date);
+                }}
                 required
                 className="h-9 text-sm"
               />
@@ -157,11 +217,45 @@ function ReceiptModal({
             <Label className="text-xs">Merchant</Label>
             <Input
               name="merchant"
-              defaultValue={initial?.merchant ?? ""}
+              value={merchant}
+              onChange={(e) => {
+                handleMerchantChange(e.target.value);
+                checkDuplicate(e.target.value, amount, date);
+              }}
               required
               className="h-9 text-sm"
+              placeholder="e.g. Petronas, Grab, Tesco"
             />
+            {/* Category suggestion indicator */}
+            {categorySuggestion && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <Sparkles className="size-3 text-sky-500" />
+                <span className="text-xs text-slate-500">Suggested:</span>
+                <span className="text-xs font-medium text-sky-700">
+                  {getCategoryLabel(categorySuggestion.suggestedCategorySlug)}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-normal",
+                    categorySuggestion.confidence === "high"
+                      ? "bg-green-50 text-green-700 border-green-200"
+                      : "bg-yellow-50 text-yellow-700 border-yellow-200",
+                  )}
+                >
+                  {categorySuggestion.confidence}
+                </Badge>
+              </div>
+            )}
           </div>
+
+          {/* Duplicate warning */}
+          {duplicateWarning && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+              {duplicateWarning}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -182,8 +276,8 @@ function ReceiptModal({
             <div className="space-y-1.5">
               <Label className="text-xs">Category</Label>
               <Select
-                name="categorySlug"
-                defaultValue={initial?.categorySlug ?? "uncategorised"}
+                value={selectedCategory}
+                onValueChange={setSelectedCategory}
               >
                 <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
@@ -199,39 +293,63 @@ function ReceiptModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Tax Amount (RM)</Label>
-              <Input
-                name="taxAmount"
-                type="number"
-                step="0.01"
-                min="0"
-                defaultValue={initial?.taxAmount ?? "0"}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Service Charge (RM)</Label>
-              <Input
-                name="serviceCharge"
-                type="number"
-                step="0.01"
-                min="0"
-                defaultValue={initial?.serviceCharge ?? "0"}
-                className="h-9 text-sm"
-              />
-            </div>
+          {/* More details toggle */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowMore(!showMore)}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+            >
+              {showMore ? (
+                <ChevronUp className="size-3.5" />
+              ) : (
+                <ChevronDown className="size-3.5" />
+              )}
+              More details
+            </button>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">Notes</Label>
-            <Input
-              name="notes"
-              defaultValue={initial?.notes ?? ""}
-              className="h-9 text-sm"
-            />
-          </div>
+          {showMore && (
+            <div className="space-y-4 pt-1">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Tax Amount (RM)</Label>
+                  <Input
+                    name="taxAmount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    defaultValue={initial?.taxAmount ?? "0"}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Service Charge (RM)</Label>
+                  <Input
+                    name="serviceCharge"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    defaultValue={initial?.serviceCharge ?? "0"}
+                    className="h-9 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Notes</Label>
+                <Input
+                  name="notes"
+                  defaultValue={initial?.notes ?? ""}
+                  className="h-9 text-sm"
+                  placeholder="Optional notes"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Hidden input to carry the category override */}
+          <input type="hidden" name="categorySlug" value={selectedCategory} />
 
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>
@@ -349,9 +467,6 @@ export function ReceiptsClient({ initialReceipts }: Props) {
     URL.revokeObjectURL(url);
   };
 
-  const getCategoryLabel = (slug: string) =>
-    CATEGORIES.find((c) => c.slug === slug)?.label ?? slug;
-
   const getPaymentLabel = (slug: string) =>
     PAYMENT_METHODS.find((p) => p.value === slug)?.label ?? slug;
 
@@ -406,6 +521,7 @@ export function ReceiptsClient({ initialReceipts }: Props) {
           onClose={() => setModalOpen(false)}
           onSave={handleCreate}
           initial={editingReceipt}
+          existingReceipts={receipts}
         />
       </div>
     );
@@ -536,7 +652,7 @@ export function ReceiptsClient({ initialReceipts }: Props) {
                 <span className="text-xs text-slate-500">{getPaymentLabel(r.paymentMethod)}</span>
               </div>
               <div className="col-span-2 self-center">
-                <span className="text-xs text-slate-600">{getCategoryLabel(r.categorySlug)}</span>
+                <span className="text-xs text-slate-600">{getCategoryLabel(r.categorySlug as CategorySlug)}</span>
               </div>
               <div className="col-span-1 self-center">
                 <Badge
@@ -590,6 +706,7 @@ export function ReceiptsClient({ initialReceipts }: Props) {
         onClose={() => setModalOpen(false)}
         onSave={editingReceipt ? handleUpdate : handleCreate}
         initial={editingReceipt}
+        existingReceipts={receipts}
       />
     </div>
   );

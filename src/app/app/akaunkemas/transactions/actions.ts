@@ -146,6 +146,17 @@ export async function importTransactionsCsv(formData: FormData) {
     return { success: false, error: "No file provided" };
   }
 
+  // Optional: JSON map of row index → category slug overrides from the review step
+  let categoryOverrides: Record<number, string> = {};
+  const overridesRaw = formData.get("categoryOverrides") as string | null;
+  if (overridesRaw) {
+    try {
+      categoryOverrides = JSON.parse(overridesRaw);
+    } catch {
+      // Ignore malformed overrides
+    }
+  }
+
   try {
     const text = await file.text();
     const parseResult = parseBankCsv(text);
@@ -162,7 +173,10 @@ export async function importTransactionsCsv(formData: FormData) {
     let skipped = 0;
     const emptyMatcher = (cs: string) => !cs || cs.trim() === "";
 
-    for (const tx of parseResult.transactions) {
+    for (let i = 0; i < parseResult.transactions.length; i++) {
+      const tx = parseResult.transactions[i]!;
+      const overrideSlug = categoryOverrides[i];
+
       try {
         txService.create({
           tenantId: ctx.tenantId,
@@ -172,7 +186,8 @@ export async function importTransactionsCsv(formData: FormData) {
           debit: tx.debit,
           credit: tx.credit,
           balance: tx.balance,
-          categorySlug: emptyMatcher(tx.category) ? "uncategorised" : tx.category,
+          categorySlug: overrideSlug
+            ?? (emptyMatcher(tx.category) ? "uncategorised" : tx.category),
           isReconciled: false,
           notes: "",
           source: "csv_import",
@@ -197,4 +212,27 @@ export async function importTransactionsCsv(formData: FormData) {
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Failed to import CSV" };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk category update (for "Apply all suggestions")
+// ---------------------------------------------------------------------------
+
+export async function bulkUpdateCategories(
+  updates: Array<{ id: string; categorySlug: string }>,
+) {
+  const ctx = await getContext();
+
+  let updated = 0;
+  for (const { id, categorySlug } of updates) {
+    try {
+      const result = txService.update(ctx.tenantId, ctx.businessId, id, { categorySlug });
+      if (result) updated++;
+    } catch {
+      // skip locked / missing
+    }
+  }
+
+  revalidatePath("/app/akaunkemas/transactions");
+  return { success: true, updated };
 }
