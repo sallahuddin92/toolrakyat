@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ZodError } from "zod";
-import {
-  createReceiptService,
-  type ReceiptService,
-  type CreateReceiptInput,
-} from "./receipts";
+import { createReceiptService } from "./__fixtures__/receipts-memory";
+import type { ReceiptService, CreateReceiptInput } from "./receipts";
 
 // Minimal required (reasonable-default) fields
 const RECEIPT_BASE: Omit<CreateReceiptInput, "tenantId" | "businessId"> = {
