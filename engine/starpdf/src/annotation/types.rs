@@ -101,6 +101,7 @@ impl AnnotationSubtype {
 
 /// Generic annotation structural model preserving source object reference and layout.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Annotation {
     pub object_ref: ObjectRef,
     pub page_index: usize,
@@ -117,6 +118,10 @@ pub struct Annotation {
     pub line_endings: Option<[LineEndingStyle; 2]>,
     pub quad_points: Vec<f64>,
     pub ink_list: Vec<Vec<[f64; 2]>>,
+    pub uri: Option<String>,
+    pub has_normal_appearance: bool,
+    pub has_rollover_appearance: bool,
+    pub has_down_appearance: bool,
     pub is_hidden: bool,
     pub is_invisible: bool,
     pub is_print: bool,

@@ -20,6 +20,9 @@ pub enum PdfError {
     CircularReference(String),
     MalformedInput(String),
     UnsupportedCompositeMapping(String),
+    CffDetectedUnsupported,
+    Cff2DetectedUnsupported,
+    UnknownFontProgram,
     InvalidOperation(String),
 }
 
@@ -50,6 +53,9 @@ impl fmt::Display for PdfError {
             Self::UnsupportedCompositeMapping(msg) => {
                 write!(f, "UNSUPPORTED_COMPOSITE_MAPPING: {msg}")
             }
+            Self::CffDetectedUnsupported => write!(f, "CFF_DETECTED_UNSUPPORTED"),
+            Self::Cff2DetectedUnsupported => write!(f, "CFF2_DETECTED_UNSUPPORTED"),
+            Self::UnknownFontProgram => write!(f, "UNKNOWN_FONT_PROGRAM"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

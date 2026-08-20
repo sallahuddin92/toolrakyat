@@ -13,7 +13,7 @@ use crate::document::object_store::ObjectStore;
 use crate::error::{PdfError, PdfResult};
 use crate::font::appearance::{AppearanceFont, AppearanceFontResolver, GlyphMappingQuality};
 use crate::font::subset::TrueTypeSubsetter;
-use crate::font::SfntFont;
+use crate::font::{FontProgramKind, SfntFont};
 use crate::forms::field::FieldType;
 use crate::mutation::change::PdfChange;
 use crate::mutation::result::MutationPlan;
@@ -27,6 +27,7 @@ const MAX_STATE_NAME_LEN: usize = 256;
 const MAX_PDF_OBJECT_NUMBER: u64 = 9_999_999_999;
 const MAX_SUBSET_FONT_RESOURCES_PER_MUTATION: usize = 64;
 const MAX_PAGE_ROTATION_ANCESTORS: usize = 64;
+const MAX_FIELD_PROPERTY_ANCESTORS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct SubsetCacheKey {
@@ -69,6 +70,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
 
         let mut modified_objects = BTreeMap::new();
         let mut overall_status = AppearanceStatus::AppearancePreserved;
+        let mut regenerated_form_appearance = false;
 
         for change in changes {
             match change {
@@ -81,6 +83,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     self.mutate_text_field(*field_ref, value, &mut modified_objects)?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                    regenerated_form_appearance = true;
                 }
                 PdfChange::SetCheckbox {
                     field_ref,
@@ -95,6 +98,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     self.mutate_checkbox(*field_ref, widget_refs, *checked, &mut modified_objects)?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                    regenerated_form_appearance = true;
                 }
                 PdfChange::SetRadio {
                     parent_ref,
@@ -110,6 +114,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     )?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                    regenerated_form_appearance = true;
                 }
                 PdfChange::SetChoice { field_ref, value } => {
                     if value.len() > MAX_FIELD_VALUE_LEN {
@@ -124,6 +129,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     )?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                    regenerated_form_appearance = true;
                 }
                 PdfChange::SetChoiceValues { field_ref, values } => {
                     if values.is_empty() || values.len() > MAX_MULTI_SELECT_INDEXES {
@@ -139,6 +145,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     self.mutate_choice(*field_ref, values, &mut modified_objects)?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                    regenerated_form_appearance = true;
                 }
                 PdfChange::SetAppearanceState {
                     widget_ref,
@@ -174,6 +181,10 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             }
         }
 
+        if regenerated_form_appearance {
+            self.reconcile_need_appearances(&mut modified_objects)?;
+        }
+
         Ok(MutationPlan {
             modified_objects,
             appearance_status: overall_status,
@@ -188,26 +199,31 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<()> {
         let mut dict = self.get_dict_for_modification(field_ref, modified)?;
+        let mut effective = self.effective_field_dictionary(field_ref, modified)?;
 
         // 1. Update /V
         dict.insert(
             "V".to_string(),
             PdfObject::String(value.as_bytes().to_vec()),
         );
+        effective.insert(
+            "V".to_string(),
+            PdfObject::String(value.as_bytes().to_vec()),
+        );
 
         // 2. Parse field properties
-        let da_str = dict
+        let da_str = effective
             .get("DA")
             .and_then(|v| v.as_string_lossy())
             .unwrap_or_else(|| "/Helv 12 Tf 0 g".to_string());
         let da = DefaultAppearance::parse(&da_str)?;
 
-        let quadding = dict
+        let quadding = effective
             .get("Q")
             .and_then(|v| v.as_integer())
             .map_or(0, |i| i as i32);
 
-        let flags = dict
+        let flags = effective
             .get("Ff")
             .and_then(|v| v.as_integer())
             .map_or(0, |i| i.max(0) as u32);
@@ -220,7 +236,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             ));
         }
         let comb_max_len = if comb {
-            let raw = dict
+            let raw = effective
                 .get("MaxLen")
                 .and_then(PdfObject::as_integer)
                 .ok_or_else(|| {
@@ -245,13 +261,13 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             value.to_string()
         };
 
-        let widget_refs = self.widget_refs_from_field(&dict)?;
+        let widget_refs = self.widget_refs_from_field(&effective)?;
         let appearance_targets = if widget_refs.is_empty() {
             vec![field_ref]
         } else {
             widget_refs
         };
-        let field_properties = dict.clone();
+        let field_properties = effective;
         modified.insert(field_ref, PdfObject::Dictionary(dict));
 
         // 3. Regenerate each widget's /AP. Terminal fields can either be their own
@@ -287,13 +303,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 Some(&resolved_font),
             )?;
             rotation.apply_to_stream(rect, &mut stream)?;
-            widget_dict.insert(
-                "AP".to_string(),
-                PdfObject::Dictionary(BTreeMap::from([(
-                    "N".to_string(),
-                    PdfObject::Stream(stream),
-                )])),
-            );
+            let generated = PdfObject::Dictionary(BTreeMap::from([(
+                "N".to_string(),
+                PdfObject::Stream(stream),
+            )]));
+            let merged = self.merge_generated_appearance(widget_dict.get("AP"), &generated)?;
+            widget_dict.insert("AP".to_string(), merged);
             modified.insert(widget_ref, PdfObject::Dictionary(widget_dict));
         }
         Ok(())
@@ -307,7 +322,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<()> {
         let mut field_dict = self.get_dict_for_modification(field_ref, modified)?;
-        let discovered_widgets = self.widget_refs_from_field(&field_dict)?;
+        let effective_field = self.effective_field_dictionary(field_ref, modified)?;
+        let discovered_widgets = self.widget_refs_from_field(&effective_field)?;
         let effective_widgets: Vec<ObjectRef> = if !discovered_widgets.is_empty()
             && (widget_refs.is_empty() || (widget_refs.len() == 1 && widget_refs[0] == field_ref))
         {
@@ -334,7 +350,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 checked,
             )?;
             Self::rotate_appearance_object(&mut ap_obj, rect, rotation)?;
-            field_dict.insert("AP".to_string(), ap_obj);
+            let merged = self.merge_generated_appearance(field_dict.get("AP"), &ap_obj)?;
+            field_dict.insert("AP".to_string(), merged);
             field_dict.insert("AS".to_string(), PdfObject::Name(state_name.to_string()));
         } else if field_dict.contains_key("AS")
             || effective_widgets.is_empty()
@@ -367,7 +384,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     checked,
                 )?;
                 Self::rotate_appearance_object(&mut ap_obj, w_rect, rotation)?;
-                w_dict.insert("AP".to_string(), ap_obj);
+                let merged = self.merge_generated_appearance(w_dict.get("AP"), &ap_obj)?;
+                w_dict.insert("AP".to_string(), merged);
             }
             modified.insert(w_ref, PdfObject::Dictionary(w_dict));
         }
@@ -416,7 +434,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                         is_selected,
                     )?;
                     Self::rotate_appearance_object(&mut ap_obj, k_rect, rotation)?;
-                    kid_dict.insert("AP".to_string(), ap_obj);
+                    let merged = self.merge_generated_appearance(kid_dict.get("AP"), &ap_obj)?;
+                    kid_dict.insert("AP".to_string(), merged);
                 }
                 modified.insert(kid_ref, PdfObject::Dictionary(kid_dict));
             }
@@ -438,7 +457,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<()> {
         let mut dict = self.get_dict_for_modification(field_ref, modified)?;
-        let flags = dict
+        let mut effective = self.effective_field_dictionary(field_ref, modified)?;
+        let flags = effective
             .get("Ff")
             .and_then(PdfObject::as_integer)
             .map_or(0, |value| value.max(0) as u32);
@@ -449,7 +469,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 "Multiple values require a multi-select list box".into(),
             ));
         }
-        let options = self.resolve_choice_options(&dict)?;
+        let options = self.resolve_choice_options(&effective)?;
         if !combo && options.is_empty() {
             return Err(PdfError::InvalidOperation(
                 "List box is missing required /Opt entries".into(),
@@ -493,6 +513,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             )
         };
         dict.insert("V".to_string(), value_object);
+        effective.insert(
+            "V".to_string(),
+            dict.get("V").cloned().ok_or_else(|| {
+                PdfError::InvalidOperation("Choice value was not constructed".into())
+            })?,
+        );
         if selected.is_empty() {
             dict.remove("I");
         } else {
@@ -507,13 +533,13 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             );
         }
 
-        let da_str = dict
+        let da_str = effective
             .get("DA")
             .and_then(|v| v.as_string_lossy())
             .unwrap_or_else(|| "/Helv 12 Tf 0 g".to_string());
         let da = DefaultAppearance::parse(&da_str)?;
 
-        let quadding = dict
+        let quadding = effective
             .get("Q")
             .and_then(|v| v.as_integer())
             .map_or(0, |i| i as i32);
@@ -527,13 +553,13 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let widget_refs = self.widget_refs_from_field(&dict)?;
+        let widget_refs = self.widget_refs_from_field(&effective)?;
         let appearance_targets = if widget_refs.is_empty() {
             vec![field_ref]
         } else {
             widget_refs
         };
-        let field_properties = dict.clone();
+        let field_properties = effective;
         modified.insert(field_ref, PdfObject::Dictionary(dict));
 
         for widget_ref in appearance_targets {
@@ -580,13 +606,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     )?
                 };
                 rotation.apply_to_stream(rect, &mut stream)?;
-                widget_dict.insert(
-                    "AP".to_string(),
-                    PdfObject::Dictionary(BTreeMap::from([(
-                        "N".to_string(),
-                        PdfObject::Stream(stream),
-                    )])),
-                );
+                let generated = PdfObject::Dictionary(BTreeMap::from([(
+                    "N".to_string(),
+                    PdfObject::Stream(stream),
+                )]));
+                let merged = self.merge_generated_appearance(widget_dict.get("AP"), &generated)?;
+                widget_dict.insert("AP".to_string(), merged);
             }
             modified.insert(widget_ref, PdfObject::Dictionary(widget_dict));
         }
@@ -877,13 +902,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 AnnotationAppearance::Regenerated(stream) => {
                     let stream_ref = self.allocate_object_ref()?;
                     modified.insert(stream_ref, PdfObject::Stream(stream));
-                    dict.insert(
-                        "AP".to_string(),
-                        PdfObject::Dictionary(BTreeMap::from([(
-                            "N".to_string(),
-                            PdfObject::Reference(stream_ref),
-                        )])),
-                    );
+                    let generated = PdfObject::Dictionary(BTreeMap::from([(
+                        "N".to_string(),
+                        PdfObject::Reference(stream_ref),
+                    )]));
+                    let merged = self.merge_generated_appearance(dict.get("AP"), &generated)?;
+                    dict.insert("AP".to_string(), merged);
                     AppearanceStatus::AppearanceRegenerated
                 }
                 AnnotationAppearance::NotRequired => AppearanceStatus::ValueUpdated,
@@ -970,9 +994,18 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         let Some(source) = resolved.embedded_source.as_ref() else {
             return Ok(resolved);
         };
-        let sfnt = resolved.font.embedded_sfnt.as_ref().ok_or_else(|| {
-            PdfError::InvalidOperation("Embedded font source is missing validated SFNT data".into())
-        })?;
+        let sfnt =
+            resolved
+                .font
+                .embedded_sfnt
+                .as_ref()
+                .ok_or(match resolved.font.font_program_kind {
+                    FontProgramKind::CffDetectedUnsupported => PdfError::CffDetectedUnsupported,
+                    FontProgramKind::Cff2DetectedUnsupported => PdfError::Cff2DetectedUnsupported,
+                    FontProgramKind::TrueTypeSupported | FontProgramKind::UnknownFontProgram => {
+                        PdfError::UnknownFontProgram
+                    }
+                })?;
         let cmap = sfnt.cmap.as_ref().ok_or_else(|| {
             PdfError::InvalidOperation(
                 "Embedded TrueType appearance font is missing a usable cmap".into(),
@@ -1186,6 +1219,230 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 actual: resolved.type_name(),
             }),
         }
+    }
+
+    fn effective_field_dictionary(
+        &mut self,
+        field_ref: ObjectRef,
+        modified: &BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<BTreeMap<String, PdfObject>> {
+        const INHERITED_KEYS: [&str; 9] = ["FT", "Ff", "DA", "Q", "Opt", "V", "DV", "MaxLen", "DR"];
+        let mut effective = self.get_dict_for_modification(field_ref, modified)?;
+        for key in INHERITED_KEYS {
+            if let Some(value) = effective.get(key).cloned() {
+                effective.insert(key.to_string(), self.store.resolve_object(&value)?);
+            }
+        }
+
+        let mut current = effective.get("Parent").and_then(PdfObject::as_reference);
+        let mut visited = BTreeSet::from([field_ref]);
+        for _ in 0..MAX_FIELD_PROPERTY_ANCESTORS {
+            let Some(parent_ref) = current else {
+                self.inherit_acroform_defaults(&mut effective)?;
+                return Ok(effective);
+            };
+            if !visited.insert(parent_ref) {
+                return Err(PdfError::CircularReference(
+                    "Cycle while resolving inherited field properties".into(),
+                ));
+            }
+            let parent = self.get_dict_for_modification(parent_ref, modified)?;
+            for key in INHERITED_KEYS {
+                if !effective.contains_key(key) {
+                    if let Some(value) = parent.get(key) {
+                        effective.insert(key.to_string(), self.store.resolve_object(value)?);
+                    }
+                }
+            }
+            current = parent.get("Parent").and_then(PdfObject::as_reference);
+        }
+        Err(PdfError::RecursionLimitExceeded)
+    }
+
+    fn reconcile_need_appearances(
+        &mut self,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<()> {
+        let Some(root) = self.store.trailer().get("Root").cloned() else {
+            // NeedAppearances reconciliation is optional when no catalog/AcroForm exists.
+            return Ok(());
+        };
+        let catalog = self.store.resolve_object(&root)?;
+        let Some(catalog_dict) = catalog.as_dict().cloned() else {
+            return Ok(());
+        };
+        let Some(acroform_object) = catalog_dict.get("AcroForm").cloned() else {
+            return Ok(());
+        };
+        let Some(acroform_ref) = acroform_object.as_reference() else {
+            return Ok(());
+        };
+        let acroform = self.store.resolve_object(&acroform_object)?;
+        let Some(acroform_dict) = acroform.as_dict() else {
+            return Ok(());
+        };
+        if acroform_dict
+            .get("NeedAppearances")
+            .and_then(PdfObject::as_bool)
+            != Some(true)
+        {
+            return Ok(());
+        }
+
+        let parser = crate::forms::AcroFormParser::new(self.store, &self.page_refs);
+        let Some(parsed) = parser.parse_catalog_acroform(&catalog_dict)? else {
+            return Ok(());
+        };
+        if parsed.fields.is_empty() {
+            return Ok(());
+        }
+        for field in parsed.fields {
+            let targets: Vec<ObjectRef> = if field.widgets.is_empty() {
+                vec![field.object_ref]
+            } else {
+                field
+                    .widgets
+                    .iter()
+                    .map(|widget| widget.object_ref)
+                    .collect()
+            };
+            for target in targets {
+                if target.number == 0 || !self.has_normal_appearance(target, modified)? {
+                    return Ok(());
+                }
+            }
+        }
+
+        let mut updated = self.get_dict_for_modification(acroform_ref, modified)?;
+        updated.insert("NeedAppearances".to_string(), PdfObject::Bool(false));
+        modified.insert(acroform_ref, PdfObject::Dictionary(updated));
+        Ok(())
+    }
+
+    fn has_normal_appearance(
+        &mut self,
+        reference: ObjectRef,
+        modified: &BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<bool> {
+        let dict = self.get_dict_for_modification(reference, modified)?;
+        let Some(appearance) = dict.get("AP") else {
+            return Ok(false);
+        };
+        let appearance = self.store.resolve_object(appearance)?;
+        let Some(normal) = appearance.as_dict().and_then(|dict| dict.get("N")) else {
+            return Ok(false);
+        };
+        let normal = self.store.resolve_object(normal)?;
+        if normal.as_stream().is_some() {
+            return Ok(true);
+        }
+        let Some(states) = normal.as_dict() else {
+            return Ok(false);
+        };
+        if states.len() > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Appearance states exceed maximum of {}",
+                crate::font::appearance::MAX_APPEARANCE_RESOURCES
+            )));
+        }
+        Ok(!states.is_empty())
+    }
+
+    fn merge_generated_appearance(
+        &mut self,
+        existing: Option<&PdfObject>,
+        generated: &PdfObject,
+    ) -> PdfResult<PdfObject> {
+        let mut generated_dict =
+            generated
+                .as_dict()
+                .cloned()
+                .ok_or_else(|| PdfError::TypeMismatch {
+                    expected: "appearance dictionary",
+                    actual: generated.type_name(),
+                })?;
+        let generated_normal = generated_dict.remove("N").ok_or_else(|| {
+            PdfError::InvalidOperation("Generated appearance is missing /N".into())
+        })?;
+        let mut merged = if let Some(existing) = existing {
+            self.store
+                .resolve_object(existing)?
+                .as_dict()
+                .cloned()
+                .ok_or_else(|| PdfError::TypeMismatch {
+                    expected: "appearance dictionary",
+                    actual: existing.type_name(),
+                })?
+        } else {
+            BTreeMap::new()
+        };
+        if merged.len() > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Appearance dictionary exceeds maximum of {} entries",
+                crate::font::appearance::MAX_APPEARANCE_RESOURCES
+            )));
+        }
+
+        let normal = if let Some(existing_normal) = merged.get("N").cloned() {
+            let existing_resolved = self.store.resolve_object(&existing_normal)?;
+            if let (Some(existing_states), Some(generated_states)) =
+                (existing_resolved.as_dict(), generated_normal.as_dict())
+            {
+                let combined_len = existing_states
+                    .len()
+                    .checked_add(generated_states.len())
+                    .ok_or_else(|| {
+                        PdfError::InvalidOperation("Appearance state count overflow".into())
+                    })?;
+                if combined_len > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+                    return Err(PdfError::InvalidOperation(format!(
+                        "Appearance states exceed maximum of {}",
+                        crate::font::appearance::MAX_APPEARANCE_RESOURCES
+                    )));
+                }
+                let mut states = existing_states.clone();
+                states.extend(generated_states.clone());
+                PdfObject::Dictionary(states)
+            } else {
+                generated_normal
+            }
+        } else {
+            generated_normal
+        };
+        merged.insert("N".to_string(), normal);
+        for (key, value) in generated_dict {
+            merged.insert(key, value);
+        }
+        Ok(PdfObject::Dictionary(merged))
+    }
+
+    fn inherit_acroform_defaults(
+        &mut self,
+        effective: &mut BTreeMap<String, PdfObject>,
+    ) -> PdfResult<()> {
+        let Some(root) = self.store.trailer().get("Root").cloned() else {
+            return Ok(());
+        };
+        let catalog = self.store.resolve_object(&root)?;
+        let Some(acroform) = catalog
+            .as_dict()
+            .and_then(|dict| dict.get("AcroForm"))
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let acroform = self.store.resolve_object(&acroform)?;
+        let Some(acroform_dict) = acroform.as_dict() else {
+            return Ok(());
+        };
+        for key in ["DA", "Q", "DR"] {
+            if !effective.contains_key(key) {
+                if let Some(value) = acroform_dict.get(key) {
+                    effective.insert(key.to_string(), self.store.resolve_object(value)?);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn extract_rect_from_dict(

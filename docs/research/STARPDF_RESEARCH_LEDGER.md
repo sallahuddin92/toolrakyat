@@ -89,3 +89,14 @@
 - **Production evidence:** automatic TrueType subset embedding, transaction-local deterministic resource reuse, bounded composite dependency closure, exact quarter-turn widget matrices, and proved Identity-H/Identity-V output render through PDF.js.
 - **Fuzz evidence:** three new and six affected 10-second campaigns completed 11,823,541 executions with zero crashes, hangs, or reproducers.
 - **Novelty boundary:** all implemented PDF/font structures are standard mechanisms; the integration and hardening are conventional/security engineering. `EXPERIMENTAL_METHOD` refers only to the producer/PDF.js validation procedure. No `POTENTIAL_NOVELTY` is asserted. Patentability claims: **NONE**.
+
+## 8. Milestone Ledger Entry: v0.10
+
+- **Starting SHA:** `e3caf30e6bd99522a2445ef14262617fd9780c77`
+- **Milestone SHA:** commit containing this ledger entry
+- **Classification:** `STANDARD_PDF_IMPLEMENTATION`, `CONVENTIONAL_ENGINEERING`, `SECURITY_HARDENING`, `PERFORMANCE_OPTIMIZATION`, `EXPERIMENTAL_METHOD`
+- **Compatibility evidence:** 22 meaningful fixtures across Chrome/Skia, LibreOfficeDev, Quartz/CUPS, Apple PDFKit annotation authoring, and pdf-lib cover canonical and orphan widgets, inherited fields, N/R/D appearances, rotations, requested annotation types, xref/object streams, and prior incremental revisions.
+- **Production evidence:** bounded field/widget separation, proof-based NeedAppearances reconciliation, producer AP preservation, typed Link URI exposure, and collision-free prefix-preserving export/reopen pass native and PDF.js roundtrips.
+- **Font evidence:** corpus CFF 0, CFF2 0, non-Identity Type0 0. Deterministic detection distinguishes TrueType, CFF, CFF2, and unknown programs; unsupported mutation refuses without reinterpretation.
+- **Fuzz evidence:** twelve 10-second campaigns across ten new/affected targets completed 31,396,831 executions with zero crashes, hangs, or reproducers; form and mutation targets reran after final control-flow fixes.
+- **Novelty boundary:** the implemented PDF mechanisms are standard; bounded recovery, atomic validation, and differential testing are conventional/security engineering. `EXPERIMENTAL_METHOD` refers only to the local producer/PDF.js evidence procedure. No `POTENTIAL_NOVELTY` is asserted. Patentability claims: **NONE**.

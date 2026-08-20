@@ -30,7 +30,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.9.0".to_string()
+    "0.10.0".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -243,6 +243,9 @@ pub fn starpdf_get_form_fields(handle: u32) -> Result<JsValue, JsValue> {
                                 rect: w.rect,
                                 appearance_state: w.appearance_state,
                                 normal_appearance_states: w.normal_appearance_states,
+                                has_normal_appearance: w.has_normal_appearance,
+                                has_rollover_appearance: w.has_rollover_appearance,
+                                has_down_appearance: w.has_down_appearance,
                                 is_checked,
                             }
                         })
@@ -313,6 +316,10 @@ pub fn starpdf_get_annotations(handle: u32, page_index: u32) -> Result<JsValue, 
                     }),
                     quad_points: a.quad_points,
                     ink_list: a.ink_list,
+                    uri: a.uri,
+                    has_normal_appearance: a.has_normal_appearance,
+                    has_rollover_appearance: a.has_rollover_appearance,
+                    has_down_appearance: a.has_down_appearance,
                 })
                 .collect();
 

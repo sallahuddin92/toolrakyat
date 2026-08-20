@@ -9,6 +9,7 @@ use crate::syntax::object::{ObjectRef, PdfObject};
 const MAX_FIELD_TREE_DEPTH: usize = 32;
 const MAX_ACROFORM_FIELDS: usize = 1000;
 const MAX_OPTIONS_COUNT: usize = 5000;
+const MAX_PAGE_ANNOTATIONS: usize = 2000;
 
 /// Information parsed from the document Catalog `/AcroForm` entry.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,11 +29,14 @@ struct InheritedAttributes {
     quadding: Option<i32>,
     options: Option<Vec<ChoiceOption>>,
     max_len: Option<usize>,
+    value: Option<PdfObject>,
+    default_value: Option<PdfObject>,
 }
 
 pub struct AcroFormParser<'a, 'b> {
     store: &'a mut ObjectStore<'b>,
     page_ref_to_index: BTreeMap<ObjectRef, usize>,
+    page_refs: Vec<ObjectRef>,
     visited_nodes: HashSet<ObjectRef>,
     fields_collected: Vec<FormField>,
 }
@@ -46,6 +50,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         Self {
             store,
             page_ref_to_index,
+            page_refs: page_refs.to_vec(),
             visited_nodes: HashSet::new(),
             fields_collected: Vec::new(),
         }
@@ -56,9 +61,19 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         mut self,
         catalog_dict: &BTreeMap<String, PdfObject>,
     ) -> PdfResult<Option<AcroForm>> {
-        let acroform_obj = match catalog_dict.get("AcroForm") {
-            Some(obj) => obj,
-            None => return Ok(None),
+        let Some(acroform_obj) = catalog_dict.get("AcroForm") else {
+            self.recover_page_widgets()?;
+            return if self.fields_collected.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(AcroForm {
+                    object_ref: None,
+                    fields: self.fields_collected,
+                    need_appearances: false,
+                    signature_flags: 0,
+                    default_appearance: None,
+                }))
+            };
         };
 
         let (acroform_ref, acroform_dict) = match acroform_obj {
@@ -77,17 +92,22 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             _ => return Ok(None),
         };
 
-        let need_appearances = acroform_dict
-            .get("NeedAppearances")
-            .and_then(|v| v.as_bool())
+        let need_appearances = self
+            .resolved_entry(&acroform_dict, "NeedAppearances")?
+            .as_ref()
+            .and_then(PdfObject::as_bool)
             .unwrap_or(false);
 
-        let signature_flags = acroform_dict
-            .get("SigFlags")
-            .and_then(|v| v.as_integer())
+        let signature_flags = self
+            .resolved_entry(&acroform_dict, "SigFlags")?
+            .as_ref()
+            .and_then(PdfObject::as_integer)
             .map_or(0, |i| i.max(0) as u32);
 
-        let default_appearance = acroform_dict.get("DA").and_then(|v| v.as_string_lossy());
+        let default_appearance = self
+            .resolved_entry(&acroform_dict, "DA")?
+            .as_ref()
+            .and_then(PdfObject::as_string_lossy);
 
         let fields_arr = match acroform_dict.get("Fields") {
             Some(obj) => self.resolve_array(obj)?,
@@ -101,6 +121,11 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 }))
             }
         };
+        if fields_arr.len() > MAX_ACROFORM_FIELDS {
+            return Err(PdfError::InvalidOperation(format!(
+                "AcroForm fields exceed maximum of {MAX_ACROFORM_FIELDS}"
+            )));
+        }
 
         let default_inherited = InheritedAttributes {
             default_appearance: default_appearance.clone(),
@@ -122,6 +147,8 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 self.process_field_dict(pseudo_ref, dict, None, "", &default_inherited, 0)?;
             }
         }
+
+        self.recover_page_widgets()?;
 
         Ok(Some(AcroForm {
             object_ref: acroform_ref,
@@ -150,7 +177,9 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         }
 
         if self.fields_collected.len() >= MAX_ACROFORM_FIELDS {
-            return Ok(());
+            return Err(PdfError::InvalidOperation(format!(
+                "AcroForm fields exceed maximum of {MAX_ACROFORM_FIELDS}"
+            )));
         }
 
         let field_obj = self.store.resolve(field_ref)?.clone();
@@ -179,38 +208,49 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         depth: usize,
     ) -> PdfResult<()> {
         // Collect current level inherited values
-        let current_ft = field_dict
-            .get("FT")
-            .and_then(|v| v.as_name())
+        let current_ft = self
+            .resolved_entry(field_dict, "FT")?
+            .as_ref()
+            .and_then(PdfObject::as_name)
             .map(|s| s.to_string())
             .or_else(|| inherited.field_type.clone());
 
-        let current_flags = field_dict
-            .get("Ff")
-            .and_then(|v| v.as_integer())
+        let current_flags = self
+            .resolved_entry(field_dict, "Ff")?
+            .as_ref()
+            .and_then(PdfObject::as_integer)
             .map(|i| i.max(0) as u32)
             .or(inherited.flags)
             .unwrap_or(0);
 
-        let current_da = field_dict
-            .get("DA")
-            .and_then(|v| v.as_string_lossy())
+        let current_da = self
+            .resolved_entry(field_dict, "DA")?
+            .as_ref()
+            .and_then(PdfObject::as_string_lossy)
             .or_else(|| inherited.default_appearance.clone());
 
-        let current_quadding = field_dict
-            .get("Q")
-            .and_then(|v| v.as_integer())
+        let current_quadding = self
+            .resolved_entry(field_dict, "Q")?
+            .as_ref()
+            .and_then(PdfObject::as_integer)
             .map(|i| i as i32)
             .or(inherited.quadding);
 
         let current_options = self
-            .parse_options(field_dict)
+            .parse_options(field_dict)?
             .or_else(|| inherited.options.clone());
-        let current_max_len = field_dict
-            .get("MaxLen")
+        let current_max_len = self
+            .resolved_entry(field_dict, "MaxLen")?
+            .as_ref()
             .and_then(PdfObject::as_integer)
             .and_then(|value| usize::try_from(value).ok())
             .or(inherited.max_len);
+        let current_value = self
+            .resolved_entry(field_dict, "V")?
+            .or_else(|| inherited.value.clone());
+        let current_default_value = self
+            .resolved_entry(field_dict, "DV")?
+            .or_else(|| inherited.default_value.clone());
 
         let current_inherited = InheritedAttributes {
             field_type: current_ft.clone(),
@@ -219,12 +259,15 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             quadding: current_quadding,
             options: current_options.clone(),
             max_len: current_max_len,
+            value: current_value,
+            default_value: current_default_value,
         };
 
         // Partial name /T
-        let partial_name = field_dict
-            .get("T")
-            .and_then(|v| v.as_string_lossy())
+        let partial_name = self
+            .resolved_entry(field_dict, "T")?
+            .as_ref()
+            .and_then(PdfObject::as_string_lossy)
             .unwrap_or_default();
 
         let fully_qualified_name = if parent_name_prefix.is_empty() {
@@ -330,11 +373,18 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         let flags = inherited.flags.unwrap_or(0);
         let field_type = self.resolve_field_type(inherited.field_type.as_deref(), flags);
 
-        let alternate_name = dict.get("TU").and_then(|v| v.as_string_lossy());
-        let mapping_name = dict.get("TM").and_then(|v| v.as_string_lossy());
+        let alternate_name = self
+            .resolved_entry(dict, "TU")?
+            .as_ref()
+            .and_then(PdfObject::as_string_lossy);
+        let mapping_name = self
+            .resolved_entry(dict, "TM")?
+            .as_ref()
+            .and_then(PdfObject::as_string_lossy);
 
-        let value = self.parse_field_value(dict.get("V"), &field_type)?;
-        let default_value = self.parse_field_value(dict.get("DV"), &field_type)?;
+        let value = self.parse_field_value(inherited.value.as_ref(), &field_type)?;
+        let default_value =
+            self.parse_field_value(inherited.default_value.as_ref(), &field_type)?;
         let options = inherited.options.clone().unwrap_or_default();
         let selected_indices = self.parse_choice_indices(dict, &field_type, &value, &options)?;
 
@@ -456,27 +506,26 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         }
     }
 
-    fn parse_options(&mut self, dict: &BTreeMap<String, PdfObject>) -> Option<Vec<ChoiceOption>> {
-        let opt_obj = dict.get("Opt")?;
-        let opt_arr = match opt_obj {
-            PdfObject::Array(arr) => arr.clone(),
-            PdfObject::Reference(r) => {
-                if let Ok(resolved) = self.store.resolve(*r) {
-                    if let Some(arr) = resolved.as_array() {
-                        arr.to_vec()
-                    } else {
-                        return None;
-                    }
-                } else {
-                    return None;
-                }
-            }
-            _ => return None,
+    fn parse_options(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Option<Vec<ChoiceOption>>> {
+        let Some(opt_obj) = self.resolved_entry(dict, "Opt")? else {
+            return Ok(None);
         };
+        let Some(opt_arr) = opt_obj.as_array() else {
+            return Ok(None);
+        };
+        if opt_arr.len() > MAX_OPTIONS_COUNT {
+            return Err(PdfError::InvalidOperation(format!(
+                "Choice options exceed maximum of {MAX_OPTIONS_COUNT}"
+            )));
+        }
 
         let mut options = Vec::new();
-        for item in opt_arr.iter().take(MAX_OPTIONS_COUNT) {
-            match item {
+        for item in opt_arr {
+            let item = self.store.resolve_object(item)?;
+            match &item {
                 PdfObject::String(bytes) => {
                     let s = String::from_utf8_lossy(bytes).to_string();
                     options.push(ChoiceOption {
@@ -503,7 +552,89 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 _ => {}
             }
         }
-        Some(options)
+        Ok(Some(options))
+    }
+
+    fn resolved_entry(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+        key: &str,
+    ) -> PdfResult<Option<PdfObject>> {
+        let Some(value) = dict.get(key) else {
+            return Ok(None);
+        };
+        Ok(Some(self.store.resolve_object(value)?))
+    }
+
+    fn recover_page_widgets(&mut self) -> PdfResult<()> {
+        for page_ref in self.page_refs.clone() {
+            if self.fields_collected.len() >= MAX_ACROFORM_FIELDS {
+                break;
+            }
+            let page = match self.store.resolve(page_ref) {
+                Ok(page) => page.clone(),
+                // Page-widget recovery is supplemental to the catalog field tree. A caller may
+                // provide page identities without caching those optional page dictionaries.
+                Err(PdfError::ObjectNotFound { .. }) => continue,
+                Err(error) => return Err(error),
+            };
+            let Some(page_dict) = page.as_dict() else {
+                continue;
+            };
+            let Some(annotations) = page_dict.get("Annots") else {
+                continue;
+            };
+            let annotations = self.resolve_array(annotations)?;
+            if annotations.len() > MAX_PAGE_ANNOTATIONS {
+                return Err(PdfError::InvalidOperation(format!(
+                    "Page annotations exceed maximum of {MAX_PAGE_ANNOTATIONS}"
+                )));
+            }
+            for annotation in annotations {
+                if self.fields_collected.len() >= MAX_ACROFORM_FIELDS {
+                    break;
+                }
+                let Some(widget_ref) = annotation.as_reference() else {
+                    continue;
+                };
+                if self.fields_collected.iter().any(|field| {
+                    field.object_ref == widget_ref
+                        || field
+                            .widgets
+                            .iter()
+                            .any(|widget| widget.object_ref == widget_ref)
+                }) {
+                    continue;
+                }
+                let object = self.store.resolve(widget_ref)?.clone();
+                let Some(dict) = object.as_dict() else {
+                    continue;
+                };
+                if dict.get("Subtype").and_then(PdfObject::as_name) != Some("Widget") {
+                    continue;
+                }
+                if let Some(parent_ref) = dict.get("Parent").and_then(PdfObject::as_reference) {
+                    if !self.visited_nodes.contains(&parent_ref) {
+                        self.parse_field_node(
+                            parent_ref,
+                            None,
+                            "",
+                            &InheritedAttributes::default(),
+                            0,
+                        )?;
+                    }
+                } else {
+                    self.parse_field_node(
+                        widget_ref,
+                        None,
+                        "",
+                        &InheritedAttributes::default(),
+                        0,
+                    )?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn parse_choice_indices(
@@ -600,7 +731,8 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             .map_or(0, |i| i.max(0) as u32);
 
         // Normal appearance states (/AP /N keys)
-        let normal_appearance_states = self.extract_ap_normal_states(dict.get("AP"))?;
+        let (normal_appearance_states, has_normal, has_rollover, has_down) =
+            self.extract_appearance_info(dict.get("AP"))?;
 
         Ok(Some(WidgetAnnotation {
             object_ref: widget_ref,
@@ -608,15 +740,21 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             rect,
             appearance_state,
             normal_appearance_states,
+            has_normal_appearance: has_normal,
+            has_rollover_appearance: has_rollover,
+            has_down_appearance: has_down,
             flags,
             parent_ref,
         }))
     }
 
-    fn extract_ap_normal_states(&mut self, ap_obj: Option<&PdfObject>) -> PdfResult<Vec<String>> {
+    fn extract_appearance_info(
+        &mut self,
+        ap_obj: Option<&PdfObject>,
+    ) -> PdfResult<(Vec<String>, bool, bool, bool)> {
         let ap_obj = match ap_obj {
             Some(v) => v,
-            None => return Ok(Vec::new()),
+            None => return Ok((Vec::new(), false, false, false)),
         };
 
         let ap_dict = match ap_obj {
@@ -624,16 +762,25 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 let resolved = self.store.resolve(*r)?;
                 match resolved.as_dict() {
                     Some(d) => d.clone(),
-                    None => return Ok(Vec::new()),
+                    None => return Ok((Vec::new(), false, false, false)),
                 }
             }
             PdfObject::Dictionary(d) => d.clone(),
-            _ => return Ok(Vec::new()),
+            _ => return Ok((Vec::new(), false, false, false)),
         };
+        if ap_dict.len() > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Appearance dictionary exceeds maximum of {} entries",
+                crate::font::appearance::MAX_APPEARANCE_RESOURCES
+            )));
+        }
+        let has_normal = ap_dict.contains_key("N");
+        let has_rollover = ap_dict.contains_key("R");
+        let has_down = ap_dict.contains_key("D");
 
         let n_obj = match ap_dict.get("N") {
             Some(v) => v,
-            None => return Ok(Vec::new()),
+            None => return Ok((Vec::new(), false, has_rollover, has_down)),
         };
 
         let n_dict = match n_obj {
@@ -641,18 +788,26 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 let resolved = self.store.resolve(*r)?;
                 match resolved.as_dict() {
                     Some(d) => d.clone(),
-                    None => return Ok(Vec::new()),
+                    None => {
+                        return Ok((Vec::new(), has_normal, has_rollover, has_down));
+                    }
                 }
             }
             PdfObject::Dictionary(d) => d.clone(),
-            _ => return Ok(Vec::new()),
+            _ => return Ok((Vec::new(), has_normal, has_rollover, has_down)),
         };
+        if n_dict.len() > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Normal appearance states exceed maximum of {}",
+                crate::font::appearance::MAX_APPEARANCE_RESOURCES
+            )));
+        }
 
         let mut states = Vec::new();
         for key in n_dict.keys() {
             states.push(key.clone());
         }
-        Ok(states)
+        Ok((states, has_normal, has_rollover, has_down))
     }
 
     fn parse_rect(&mut self, obj: &PdfObject) -> PdfResult<[f64; 4]> {

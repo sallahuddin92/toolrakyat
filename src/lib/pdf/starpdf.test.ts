@@ -10,10 +10,10 @@ function loadTestAsset(filename: string): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe("StarPDF v0.9 WASM Client Runtime & Appearance Engine", () => {
-  it("retrieves engine version 0.9.0", async () => {
+describe("StarPDF v0.10 WASM Client Runtime & Appearance Engine", () => {
+  it("retrieves engine version 0.10.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.9.0");
+    expect(version).toBe("0.10.0");
   });
 
   it("creates minimal PDF and opens it", async () => {

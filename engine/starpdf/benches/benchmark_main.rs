@@ -28,7 +28,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.9 Micro-Benchmark Suite             ");
+    println!("          StarPDF Engine v0.10 Micro-Benchmark Suite            ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -332,28 +332,22 @@ ET
 
     // 12. Mutation Plan Evaluation
     {
-        let dummy_bytes = b"%PDF-1.7\n";
-        let source = starpdf::io::source::ByteSource::new(dummy_bytes);
         let field_ref = ObjectRef::new(20, 0);
         let field_dict = BTreeMap::from([
             ("FT".to_string(), PdfObject::Name("Tx".to_string())),
             ("T".to_string(), PdfObject::String(b"field".to_vec())),
             ("V".to_string(), PdfObject::String(b"initial".to_vec())),
         ]);
-        let objects = BTreeMap::from([(field_ref, PdfObject::Dictionary(field_dict))]);
-        let mut xref = starpdf::xref::table::XrefTable::new();
-        xref.insert_in_use(20, 10, 0);
+        let mut document = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        document
+            .store_mut()
+            .insert_cached(field_ref, PdfObject::Dictionary(field_dict));
 
         let iterations = 10_000;
         let start = Instant::now();
         for _ in 0..iterations {
-            let mut store = starpdf::document::object_store::ObjectStore::new(source, xref.clone());
-            for (r, obj) in &objects {
-                store.insert_cached(*r, obj.clone());
-            }
-            let mut engine = MutationEngine::new(&mut store, &[]);
-            let _ = engine
-                .prepare_plan(&[PdfChange::SetTextField {
+            let _ = document
+                .apply_mutation(&[PdfChange::SetTextField {
                     field_ref,
                     value: "mutated_value".to_string(),
                 }])
@@ -805,6 +799,106 @@ ET
         let elapsed = start.elapsed();
         println!(
             "30. Subset Export+Reopen:    {:>8} ns/op  ({:.2?} for {} roundtrips)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 31. Producer AcroForm Field Tree + Inheritance Traversal
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_10_compat/pdflib-complete-form.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(doc.form_fields().unwrap().len(), 6);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "31. Producer Field Traversal: {:>8} ns/op  ({:.2?} for {} traversals)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 32. Orphan PDFKit Widget Resolution
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(doc.form_fields().unwrap().len(), 4);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "32. Orphan Widget Resolution: {:>8} ns/op  ({:.2?} for {} resolutions)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 33. Producer Annotation Graph + Existing AP Parsing
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_10_compat/pdfkit-shapes-ink-link.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            assert_eq!(doc.page_annotations(0).unwrap().len(), 5);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "33. Annotation/AP Traversal:  {:>8} ns/op  ({:.2?} for {} traversals)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 34. CFF/CFF2/TrueType Program Detection
+    {
+        let font = benchmark_true_type();
+        let iterations = 100_000;
+        let start = Instant::now();
+        for index in 0..iterations {
+            let (key, subtype) = if index % 2 == 0 {
+                ("FontFile2", None)
+            } else {
+                ("FontFile3", Some("Type1C"))
+            };
+            let _ = Font::detect_font_program(key, subtype, &font).unwrap();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "34. Font Program Detection:   {:>8} ns/op  ({:.2?} for {} detections)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 35. Inherited Field Mutation + AP Preservation Planning
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_10_compat/pdflib-inherited-field.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let field_ref = doc.form_fields().unwrap()[0].object_ref;
+        let change = PdfChange::SetTextField {
+            field_ref,
+            value: "Inherited benchmark".into(),
+        };
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.apply_mutation(std::slice::from_ref(&change)).unwrap();
+            assert!(!plan.modified_objects.is_empty());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "35. Inherited Mutation Plan:  {:>8} ns/op  ({:.2?} for {} plans)",
             elapsed.as_nanos() / iterations as u128,
             elapsed,
             iterations

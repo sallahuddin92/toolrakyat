@@ -61,6 +61,9 @@ export interface StarPdfWidget {
   rect: [number, number, number, number];
   appearance_state?: string;
   normal_appearance_states: string[];
+  has_normal_appearance: boolean;
+  has_rollover_appearance: boolean;
+  has_down_appearance: boolean;
   is_checked: boolean;
 }
 
@@ -99,6 +102,10 @@ export interface StarPdfAnnotation {
   line_endings?: StarPdfAddAnnotationInput["line_endings"];
   quad_points: number[];
   ink_list: [number, number][][];
+  uri?: string;
+  has_normal_appearance: boolean;
+  has_rollover_appearance: boolean;
+  has_down_appearance: boolean;
 }
 
 export interface StarPdfAddAnnotationInput {

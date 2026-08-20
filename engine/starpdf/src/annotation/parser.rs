@@ -6,6 +6,7 @@ use crate::error::{PdfError, PdfResult};
 use crate::syntax::object::{ObjectRef, PdfObject};
 
 const MAX_PAGE_ANNOTATIONS: usize = 2000;
+const MAX_ANNOTATION_URI_BYTES: usize = 8192;
 
 pub struct AnnotationParser<'a, 'b> {
     store: &'a mut ObjectStore<'b>,
@@ -37,7 +38,12 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
         };
 
         let mut annotations = Vec::new();
-        for item in annots_arr.iter().take(MAX_PAGE_ANNOTATIONS) {
+        if annots_arr.len() > MAX_PAGE_ANNOTATIONS {
+            return Err(PdfError::InvalidOperation(format!(
+                "Page annotations exceed maximum of {MAX_PAGE_ANNOTATIONS}"
+            )));
+        }
+        for item in &annots_arr {
             match item {
                 PdfObject::Reference(r) => {
                     if let Ok(annot) = self.parse_single_annotation(*r, page_index) {
@@ -147,6 +153,9 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
             ));
         }
         let ink_list = self.parse_ink_list(dict.get("InkList"))?;
+        let uri = self.parse_link_uri(&subtype, dict)?;
+        let (has_normal_appearance, has_rollover_appearance, has_down_appearance) =
+            self.parse_appearance_presence(dict.get("AP"))?;
 
         let is_invisible = (flags & (1 << 0)) != 0; // Bit 1
         let is_hidden = (flags & (1 << 1)) != 0; // Bit 2
@@ -168,10 +177,75 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
             line_endings,
             quad_points,
             ink_list,
+            uri,
+            has_normal_appearance,
+            has_rollover_appearance,
+            has_down_appearance,
             is_hidden,
             is_invisible,
             is_print,
         })
+    }
+
+    fn parse_appearance_presence(
+        &mut self,
+        appearance: Option<&PdfObject>,
+    ) -> PdfResult<(bool, bool, bool)> {
+        let Some(appearance) = appearance else {
+            return Ok((false, false, false));
+        };
+        let appearance = self.store.resolve_object(appearance)?;
+        let Some(dict) = appearance.as_dict() else {
+            return Err(PdfError::TypeMismatch {
+                expected: "appearance dictionary",
+                actual: appearance.type_name(),
+            });
+        };
+        if dict.len() > crate::font::appearance::MAX_APPEARANCE_RESOURCES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Appearance dictionary exceeds maximum of {} entries",
+                crate::font::appearance::MAX_APPEARANCE_RESOURCES
+            )));
+        }
+        Ok((
+            dict.contains_key("N"),
+            dict.contains_key("R"),
+            dict.contains_key("D"),
+        ))
+    }
+
+    fn parse_link_uri(
+        &mut self,
+        subtype: &AnnotationSubtype,
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Option<String>> {
+        if *subtype != AnnotationSubtype::Link {
+            return Ok(None);
+        }
+        let Some(action) = dict.get("A") else {
+            return Ok(None);
+        };
+        let action = self.store.resolve_object(action)?;
+        let Some(action_dict) = action.as_dict() else {
+            return Err(PdfError::TypeMismatch {
+                expected: "Link action dictionary",
+                actual: action.type_name(),
+            });
+        };
+        if action_dict.get("S").and_then(PdfObject::as_name) != Some("URI") {
+            return Ok(None);
+        }
+        let Some(uri) = action_dict.get("URI").and_then(PdfObject::as_string_lossy) else {
+            return Err(PdfError::InvalidOperation(
+                "Link /URI action is missing a string /URI".into(),
+            ));
+        };
+        if uri.len() > MAX_ANNOTATION_URI_BYTES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Annotation URI exceeds maximum of {MAX_ANNOTATION_URI_BYTES} bytes"
+            )));
+        }
+        Ok(Some(uri))
     }
 
     fn parse_rect(&mut self, obj: &PdfObject) -> PdfResult<[f64; 4]> {
