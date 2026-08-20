@@ -7,6 +7,7 @@ description = "Low-level, zero-dependency, high-performance PDF engine."
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+miniz_oxide = "0.9.1"
 # Intentionally 0 external dependencies for core engine runtime.
 # Standard library is used exclusively for performance, security, and portability.
 
