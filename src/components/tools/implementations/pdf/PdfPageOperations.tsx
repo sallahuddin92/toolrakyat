@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Copy, FileOutput, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, FileInput, FileOutput, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -15,6 +15,7 @@ interface PdfPageOperationsProps {
   onDuplicate: () => void;
   onInsertBlank: () => void;
   onExtract: () => void;
+  onMerge: () => void;
 }
 
 export function PdfPageOperations({
@@ -28,6 +29,7 @@ export function PdfPageOperations({
   onDuplicate,
   onInsertBlank,
   onExtract,
+  onMerge,
 }: PdfPageOperationsProps) {
   return (
     <div
@@ -92,6 +94,17 @@ export function PdfPageOperations({
       >
         <FileOutput className="size-3.5" />
         Extract {selectedCount}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={onMerge}
+        disabled={isProcessing}
+        data-testid="page-merge"
+      >
+        <FileInput className="size-3.5" />
+        Add PDF
       </Button>
       <Button
         type="button"

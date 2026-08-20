@@ -210,3 +210,9 @@ name = "fuzz_field_graph_classification"
 path = "fuzz_targets/fuzz_field_graph_classification.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_page_document_ops"
+path = "fuzz_targets/fuzz_page_document_ops.rs"
+test = false
+doc = false

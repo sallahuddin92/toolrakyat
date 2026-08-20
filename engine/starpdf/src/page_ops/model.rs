@@ -4,7 +4,10 @@ pub enum PageOperationType {
     MovePage,
     DuplicatePage,
     InsertBlankPage,
+    InsertImportedPage,
     ExtractPages,
+    SplitDocument,
+    MergeDocuments,
 }
 
 impl PageOperationType {
@@ -14,7 +17,40 @@ impl PageOperationType {
             Self::MovePage => "MOVE_PAGE",
             Self::DuplicatePage => "DUPLICATE_PAGE",
             Self::InsertBlankPage => "INSERT_BLANK_PAGE",
+            Self::InsertImportedPage => "INSERT_IMPORTED_PAGE",
             Self::ExtractPages => "EXTRACT_PAGES",
+            Self::SplitDocument => "SPLIT_DOCUMENT",
+            Self::MergeDocuments => "MERGE_DOCUMENTS",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageSource {
+    pub document_index: usize,
+    pub page_index: usize,
+}
+
+impl PageSource {
+    pub const fn new(document_index: usize, page_index: usize) -> Self {
+        Self {
+            document_index,
+            page_index,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageRange {
+    pub start: usize,
+    pub end_exclusive: usize,
+}
+
+impl PageRange {
+    pub const fn new(start: usize, end_exclusive: usize) -> Self {
+        Self {
+            start,
+            end_exclusive,
         }
     }
 }
@@ -82,6 +118,7 @@ pub enum DocumentWriteMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageOperationLimits {
+    pub max_input_documents: usize,
     pub max_total_pages: usize,
     pub max_selected_pages: usize,
     pub max_imported_objects: usize,
@@ -97,6 +134,7 @@ pub struct PageOperationLimits {
 impl Default for PageOperationLimits {
     fn default() -> Self {
         Self {
+            max_input_documents: 16,
             max_total_pages: 10_000,
             max_selected_pages: 10_000,
             max_imported_objects: 100_000,

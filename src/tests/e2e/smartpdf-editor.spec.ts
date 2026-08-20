@@ -361,7 +361,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.goto("/tools/pdf/editor");
   });
 
-  test("v0.12A page controls reorder, duplicate, insert, delete, and extract through the worker", async ({
+  test("v0.12B page controls reorder, duplicate, insert, delete, merge, and extract through the worker", async ({
     page,
   }) => {
     const fixture = fs.readFileSync(path.join(process.cwd(), "test-assets/multi-page.test.pdf"));
@@ -380,6 +380,16 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("3 / 3", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    const mergeChooserPromise = page.waitForEvent("filechooser");
+    await page.getByTestId("page-merge").click();
+    const mergeChooser = await mergeChooserPromise;
+    await mergeChooser.setFiles({
+      name: "added-pages.pdf",
+      mimeType: "application/pdf",
+      buffer: fixture,
+    });
+    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByTestId("page-extract").click();
@@ -759,7 +769,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       };
     }, Array.from(fixture));
 
-    expect(workerResult.version).toBe("0.12.0");
+    expect(workerResult.version).toBe("0.12.1");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
@@ -1083,7 +1093,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       },
       { kind: "checkbox", name: "pdfkit.agree", checked: false },
     ]);
-    expect(result.version).toBe("0.12.0");
+    expect(result.version).toBe("0.12.1");
     expect(result.status).toBe("AP_REGENERATED");
     expect(result.prefixPreserved).toBe(true);
     const shared = result.fields.filter((field) => field.name === "pdfkit.person.name");

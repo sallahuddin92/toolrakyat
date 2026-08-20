@@ -18,6 +18,9 @@ export const starpdf_get_info: (a: number) => [number, number, number];
 export const starpdf_get_page_count: (a: number) => [number, number, number];
 export const starpdf_get_security_info: (a: number) => [number, number, number];
 export const starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const starpdf_insert_imported_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const starpdf_merge_documents: (a: any) => [number, number, number, number];
+export const starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
 export const starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
 export const starpdf_open: (a: number, b: number) => [number, number, number];
 export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
@@ -27,6 +30,7 @@ export const starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e:
 export const starpdf_set_choice_values: (a: number, b: bigint, c: number, d: any) => [number, number, number];
 export const starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
 export const starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+export const starpdf_split_document: (a: number, b: any) => [number, number, number];
 export const starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
 export const starpdf_validate: (a: number) => [number, number, number];
 export const starpdf_version: () => [number, number];

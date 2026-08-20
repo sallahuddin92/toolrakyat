@@ -414,6 +414,50 @@ impl<'a> PdfDocument<'a> {
         )
     }
 
+    pub fn insert_page_from(
+        &mut self,
+        imported_document: &PdfDocument<'_>,
+        imported_page_index: usize,
+        insert_at: usize,
+    ) -> PdfResult<Vec<u8>> {
+        crate::page_ops::DocumentBuilder::insert_page(
+            self.source.as_bytes(),
+            imported_document.source.as_bytes(),
+            imported_page_index,
+            insert_at,
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn merge_documents(inputs: &[&[u8]]) -> PdfResult<Vec<u8>> {
+        crate::page_ops::DocumentBuilder::merge_documents(
+            inputs,
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn merge_selected(
+        inputs: &[&[u8]],
+        page_sources: &[crate::page_ops::PageSource],
+    ) -> PdfResult<Vec<u8>> {
+        crate::page_ops::DocumentBuilder::merge_selected(
+            inputs,
+            page_sources,
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn split_document(
+        &mut self,
+        ranges: &[crate::page_ops::PageRange],
+    ) -> PdfResult<Vec<Vec<u8>>> {
+        crate::page_ops::DocumentBuilder::split_document(
+            self.source.as_bytes(),
+            ranges,
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
     fn decompress_stream_data(
         &self,
         stream: &crate::syntax::object::StreamObject,

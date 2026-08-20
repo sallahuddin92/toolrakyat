@@ -83,3 +83,63 @@ export async function runStarPdfPageOperation(
     worker.terminate();
   }
 }
+
+export async function mergeStarPdfDocuments(
+  inputs: Uint8Array[],
+  pageSources?: { documentIndex: number; pageIndex: number }[]
+): Promise<Uint8Array> {
+  const worker = new Worker("/starpdf.worker.js", { type: "module" });
+  try {
+    await sendRequest(worker, { type: "init", id: requestId("init") });
+    const buffers = inputs.map((input) => input.slice().buffer as ArrayBuffer);
+    const response = await sendRequest(
+      worker,
+      { type: "mergeDocuments", id: requestId("mergeDocuments"), buffers, pageSources },
+      buffers
+    );
+    if (response.type !== "mergeDocuments") {
+      throw new Error("Unexpected StarPDF merge response");
+    }
+    return response.bytes;
+  } finally {
+    worker.terminate();
+  }
+}
+
+export async function splitStarPdfDocument(
+  input: Uint8Array,
+  ranges: { start: number; endExclusive: number }[]
+): Promise<Uint8Array[]> {
+  const worker = new Worker("/starpdf.worker.js", { type: "module" });
+  let handle: number | undefined;
+  try {
+    await sendRequest(worker, { type: "init", id: requestId("init") });
+    const buffer = input.slice().buffer as ArrayBuffer;
+    const opened = await sendRequest(
+      worker,
+      { type: "open", id: requestId("open"), buffer },
+      [buffer]
+    );
+    if (opened.type !== "open") throw new Error("Unexpected StarPDF worker response");
+    handle = opened.handle;
+    const response = await sendRequest(worker, {
+      type: "splitDocument",
+      id: requestId("splitDocument"),
+      handle,
+      ranges,
+    });
+    if (response.type !== "splitDocument") {
+      throw new Error("Unexpected StarPDF split response");
+    }
+    return response.outputs;
+  } finally {
+    if (handle !== undefined) {
+      try {
+        await sendRequest(worker, { type: "close", id: requestId("close"), handle });
+      } catch {
+        // Terminating the dedicated worker still releases its private registry.
+      }
+    }
+    worker.terminate();
+  }
+}
