@@ -23,6 +23,10 @@ pub enum PdfError {
     CffDetectedUnsupported,
     Cff2DetectedUnsupported,
     UnknownFontProgram,
+    MalformedSignature(String),
+    EncryptedDocumentUnsupported(String),
+    SignatureMutationUnsupported(String),
+    AmbiguousFieldGraph(String),
     InvalidOperation(String),
 }
 
@@ -56,6 +60,14 @@ impl fmt::Display for PdfError {
             Self::CffDetectedUnsupported => write!(f, "CFF_DETECTED_UNSUPPORTED"),
             Self::Cff2DetectedUnsupported => write!(f, "CFF2_DETECTED_UNSUPPORTED"),
             Self::UnknownFontProgram => write!(f, "UNKNOWN_FONT_PROGRAM"),
+            Self::MalformedSignature(msg) => write!(f, "SIGNED_STRUCTURE_MALFORMED: {msg}"),
+            Self::EncryptedDocumentUnsupported(msg) => {
+                write!(f, "ENCRYPTED_DOCUMENT_MUTATION_UNSUPPORTED: {msg}")
+            }
+            Self::SignatureMutationUnsupported(msg) => {
+                write!(f, "SIGNATURE_MUTATION_UNSUPPORTED: {msg}")
+            }
+            Self::AmbiguousFieldGraph(msg) => write!(f, "AMBIGUOUS_FIELD_GRAPH: {msg}"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

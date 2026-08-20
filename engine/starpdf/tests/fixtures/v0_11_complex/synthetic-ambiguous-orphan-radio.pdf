@@ -1,0 +1,51 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents 4 0 R /Annots [5 0 R 6 0 R] >>
+endobj
+4 0 obj
+<< /Length 36 >>
+stream
+BT /F1 12 Tf 72 720 Td (v0.11) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 32768 /T (ambiguous.radio) /Rect [72 620 92 640] /P 3 0 R /V /Off /AS /Off /AP << /N << /Off 7 0 R /A 8 0 R >> >> >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Btn /Ff 32768 /T (ambiguous.radio) /Rect [110 620 130 640] /P 3 0 R /V /Off /AS /Off /AP << /N << /Off 7 0 R /B 8 0 R >> >> >>
+endobj
+7 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 0 >>
+stream
+
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 0 >>
+stream
+
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000318 00000 n 
+0000000404 00000 n 
+0000000582 00000 n 
+0000000762 00000 n 
+0000000859 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R /ID [<0011223344556677> <8899AABBCCDDEEFF>]  >>
+startxref
+956
+%%EOF

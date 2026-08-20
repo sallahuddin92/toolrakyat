@@ -177,6 +177,18 @@ export function starpdf_get_page_count(handle) {
 }
 
 /**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_get_security_info(handle) {
+    const ret = wasm.starpdf_get_security_info(handle);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {Uint8Array} bytes
  * @returns {number}
  */

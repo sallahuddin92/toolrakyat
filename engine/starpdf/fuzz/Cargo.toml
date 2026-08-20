@@ -186,3 +186,27 @@ name = "fuzz_font_program_detection"
 path = "fuzz_targets/fuzz_font_program_detection.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_signature_security"
+path = "fuzz_targets/fuzz_signature_security.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_encryption_detection"
+path = "fuzz_targets/fuzz_encryption_detection.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_revision_chain"
+path = "fuzz_targets/fuzz_revision_chain.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_field_graph_classification"
+path = "fuzz_targets/fuzz_field_graph_classification.rs"
+test = false
+doc = false

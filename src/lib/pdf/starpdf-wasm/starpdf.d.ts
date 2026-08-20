@@ -25,6 +25,8 @@ export function starpdf_get_info(handle: number): any;
 
 export function starpdf_get_page_count(handle: number): number;
 
+export function starpdf_get_security_info(handle: number): any;
+
 export function starpdf_open(bytes: Uint8Array): number;
 
 export function starpdf_remove_annotation(handle: number, page_index: number, obj_num: bigint, obj_gen: number): boolean;
@@ -63,6 +65,7 @@ export interface InitOutput {
     readonly starpdf_get_glyph_mapping_quality: (a: number) => [number, number, number, number];
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
+    readonly starpdf_get_security_info: (a: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];

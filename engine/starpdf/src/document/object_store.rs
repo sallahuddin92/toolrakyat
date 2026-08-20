@@ -105,6 +105,14 @@ impl<'a> ObjectStore<'a> {
                     generation: obj_ref.generation,
                 })?;
 
+        if entry.generation() != obj_ref.generation {
+            self.resolving_stack.pop();
+            return Err(PdfError::ObjectNotFound {
+                number: obj_ref.number,
+                generation: obj_ref.generation,
+            });
+        }
+
         let resolution_result = match entry {
             XrefEntry::InUse { byte_offset, .. } => {
                 self.resolve_uncompressed_object(obj_ref, byte_offset)
@@ -150,10 +158,9 @@ impl<'a> ObjectStore<'a> {
         let mut parser = Parser::from_cursor(cursor);
         let (parsed_ref, obj) = parser.parse_indirect_object()?;
 
-        if parsed_ref.number != obj_ref.number {
+        if parsed_ref != obj_ref {
             return Err(PdfError::InvalidSyntax(format!(
-                "Object number mismatch at offset {byte_offset}: expected {}, found {}",
-                obj_ref.number, parsed_ref.number
+                "Object identity mismatch at offset {byte_offset}: expected {obj_ref}, found {parsed_ref}"
             )));
         }
 

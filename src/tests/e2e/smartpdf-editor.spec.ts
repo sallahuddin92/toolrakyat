@@ -725,7 +725,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       };
     }, Array.from(fixture));
 
-    expect(workerResult.version).toBe("0.10.0");
+    expect(workerResult.version).toBe("0.11.0");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
@@ -1049,7 +1049,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       },
       { kind: "checkbox", name: "pdfkit.agree", checked: false },
     ]);
-    expect(result.version).toBe("0.10.0");
+    expect(result.version).toBe("0.11.0");
     expect(result.status).toBe("AP_REGENERATED");
     expect(result.prefixPreserved).toBe(true);
     const shared = result.fields.filter((field) => field.name === "pdfkit.person.name");
@@ -1286,5 +1286,93 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       );
       expect((await canvas.screenshot()).byteLength, fixtureId).toBeGreaterThan(1_000);
     }
+  });
+
+  test("signed PDF shows precise non-verification warning and remains viewable", async ({ page }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-signed-valid.pdf",
+      ),
+    );
+    await uploadPdfBytes(page, "synthetic-signed-valid.pdf", fixture);
+    const warning = page.getByTestId("starpdf-signed-document-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("does not verify cryptographic signature validity");
+    await expect(warning).toContainText("post-signature revision");
+  });
+
+  test("encrypted PDF is refused with an explicit security-handler message", async ({ page }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf",
+      ),
+    );
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "synthetic-encrypted-standard.pdf",
+      mimeType: "application/pdf",
+      buffer: fixture,
+    });
+    const error = page.getByTestId("starpdf-document-error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText("encrypted with an unsupported security handler");
+    await expect(error).toContainText("does not decrypt or bypass");
+    await expect(page.getByTestId("smartpdf-editor-workspace")).toHaveCount(0);
+  });
+
+  test("worker returns typed encrypted-document refusal", async ({ page }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf",
+      ),
+    );
+    const result = await page.evaluate(async (input) => {
+      const worker = new Worker("/starpdf.worker.js", { type: "module" });
+      let sequence = 0;
+      const request = (message: Record<string, unknown>) =>
+        new Promise<Record<string, unknown>>((resolve, reject) => {
+          const id = `security-${++sequence}`;
+          const listener = (event: MessageEvent<Record<string, unknown>>) => {
+            if (event.data.id !== id) return;
+            worker.removeEventListener("message", listener);
+            resolve(event.data);
+          };
+          worker.addEventListener("message", listener);
+          worker.addEventListener("error", reject, { once: true });
+          worker.postMessage({ ...message, id });
+        });
+      await request({ type: "init" });
+      const opened = await request({
+        type: "open",
+        buffer: new Uint8Array(input).buffer,
+      });
+      const handle = opened.handle as number;
+      const security = await request({ type: "securityInfo", handle });
+      const staged = await request({
+        type: "addAnnotation",
+        handle,
+        pageIndex: 0,
+        input: { subtype: "Square", rect: [10, 10, 20, 20] },
+      });
+      const refusal = await request({ type: "exportIncremental", handle });
+      await request({ type: "close", handle });
+      worker.terminate();
+      return { security, staged, refusal };
+    }, Array.from(fixture));
+    expect((result.security.securityInfo as { encryption_state: string }).encryption_state).toBe(
+      "STANDARD_SECURITY_DETECTED",
+    );
+    expect(result.staged.success).toBe(true);
+    expect(result.refusal.success).toBe(false);
+    expect(result.refusal.code).toBe("ENCRYPTED_DOCUMENT");
+  });
+
+  test("ordinary PDF remains free of security warnings", async ({ page }) => {
+    const fixture = fs.readFileSync(path.join(process.cwd(), "test-assets/smartpdf-form.pdf"));
+    await uploadPdfBytes(page, "ordinary-form.pdf", fixture);
+    await expect(page.getByTestId("starpdf-signed-document-warning")).toHaveCount(0);
+    await expect(page.getByTestId("starpdf-document-error")).toHaveCount(0);
   });
 });

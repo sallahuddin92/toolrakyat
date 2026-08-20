@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::document::object_store::ObjectStore;
 use crate::error::{PdfError, PdfResult};
-use crate::forms::field::{ChoiceOption, FieldType, FieldValue, FormField};
+use crate::forms::field::{
+    ChoiceOption, FieldGraphClassification, FieldType, FieldValue, FormField,
+};
 use crate::forms::widget::WidgetAnnotation;
 use crate::syntax::object::{ObjectRef, PdfObject};
 
@@ -38,6 +40,7 @@ pub struct AcroFormParser<'a, 'b> {
     page_ref_to_index: BTreeMap<ObjectRef, usize>,
     page_refs: Vec<ObjectRef>,
     visited_nodes: HashSet<ObjectRef>,
+    recovered_orphans: HashSet<ObjectRef>,
     fields_collected: Vec<FormField>,
 }
 
@@ -52,6 +55,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             page_ref_to_index,
             page_refs: page_refs.to_vec(),
             visited_nodes: HashSet::new(),
+            recovered_orphans: HashSet::new(),
             fields_collected: Vec::new(),
         }
     }
@@ -63,6 +67,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
     ) -> PdfResult<Option<AcroForm>> {
         let Some(acroform_obj) = catalog_dict.get("AcroForm") else {
             self.recover_page_widgets()?;
+            self.classify_recovered_field_graphs();
             return if self.fields_collected.is_empty() {
                 Ok(None)
             } else {
@@ -149,6 +154,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         }
 
         self.recover_page_widgets()?;
+        self.classify_recovered_field_graphs();
 
         Ok(Some(AcroForm {
             object_ref: acroform_ref,
@@ -289,19 +295,27 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             // Determine if kids are child fields (have /T) or widget annotations (no /T)
             let mut subfield_refs = Vec::new();
             let mut widget_refs = Vec::new();
+            let mut malformed_graph = false;
 
             for kid_obj in kids {
-                let kid_ref = match kid_obj.as_reference() {
-                    Some(r) => r,
-                    None => continue,
+                let kid_ref = if let Some(reference) = kid_obj.as_reference() {
+                    reference
+                } else {
+                    malformed_graph = true;
+                    continue;
                 };
                 let kid_resolved = self.store.resolve(kid_ref)?.clone();
                 if let Some(kid_dict) = kid_resolved.as_dict() {
+                    if kid_dict.get("Parent").and_then(PdfObject::as_reference) != Some(field_ref) {
+                        malformed_graph = true;
+                    }
                     if kid_dict.contains_key("T") {
                         subfield_refs.push(kid_ref);
                     } else {
                         widget_refs.push(kid_ref);
                     }
+                } else {
+                    malformed_graph = true;
                 }
             }
 
@@ -338,6 +352,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 field_dict,
                 &current_inherited,
                 widgets,
+                malformed_graph,
             )?;
         } else {
             // Terminal field with single / direct widget
@@ -354,6 +369,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 field_dict,
                 &current_inherited,
                 widgets,
+                false,
             )?;
         }
 
@@ -369,6 +385,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         dict: &BTreeMap<String, PdfObject>,
         inherited: &InheritedAttributes,
         widgets: Vec<WidgetAnnotation>,
+        malformed_graph: bool,
     ) -> PdfResult<()> {
         let flags = inherited.flags.unwrap_or(0);
         let field_type = self.resolve_field_type(inherited.field_type.as_deref(), flags);
@@ -391,6 +408,13 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         let is_read_only = (flags & (1 << 0)) != 0; // Bit 1
         let is_required = (flags & (1 << 1)) != 0; // Bit 2
         let is_comb = matches!(field_type, FieldType::Text { .. }) && (flags & (1 << 24)) != 0;
+        let graph_classification = if malformed_graph {
+            FieldGraphClassification::MalformedFieldGraph
+        } else if widgets.len() > 1 {
+            FieldGraphClassification::MultiWidgetField
+        } else {
+            FieldGraphClassification::CanonicalField
+        };
 
         self.fields_collected.push(FormField {
             object_ref,
@@ -412,6 +436,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             widgets,
             is_read_only,
             is_required,
+            graph_classification,
         });
 
         Ok(())
@@ -624,6 +649,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                         )?;
                     }
                 } else {
+                    self.recovered_orphans.insert(widget_ref);
                     self.parse_field_node(
                         widget_ref,
                         None,
@@ -635,6 +661,37 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             }
         }
         Ok(())
+    }
+
+    fn classify_recovered_field_graphs(&mut self) {
+        let ambiguous_names: HashSet<String> = self
+            .fields_collected
+            .iter()
+            .filter(|field| self.recovered_orphans.contains(&field.object_ref) && field.is_radio())
+            .filter_map(|field| {
+                let matches = self
+                    .fields_collected
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.object_ref != field.object_ref
+                            && self.recovered_orphans.contains(&candidate.object_ref)
+                            && candidate.is_radio()
+                            && candidate.fully_qualified_name == field.fully_qualified_name
+                    })
+                    .count();
+                (matches > 0).then(|| field.fully_qualified_name.clone())
+            })
+            .collect();
+        for field in &mut self.fields_collected {
+            if self.recovered_orphans.contains(&field.object_ref) {
+                field.graph_classification =
+                    if ambiguous_names.contains(&field.fully_qualified_name) {
+                        FieldGraphClassification::AmbiguousWidgetGroup
+                    } else {
+                        FieldGraphClassification::OrphanWidget
+                    };
+            }
+        }
     }
 
     fn parse_choice_indices(

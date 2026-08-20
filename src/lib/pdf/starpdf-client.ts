@@ -6,6 +6,7 @@ import type {
   StarPdfPageText,
   StarPdfSearchOptions,
   StarPdfSearchResult,
+  StarPdfSecurityInfo,
   StarPdfUpdateAnnotationInput,
 } from "./starpdf-types";
 
@@ -23,6 +24,7 @@ import initWasm, {
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
+  starpdf_get_security_info,
   starpdf_open,
   starpdf_remove_annotation,
   starpdf_search,
@@ -99,6 +101,12 @@ export class StarPdfDocumentHandle {
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_get_page_count(this._handle);
+  }
+
+  async getSecurityInfo(): Promise<StarPdfSecurityInfo> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_security_info(this._handle) as StarPdfSecurityInfo;
   }
 
   async extractPageText(pageIndex: number): Promise<StarPdfPageText> {

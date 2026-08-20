@@ -11,6 +11,27 @@ pub struct WasmDocumentInfo {
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmSecurityInfo {
+    pub signature_state: String,
+    pub signature_count: usize,
+    pub byte_range_count: usize,
+    pub encryption_state: String,
+    pub encryption_filter: Option<String>,
+    pub encryption_subfilter: Option<String>,
+    pub permission_raw: Option<i32>,
+    pub permission_printing: Option<bool>,
+    pub permission_modification: Option<bool>,
+    pub permission_copying: Option<bool>,
+    pub permission_annotation_and_forms: Option<bool>,
+    pub mutation_allowed: bool,
+    pub mutation_reason_code: Option<String>,
+    pub signed_mutation_state: String,
+    pub cryptographic_verification: String,
+    pub document_id_valid: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmTextSpan {
     pub page_index: usize,
     pub text: String,
@@ -96,6 +117,7 @@ pub struct WasmFormField {
     pub options: Vec<WasmChoiceOption>,
     pub selected_indices: Vec<usize>,
     pub widgets: Vec<WasmWidget>,
+    pub graph_classification: String,
 }
 
 #[cfg(feature = "wasm")]
