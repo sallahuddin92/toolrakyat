@@ -7,6 +7,25 @@ use crate::font::encoding::SimpleEncoding;
 use crate::font::sfnt::SfntFont;
 use crate::syntax::object::PdfObject;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontProgramKind {
+    TrueTypeSupported,
+    CffDetectedUnsupported,
+    Cff2DetectedUnsupported,
+    UnknownFontProgram,
+}
+
+impl FontProgramKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TrueTypeSupported => "TRUETYPE_SUPPORTED",
+            Self::CffDetectedUnsupported => "CFF_DETECTED_UNSUPPORTED",
+            Self::Cff2DetectedUnsupported => "CFF2_DETECTED_UNSUPPORTED",
+            Self::UnknownFontProgram => "UNKNOWN_FONT_PROGRAM",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Font {
     pub name: String,
@@ -21,6 +40,7 @@ pub struct Font {
     pub encoding: SimpleEncoding,
     pub to_unicode: Option<UnicodeCMap>,
     pub embedded_sfnt: Option<SfntFont>,
+    pub font_program_kind: FontProgramKind,
 }
 
 impl Font {
@@ -39,6 +59,7 @@ impl Font {
             encoding: SimpleEncoding::standard_win_ansi(),
             to_unicode: None,
             embedded_sfnt: None,
+            font_program_kind: FontProgramKind::UnknownFontProgram,
         }
     }
 
@@ -121,7 +142,8 @@ impl Font {
         }
 
         // 4. Resolve embedded TrueType/SFNT data from simple or Type0 descendant fonts.
-        let mut embedded_sfnt = Self::embedded_sfnt_from_font_dict(font_dict, store)?;
+        let (mut font_program_kind, mut embedded_sfnt) =
+            Self::embedded_program_from_font_dict(font_dict, store)?;
 
         // 5. Handle Type0 DescendantFonts /DW and /W if composite
         if is_composite {
@@ -148,8 +170,10 @@ impl Font {
                                 composite_identity_mapping =
                                     identity_encoding && identity_cid_to_gid;
                                 if embedded_sfnt.is_none() {
-                                    embedded_sfnt =
-                                        Self::embedded_sfnt_from_font_dict(cid_dict, store)?;
+                                    let (descendant_kind, descendant_sfnt) =
+                                        Self::embedded_program_from_font_dict(cid_dict, store)?;
+                                    font_program_kind = descendant_kind;
+                                    embedded_sfnt = descendant_sfnt;
                                 }
                                 if let Some(dw) = cid_dict.get("DW").and_then(|v| v.as_f64()) {
                                     default_width = dw;
@@ -174,15 +198,16 @@ impl Font {
             encoding,
             to_unicode,
             embedded_sfnt,
+            font_program_kind,
         })
     }
 
-    fn embedded_sfnt_from_font_dict(
+    fn embedded_program_from_font_dict(
         font_dict: &BTreeMap<String, PdfObject>,
         store: &mut ObjectStore<'_>,
-    ) -> PdfResult<Option<SfntFont>> {
+    ) -> PdfResult<(FontProgramKind, Option<SfntFont>)> {
         let Some(descriptor) = font_dict.get("FontDescriptor") else {
-            return Ok(None);
+            return Ok((FontProgramKind::UnknownFontProgram, None));
         };
         let descriptor = store.resolve_object(descriptor)?;
         let Some(descriptor_dict) = descriptor.as_dict() else {
@@ -191,11 +216,14 @@ impl Font {
                 actual: descriptor.type_name(),
             });
         };
-        let Some(font_file) = descriptor_dict
-            .get("FontFile2")
-            .or_else(|| descriptor_dict.get("FontFile3"))
-        else {
-            return Ok(None);
+        let (font_file_key, font_file) = if let Some(file) = descriptor_dict.get("FontFile2") {
+            ("FontFile2", file)
+        } else if let Some(file) = descriptor_dict.get("FontFile3") {
+            ("FontFile3", file)
+        } else if let Some(file) = descriptor_dict.get("FontFile") {
+            ("FontFile", file)
+        } else {
+            return Ok((FontProgramKind::UnknownFontProgram, None));
         };
         let font_file = store.resolve_object(font_file)?;
         let stream = font_file
@@ -222,7 +250,43 @@ impl Font {
             }
             None => stream.data.clone(),
         };
-        SfntFont::parse(&data).map(Some)
+        let stream_subtype = stream.dict.get("Subtype").and_then(PdfObject::as_name);
+        let kind = Self::detect_font_program(font_file_key, stream_subtype, &data)?;
+        let sfnt = if kind == FontProgramKind::TrueTypeSupported {
+            Some(SfntFont::parse(&data)?)
+        } else {
+            None
+        };
+        Ok((kind, sfnt))
+    }
+
+    pub fn detect_font_program(
+        font_file_key: &str,
+        stream_subtype: Option<&str>,
+        data: &[u8],
+    ) -> PdfResult<FontProgramKind> {
+        if font_file_key == "FontFile3"
+            && matches!(stream_subtype, Some("Type1C" | "CIDFontType0C"))
+        {
+            return Ok(FontProgramKind::CffDetectedUnsupported);
+        }
+        let is_sfnt = data.starts_with(&[0x00, 0x01, 0x00, 0x00])
+            || data.starts_with(b"true")
+            || data.starts_with(b"OTTO");
+        if !is_sfnt {
+            return Ok(FontProgramKind::UnknownFontProgram);
+        }
+        let directory = crate::font::sfnt::TableDirectory::parse(data)?;
+        if directory.tables.contains_key(b"CFF2") {
+            return Ok(FontProgramKind::Cff2DetectedUnsupported);
+        }
+        if directory.tables.contains_key(b"CFF ") {
+            return Ok(FontProgramKind::CffDetectedUnsupported);
+        }
+        if directory.tables.contains_key(b"glyf") && directory.tables.contains_key(b"loca") {
+            return Ok(FontProgramKind::TrueTypeSupported);
+        }
+        Ok(FontProgramKind::UnknownFontProgram)
     }
 
     /// Decodes a byte sequence into individual character glyph representations and advances.
@@ -296,5 +360,52 @@ impl Font {
         // Priority 4: Fallback char from code
         let fallback = char::from_u32(code).unwrap_or('\u{FFFD}');
         (fallback.to_string(), width)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Font, FontProgramKind};
+
+    fn sfnt(tags: &[[u8; 4]]) -> Vec<u8> {
+        let mut output = vec![0u8; 12 + tags.len() * 16];
+        output[0..4].copy_from_slice(b"OTTO");
+        output[4..6].copy_from_slice(&(tags.len() as u16).to_be_bytes());
+        let table_offset = output.len() as u32;
+        for (index, tag) in tags.iter().enumerate() {
+            let record = 12 + index * 16;
+            output[record..record + 4].copy_from_slice(tag);
+            output[record + 8..record + 12].copy_from_slice(&table_offset.to_be_bytes());
+        }
+        output
+    }
+
+    #[test]
+    fn detects_supported_and_unsupported_font_programs_without_guessing() {
+        assert_eq!(
+            Font::detect_font_program("FontFile2", None, &sfnt(&[*b"glyf", *b"loca"]))
+                .unwrap_or(FontProgramKind::UnknownFontProgram),
+            FontProgramKind::TrueTypeSupported
+        );
+        assert_eq!(
+            Font::detect_font_program("FontFile3", Some("OpenType"), &sfnt(&[*b"CFF "]))
+                .unwrap_or(FontProgramKind::UnknownFontProgram),
+            FontProgramKind::CffDetectedUnsupported
+        );
+        assert_eq!(
+            Font::detect_font_program("FontFile3", Some("OpenType"), &sfnt(&[*b"CFF2"]))
+                .unwrap_or(FontProgramKind::UnknownFontProgram),
+            FontProgramKind::Cff2DetectedUnsupported
+        );
+        assert_eq!(
+            Font::detect_font_program("FontFile3", Some("Type1C"), &[1, 0, 4, 4])
+                .unwrap_or(FontProgramKind::UnknownFontProgram),
+            FontProgramKind::CffDetectedUnsupported
+        );
+        assert_eq!(
+            Font::detect_font_program("FontFile", None, b"%!PS-AdobeFont")
+                .unwrap_or(FontProgramKind::TrueTypeSupported),
+            FontProgramKind::UnknownFontProgram
+        );
     }
 }

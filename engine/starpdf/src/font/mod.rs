@@ -8,6 +8,6 @@ pub mod subset;
 
 pub use cmap::UnicodeCMap;
 pub use encoding::SimpleEncoding;
-pub use font::Font;
+pub use font::{Font, FontProgramKind};
 pub use resource::PageResources;
 pub use sfnt::SfntFont;

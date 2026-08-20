@@ -65,3 +65,12 @@ Classification: `SECURITY_HARDENING`.
 - Nine final bounded campaigns executed 11,823,541 inputs with zero crash, hang, OOM, or reproducer. Production source retains zero exact `.unwrap()`/`.expect()` occurrences and forbids unsafe Rust.
 
 Classification: `SECURITY_HARDENING`.
+
+## 7. v0.10 Hostile-Input Findings
+
+- AcroForm inheritance and page-widget recovery are cycle-checked and bounded to 32 ancestors, 1,000 fields, 2,000 annotations/widgets per page, and 5,000 options. Recovery follows known page annotation references only; it never scans arbitrary objects or aliases by name.
+- AP inspection/regeneration bounds dictionary/state entries and preserves unrelated N/R/D data. NeedAppearances is cleared only after a complete normal-appearance proof.
+- Link URI parsing is capped at 8,192 bytes. CFF/CFF2/unknown font programs have distinct typed mutation refusals and are never treated as TrueType.
+- Twelve bounded libFuzzer campaigns across ten targets executed 31,396,831 inputs with zero crash, hang, OOM, or reproducer. Production source retains zero exact `.unwrap()`/`.expect()` occurrences and forbids unsafe Rust.
+
+Classification: `SECURITY_HARDENING`.

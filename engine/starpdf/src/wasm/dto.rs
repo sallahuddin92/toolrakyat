@@ -63,6 +63,7 @@ pub struct WasmChoiceOption {
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct WasmWidget {
     pub object_num: u64,
     pub object_gen: u16,
@@ -70,6 +71,9 @@ pub struct WasmWidget {
     pub rect: [f64; 4],
     pub appearance_state: Option<String>,
     pub normal_appearance_states: Vec<String>,
+    pub has_normal_appearance: bool,
+    pub has_rollover_appearance: bool,
+    pub has_down_appearance: bool,
     pub is_checked: bool,
 }
 
@@ -112,6 +116,10 @@ pub struct WasmAnnotation {
     pub line_endings: Option<[String; 2]>,
     pub quad_points: Vec<f64>,
     pub ink_list: Vec<Vec<[f64; 2]>>,
+    pub uri: Option<String>,
+    pub has_normal_appearance: bool,
+    pub has_rollover_appearance: bool,
+    pub has_down_appearance: bool,
 }
 
 #[cfg(feature = "wasm")]

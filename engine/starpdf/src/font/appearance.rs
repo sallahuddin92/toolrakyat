@@ -361,6 +361,8 @@ impl AppearanceFontResolver {
             ("FontFile2".to_string(), file)
         } else if let Some(file) = descriptor_dictionary.get("FontFile3") {
             ("FontFile3".to_string(), file)
+        } else if let Some(file) = descriptor_dictionary.get("FontFile") {
+            ("FontFile".to_string(), file)
         } else {
             return Ok(None);
         };

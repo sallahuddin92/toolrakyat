@@ -151,6 +151,211 @@ async function createType0AppearanceFixture(): Promise<Buffer> {
   );
 }
 
+type ProducerMutation =
+  | { kind: "add-square" }
+  | { kind: "text"; name: string; value: string; occurrence?: number }
+  | { kind: "checkbox"; name: string; checked: boolean }
+  | { kind: "choice"; name: string; values: string[] }
+  | { kind: "radio"; name: string; widgetIndex: number }
+  | {
+      kind: "annotation";
+      subtype: string;
+      input: Record<string, unknown>;
+    };
+
+async function mutateProducerFixture(
+  page: import("@playwright/test").Page,
+  bytes: Buffer,
+  mutations: ProducerMutation[],
+) {
+  return page.evaluate(
+    async ({ inputBytes, requestedMutations }) => {
+      type WorkerMessage = Record<string, unknown> & {
+        id: string;
+        success?: boolean;
+        type: string;
+      };
+      type Widget = {
+        object_num: number;
+        object_gen: number;
+        normal_appearance_states: string[];
+        has_normal_appearance: boolean;
+        has_rollover_appearance: boolean;
+        has_down_appearance: boolean;
+      };
+      type Field = {
+        name: string;
+        object_num: number;
+        object_gen: number;
+        value: string;
+        widgets: Widget[];
+      };
+      type Annotation = {
+        subtype: string;
+        object_num: number;
+        object_gen: number;
+        contents?: string;
+        uri?: string;
+        has_normal_appearance: boolean;
+        has_rollover_appearance: boolean;
+        has_down_appearance: boolean;
+      };
+      const worker = new Worker("/starpdf.worker.js", { type: "module" });
+      let requestId = 0;
+      const request = (message: Omit<WorkerMessage, "id">): Promise<WorkerMessage> => {
+        const id = `producer-${++requestId}`;
+        return new Promise((resolve, reject) => {
+          const onMessage = (event: MessageEvent<WorkerMessage>) => {
+            if (event.data.id !== id) return;
+            worker.removeEventListener("message", onMessage);
+            resolve(event.data);
+          };
+          worker.addEventListener("message", onMessage);
+          worker.addEventListener("error", reject, { once: true });
+          worker.postMessage({ ...message, id });
+        });
+      };
+
+      const init = await request({ type: "init" });
+      const open = await request({
+        type: "open",
+        buffer: new Uint8Array(inputBytes).buffer,
+      });
+      const handle = open.handle as number;
+      const fieldResponse = await request({ type: "getFormFields", handle });
+      const fields = fieldResponse.fields as Field[];
+      const annotationResponse = await request({
+        type: "getAnnotations",
+        handle,
+        pageIndex: 0,
+      });
+      const annotations = annotationResponse.annotations as Annotation[];
+      const beforePreservation = annotations.map((annotation) => ({
+        subtype: annotation.subtype,
+        normal: annotation.has_normal_appearance,
+        rollover: annotation.has_rollover_appearance,
+        down: annotation.has_down_appearance,
+      }));
+
+      for (const mutation of requestedMutations as ProducerMutation[]) {
+        if (mutation.kind === "add-square") {
+          await request({
+            type: "addAnnotation",
+            handle,
+            pageIndex: 0,
+            input: {
+              subtype: "Square",
+              rect: [500, 735, 530, 765],
+              color: [0.05, 0.35, 0.8],
+              border_width: 2,
+            },
+          });
+          continue;
+        }
+        if (mutation.kind === "annotation") {
+          const annotation = annotations.find(
+            (candidate) => candidate.subtype === mutation.subtype,
+          );
+          if (!annotation) throw new Error(`Missing annotation ${mutation.subtype}`);
+          await request({
+            type: "updateAnnotation",
+            handle,
+            objectNum: annotation.object_num,
+            objectGen: annotation.object_gen,
+            input: mutation.input,
+          });
+          continue;
+        }
+        const matches = fields.filter((candidate) => candidate.name === mutation.name);
+        const field = matches[mutation.kind === "text" ? mutation.occurrence ?? 0 : 0];
+        if (!field) throw new Error(`Missing producer field ${mutation.name}`);
+        if (mutation.kind === "text") {
+          await request({
+            type: "setTextField",
+            handle,
+            objectNum: field.object_num,
+            objectGen: field.object_gen,
+            value: mutation.value,
+          });
+        } else if (mutation.kind === "checkbox") {
+          await request({
+            type: "setCheckbox",
+            handle,
+            objectNum: field.object_num,
+            objectGen: field.object_gen,
+            checked: mutation.checked,
+          });
+        } else if (mutation.kind === "choice") {
+          await request({
+            type: "setChoiceValues",
+            handle,
+            objectNum: field.object_num,
+            objectGen: field.object_gen,
+            values: mutation.values,
+          });
+        } else {
+          const widget = field.widgets[mutation.widgetIndex];
+          const onState = widget?.normal_appearance_states.find((state) => state !== "Off");
+          if (!widget || !onState) throw new Error(`Missing radio state for ${mutation.name}`);
+          await request({
+            type: "setRadio",
+            handle,
+            parentNum: field.object_num,
+            parentGen: field.object_gen,
+            widgetNum: widget.object_num,
+            widgetGen: widget.object_gen,
+            onState,
+          });
+        }
+      }
+
+      const exported = await request({ type: "exportIncremental", handle });
+      if (!exported.success) throw new Error(`StarPDF export failed: ${String(exported.error)}`);
+      const output = exported.bytes as Uint8Array;
+      const status = await request({ type: "getAppearanceStatus", handle });
+      const reopen = await request({ type: "open", buffer: output.slice().buffer });
+      const afterFields = await request({
+        type: "getFormFields",
+        handle: reopen.handle as number,
+      });
+      const afterAnnotations = await request({
+        type: "getAnnotations",
+        handle: reopen.handle as number,
+        pageIndex: 0,
+      });
+      await request({ type: "close", handle });
+      await request({ type: "close", handle: reopen.handle as number });
+      worker.terminate();
+      return {
+        version: init.version,
+        output: Array.from(output),
+        status: status.status,
+        fields: afterFields.fields as Field[],
+        annotations: afterAnnotations.annotations as Annotation[],
+        beforePreservation,
+        prefixPreserved: output
+          .slice(0, inputBytes.length)
+          .every((value, index) => value === inputBytes[index]),
+      };
+    },
+    { inputBytes: Array.from(bytes), requestedMutations: mutations },
+  );
+}
+
+async function changedRegionRatio(
+  before: Buffer,
+  after: Buffer,
+  region: { left: number; top: number; width: number; height: number },
+) {
+  const beforePixels = await sharp(before).extract(region).raw().toBuffer();
+  const afterPixels = await sharp(after).extract(region).raw().toBuffer();
+  let changedChannels = 0;
+  for (let index = 0; index < beforePixels.length; index += 1) {
+    if (Math.abs(beforePixels[index] - afterPixels[index]) > 8) changedChannels += 1;
+  }
+  return changedChannels / beforePixels.length;
+}
+
 test.describe("SmartPDF — Advanced PDF Editor", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/tools/pdf/editor");
@@ -520,7 +725,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       };
     }, Array.from(fixture));
 
-    expect(workerResult.version).toBe("0.9.0");
+    expect(workerResult.version).toBe("0.10.0");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
@@ -822,5 +1027,264 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       if (Math.abs(originalRegion[index] - mutatedRegion[index]) > 8) changedChannels += 1;
     }
     expect(changedChannels / originalRegion.length).toBeGreaterThan(0.005);
+  });
+
+  test("StarPDF visibly mutates PDFKit producer text and checkbox widgets without name aliasing", async ({
+    page,
+  }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf",
+      ),
+    );
+    const originalCanvas = await uploadPdfBytes(page, "pdfkit-text-checkbox.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+    const result = await mutateProducerFixture(page, fixture, [
+      {
+        kind: "text",
+        name: "pdfkit.person.name",
+        occurrence: 0,
+        value: "Only first PDFKit widget changed",
+      },
+      { kind: "checkbox", name: "pdfkit.agree", checked: false },
+    ]);
+    expect(result.version).toBe("0.10.0");
+    expect(result.status).toBe("AP_REGENERATED");
+    expect(result.prefixPreserved).toBe(true);
+    const shared = result.fields.filter((field) => field.name === "pdfkit.person.name");
+    expect(shared.map((field) => field.value)).toEqual([
+      "Only first PDFKit widget changed",
+      "PDFKit multi-widget 2",
+    ]);
+    expect(result.fields.find((field) => field.name === "pdfkit.agree")?.value).toBe("false");
+
+    await page.reload();
+    const changedCanvas = await uploadPdfBytes(
+      page,
+      "pdfkit-text-checkbox-v0.10.pdf",
+      Buffer.from(result.output),
+    );
+    const changedPng = await changedCanvas.screenshot();
+    expect(
+      await changedRegionRatio(originalPng, changedPng, {
+        left: 40,
+        top: 65,
+        width: 530,
+        height: 230,
+      }),
+    ).toBeGreaterThan(0.002);
+  });
+
+  test("StarPDF visibly mutates producer radio and choice fields", async ({ page }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_10_compat/pdflib-complete-form.pdf",
+      ),
+    );
+    const originalCanvas = await uploadPdfBytes(page, "pdflib-complete-form.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+    const result = await mutateProducerFixture(page, fixture, [
+      { kind: "choice", name: "country", values: ["Singapore"] },
+      { kind: "radio", name: "priority", widgetIndex: 0 },
+    ]);
+    expect(result.status).toBe("AP_REGENERATED");
+    expect(result.prefixPreserved).toBe(true);
+    expect(result.fields.find((field) => field.name === "country")?.value).toBe("Singapore");
+    // pdf-lib encodes radio export states as the widget indexes /0 and /1.
+    expect(result.fields.find((field) => field.name === "priority")?.value).toBe("0");
+
+    await page.reload();
+    const changedCanvas = await uploadPdfBytes(
+      page,
+      "pdflib-radio-choice-v0.10.pdf",
+      Buffer.from(result.output),
+    );
+    const changedPng = await changedCanvas.screenshot();
+    expect(
+      await changedRegionRatio(originalPng, changedPng, {
+        left: 40,
+        top: 245,
+        width: 260,
+        height: 100,
+      }),
+    ).toBeGreaterThan(0.001);
+  });
+
+  test("StarPDF visibly mutates a PDFKit page-rotated and widget-rotated text field", async ({
+    page,
+  }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-rotated-widget.pdf",
+      ),
+    );
+    const originalCanvas = await uploadPdfBytes(page, "pdfkit-rotated-widget.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+    const result = await mutateProducerFixture(page, fixture, [
+      {
+        kind: "text",
+        name: "pdfkit.rotated",
+        value: "Rotated exact producer update",
+      },
+    ]);
+    expect(result.status).toBe("AP_REGENERATED");
+    expect(result.fields.find((field) => field.name === "pdfkit.rotated")?.value).toBe(
+      "Rotated exact producer update",
+    );
+    await page.reload();
+    const changedCanvas = await uploadPdfBytes(
+      page,
+      "pdfkit-rotated-widget-v0.10.pdf",
+      Buffer.from(result.output),
+    );
+    const changedPng = await changedCanvas.screenshot();
+    const metadata = await sharp(originalPng).metadata();
+    expect(
+      await changedRegionRatio(originalPng, changedPng, {
+        left: 180,
+        top: 70,
+        width: 90,
+        height: Math.min(290, (metadata.height ?? 0) - 70),
+      }),
+    ).toBeGreaterThan(0.001);
+  });
+
+  test("StarPDF regenerates PDFKit FreeText and Highlight while preserving unrelated AP", async ({
+    page,
+  }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-markup-freetext.pdf",
+      ),
+    );
+    const originalCanvas = await uploadPdfBytes(page, "pdfkit-markup-freetext.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+    const result = await mutateProducerFixture(page, fixture, [
+      {
+        kind: "annotation",
+        subtype: "FreeText",
+        input: { contents: "StarPDF regenerated PDFKit FreeText", color: [0, 0.45, 0.2] },
+      },
+      {
+        kind: "annotation",
+        subtype: "Highlight",
+        input: { color: [0.2, 0.8, 1] },
+      },
+    ]);
+    expect(result.status).toBe("AP_REGENERATED");
+    expect(
+      result.annotations.find((annotation) => annotation.subtype === "FreeText")?.contents,
+    ).toBe("StarPDF regenerated PDFKit FreeText");
+    expect(
+      result.annotations.find((annotation) => annotation.subtype === "Underline")
+        ?.has_normal_appearance,
+    ).toBe(true);
+    await page.reload();
+    const changedCanvas = await uploadPdfBytes(
+      page,
+      "pdfkit-annotations-v0.10.pdf",
+      Buffer.from(result.output),
+    );
+    const changedPng = await changedCanvas.screenshot();
+    expect(
+      await changedRegionRatio(originalPng, changedPng, {
+        left: 40,
+        top: 115,
+        width: 285,
+        height: 180,
+      }),
+    ).toBeGreaterThan(0.002);
+  });
+
+  test("StarPDF regenerates a PDFKit Line and preserves unrelated shape and Link data", async ({
+    page,
+  }) => {
+    const fixture = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-shapes-ink-link.pdf",
+      ),
+    );
+    const originalCanvas = await uploadPdfBytes(page, "pdfkit-shapes-ink-link.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+    const result = await mutateProducerFixture(page, fixture, [
+      {
+        kind: "annotation",
+        subtype: "Line",
+        input: {
+          line_points: [55, 525, 265, 565],
+          line_endings: ["OpenArrow", "ClosedArrow"],
+          color: [0.8, 0.1, 0.2],
+          border_width: 3,
+        },
+      },
+      {
+        kind: "annotation",
+        subtype: "Square",
+        input: { contents: "Semantic-only square note" },
+      },
+    ]);
+    expect(result.status).toBe("AP_REGENERATED");
+    expect(
+      result.annotations.find((annotation) => annotation.subtype === "Square")
+        ?.has_normal_appearance,
+    ).toBe(true);
+    expect(result.annotations.find((annotation) => annotation.subtype === "Link")?.uri).toBe(
+      "https://example.invalid/starpdf-v0.10",
+    );
+    await page.reload();
+    const changedCanvas = await uploadPdfBytes(
+      page,
+      "pdfkit-line-v0.10.pdf",
+      Buffer.from(result.output),
+    );
+    const changedPng = await changedCanvas.screenshot();
+    expect(
+      await changedRegionRatio(originalPng, changedPng, {
+        left: 40,
+        top: 210,
+        width: 250,
+        height: 90,
+      }),
+    ).toBeGreaterThan(0.001);
+  });
+
+  test("all v0.10 producer fixtures complete incremental export, reopen, and PDF.js render", async ({
+    page,
+  }) => {
+    const fixtureIds = [
+      "pdfkit-choice-radio",
+      "pdfkit-markup-freetext",
+      "pdfkit-rotated-widget",
+      "pdfkit-shapes-ink-link",
+      "pdfkit-text-checkbox",
+      "pdflib-complete-form",
+      "pdflib-inherited-field",
+      "pdflib-needappearances-ap-rd",
+      "pdflib-starpdf-two-revisions",
+    ];
+    for (const fixtureId of fixtureIds) {
+      const fixture = fs.readFileSync(
+        path.join(
+          process.cwd(),
+          `engine/starpdf/tests/fixtures/v0_10_compat/${fixtureId}.pdf`,
+        ),
+      );
+      const result = await mutateProducerFixture(page, fixture, [{ kind: "add-square" }]);
+      expect(result.status, fixtureId).toBe("AP_REGENERATED");
+      expect(result.prefixPreserved, fixtureId).toBe(true);
+      expect(result.annotations.length, fixtureId).toBe(result.beforePreservation.length + 1);
+      await page.reload();
+      const canvas = await uploadPdfBytes(
+        page,
+        `${fixtureId}-v0.10-roundtrip.pdf`,
+        Buffer.from(result.output),
+      );
+      expect((await canvas.screenshot()).byteLength, fixtureId).toBeGreaterThan(1_000);
+    }
   });
 });

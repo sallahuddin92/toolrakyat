@@ -8,6 +8,9 @@ pub struct WidgetAnnotation {
     pub rect: [f64; 4],
     pub appearance_state: Option<String>,
     pub normal_appearance_states: Vec<String>,
+    pub has_normal_appearance: bool,
+    pub has_rollover_appearance: bool,
+    pub has_down_appearance: bool,
     pub flags: u32,
     pub parent_ref: Option<ObjectRef>,
 }

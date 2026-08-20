@@ -168,3 +168,21 @@ name = "fuzz_search_fragment_recovery"
 path = "fuzz_targets/fuzz_search_fragment_recovery.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_form_compatibility"
+path = "fuzz_targets/fuzz_form_compatibility.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_annotation_compatibility"
+path = "fuzz_targets/fuzz_annotation_compatibility.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_font_program_detection"
+path = "fuzz_targets/fuzz_font_program_detection.rs"
+test = false
+doc = false
