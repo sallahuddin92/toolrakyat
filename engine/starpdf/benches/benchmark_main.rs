@@ -1,4 +1,4 @@
-#![allow(clippy::all, clippy::pedantic, clippy::let_unit_value)]
+#![allow(clippy::all, clippy::pedantic, clippy::let_unit_value, unused_imports)]
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -6,7 +6,9 @@ use std::time::Instant;
 use starpdf::content::ContentParser;
 use starpdf::document::{ObjectStreamReader, PdfDocument};
 use starpdf::filter::{DecompressLimits, FlateDecoder};
+use starpdf::font::sfnt::{HeadTable, HheaTable, HmtxTable, MaxpTable, SfntCmapTable, SfntFont};
 use starpdf::font::{Font, PageResources, UnicodeCMap};
+use starpdf::search::{DocumentSearchIndex, SearchOptions};
 use starpdf::syntax::object::{PdfObject, StreamObject};
 use starpdf::syntax::{Lexer, Parser};
 use starpdf::text::TextExtractor;
@@ -16,7 +18,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.3 Micro-Benchmark Suite             ");
+    println!("          StarPDF Engine v0.4 Micro-Benchmark Suite             ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -87,29 +89,37 @@ fn main() {
         );
     }
 
-    // 4. ToUnicode CMap Parser
+    // 4. SFNT Table & Cmap Parser
     {
-        let cmap_data = b"
-/CIDInit /ProcSet findresource begin
-12 dict begin
-begincmap
-1 begincodespacerange <0001> <FFFF> endcodespacerange
-10 beginbfchar
-<0001> <0041> <0002> <0042> <0003> <0043> <0004> <0044> <0005> <0045>
-<0006> <0046> <0007> <0047> <0008> <0048> <0009> <0049> <000A> <004A>
-endbfchar
-endcmap
-end
-";
+        let mut cmap_data = Vec::new();
+        cmap_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x01]);
+        cmap_data.extend_from_slice(&12u32.to_be_bytes());
+        let mut subtable = Vec::new();
+        subtable.extend_from_slice(&4u16.to_be_bytes());
+        subtable.extend_from_slice(&32u16.to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        subtable.extend_from_slice(&4u16.to_be_bytes());
+        subtable.extend_from_slice(&[0x00, 0x04, 0x00, 0x01, 0x00, 0x00]);
+        subtable.extend_from_slice(&65u16.to_be_bytes());
+        subtable.extend_from_slice(&0xFFFFu16.to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        subtable.extend_from_slice(&65u16.to_be_bytes());
+        subtable.extend_from_slice(&0xFFFFu16.to_be_bytes());
+        subtable.extend_from_slice(&(-64i16).to_be_bytes());
+        subtable.extend_from_slice(&1i16.to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        cmap_data.extend_from_slice(&subtable);
+
         let iterations = 10_000;
         let start = Instant::now();
         for _ in 0..iterations {
-            let _ = UnicodeCMap::parse(cmap_data).unwrap();
+            let _ = SfntCmapTable::parse(&cmap_data).unwrap();
         }
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "4. CMap Stream Parsing:      {:>8} ns/op  ({:.2?} for {} parses)",
+            "4. SFNT Cmap Parsing:        {:>8} ns/op  ({:.2?} for {} parses)",
             ns_per_op, elapsed, iterations
         );
     }
@@ -149,7 +159,28 @@ ET
         );
     }
 
-    // 6. XRef Stream Parser Throughput
+    // 6. Text Search Index & Phrase Matching
+    {
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let search_index = doc.build_search_index().unwrap();
+        let options = SearchOptions::default();
+
+        let iterations = 20_000;
+        let start = Instant::now();
+        let mut hit_count = 0;
+        for _ in 0..iterations {
+            let hits = search_index.search("Benchmark", &options);
+            hit_count += hits.len();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "6. Search Index Query:       {:>8} ns/op  ({:.2?} for {} queries, {} hits)",
+            ns_per_op, elapsed, iterations, hit_count
+        );
+    }
+
+    // 7. XRef Stream Parser Throughput
     {
         let mut dict = BTreeMap::new();
         dict.insert("Type".into(), PdfObject::Name("XRef".into()));
@@ -184,12 +215,12 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "6. XRef Stream Parsing:      {:>8} ns/op  ({:.2?} for {} 100-entry streams)",
+            "7. XRef Stream Parsing:      {:>8} ns/op  ({:.2?} for {} 100-entry streams)",
             ns_per_op, elapsed, iterations
         );
     }
 
-    // 7. Compressed Object Resolution (ObjStm)
+    // 8. Compressed Object Resolution (ObjStm)
     {
         let mut dict = BTreeMap::new();
         dict.insert("Type".into(), PdfObject::Name("ObjStm".into()));
@@ -221,14 +252,14 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / (iterations * 2) as u128;
         println!(
-            "7. ObjStm Object Extraction: {:>8} ns/op  ({:.2?} for {} extractions)",
+            "8. ObjStm Object Extraction: {:>8} ns/op  ({:.2?} for {} extractions)",
             ns_per_op,
             elapsed,
             iterations * 2
         );
     }
 
-    // 8. Document Open & XRef Resolution
+    // 9. Document Open & XRef Resolution
     {
         let iterations = 10_000;
         let start = Instant::now();
@@ -238,12 +269,12 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "8. Document Open & XRef:     {:>8} ns/op  ({:.2?} for {} opens)",
+            "9. Document Open & XRef:     {:>8} ns/op  ({:.2?} for {} opens)",
             ns_per_op, elapsed, iterations
         );
     }
 
-    // 9. Page Tree Traversal
+    // 10. Page Tree Traversal
     {
         let iterations = 10_000;
         let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
@@ -255,29 +286,8 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "9. Page Tree Resolution:     {:>8} ns/op  ({:.2?} for {} resolutions)",
+            "10. Page Tree Resolution:    {:>8} ns/op  ({:.2?} for {} resolutions)",
             ns_per_op, elapsed, iterations
-        );
-    }
-
-    // 10. Content Stream Parser
-    {
-        let content_stream =
-            b"q 1 0 0 1 50 700 cm BT /F1 12 Tf (Hello World) Tj T* (Second Line) Tj ET Q";
-        let iterations = 10_000;
-        let start = Instant::now();
-        let mut op_count = 0;
-        for _ in 0..iterations {
-            let mut parser = ContentParser::from_bytes(content_stream);
-            let instrs = parser.parse_instructions().unwrap();
-            op_count += instrs.len();
-        }
-        let elapsed = start.elapsed();
-        let total_bytes = content_stream.len() * iterations;
-        let mb_per_sec = (total_bytes as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
-        println!(
-            "10. Content Stream Parser:   {:>8.2} MB/s  ({} instructions in {:.2?})",
-            mb_per_sec, op_count, elapsed
         );
     }
     println!("================================================================");

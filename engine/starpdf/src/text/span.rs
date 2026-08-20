@@ -79,4 +79,13 @@ impl PageText {
 
         full_text
     }
+
+    /// Searches for a query string in this page text.
+    pub fn search(
+        &self,
+        query: &str,
+        options: &crate::search::SearchOptions,
+    ) -> Vec<crate::search::SearchResult> {
+        crate::search::TextMatcher::search_page(self, query, options)
+    }
 }
