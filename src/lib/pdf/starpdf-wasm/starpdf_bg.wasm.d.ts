@@ -1,6 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const starpdf_add_annotation: (a: number, b: number, c: any) => [number, number, number];
 export const starpdf_close: (a: number) => [number, number, number];
 export const starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
 export const starpdf_export_incremental: (a: number) => [number, number, number, number];
@@ -11,15 +12,19 @@ export const starpdf_get_form_fields: (a: number) => [number, number, number];
 export const starpdf_get_info: (a: number) => [number, number, number];
 export const starpdf_get_page_count: (a: number) => [number, number, number];
 export const starpdf_open: (a: number, b: number) => [number, number, number];
+export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
 export const starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
 export const starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
 export const starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
 export const starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+export const starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
 export const starpdf_validate: (a: number) => [number, number, number];
 export const starpdf_version: () => [number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

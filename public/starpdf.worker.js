@@ -5,6 +5,7 @@
 
 /* eslint-disable no-restricted-globals */
 import initWasm, {
+  starpdf_add_annotation,
   starpdf_close,
   starpdf_create_minimal_pdf,
   starpdf_export_incremental,
@@ -15,16 +16,27 @@ import initWasm, {
   starpdf_get_info,
   starpdf_get_page_count,
   starpdf_open,
+  starpdf_remove_annotation,
   starpdf_search,
   starpdf_set_checkbox,
   starpdf_set_choice,
   starpdf_set_radio,
   starpdf_set_text_field,
+  starpdf_update_annotation,
   starpdf_validate,
   starpdf_version,
 } from "/starpdf_wasm/starpdf.js";
 
 let initialized = false;
+
+function classifyError(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/handle/i.test(message)) return { code: "INVALID_HANDLE", message };
+  if (/limit|maximum|exceed/i.test(message)) return { code: "RESOURCE_LIMIT", message };
+  if (/unsupported/i.test(message)) return { code: "UNSUPPORTED", message };
+  if (/parse|syntax|header|xref|PDF/i.test(message)) return { code: "INVALID_PDF", message };
+  return { code: "ENGINE_ERROR", message };
+}
 
 async function ensureInit(wasmUrl = "/starpdf_wasm/starpdf_bg.wasm") {
   if (!initialized) {
@@ -119,6 +131,21 @@ self.onmessage = async (event) => {
         self.postMessage({ type: "setChoice", id: req.id, success: true });
         break;
       }
+      case "addAnnotation": {
+        starpdf_add_annotation(req.handle, req.pageIndex, req.input);
+        self.postMessage({ type: "addAnnotation", id: req.id, success: true });
+        break;
+      }
+      case "updateAnnotation": {
+        starpdf_update_annotation(req.handle, BigInt(req.objectNum), req.objectGen, req.input);
+        self.postMessage({ type: "updateAnnotation", id: req.id, success: true });
+        break;
+      }
+      case "removeAnnotation": {
+        starpdf_remove_annotation(req.handle, req.pageIndex, BigInt(req.objectNum), req.objectGen);
+        self.postMessage({ type: "removeAnnotation", id: req.id, success: true });
+        break;
+      }
       case "exportIncremental": {
         const bytes = starpdf_export_incremental(req.handle);
         self.postMessage({ type: "exportIncremental", id: req.id, success: true, bytes }, [bytes.buffer]);
@@ -143,11 +170,13 @@ self.onmessage = async (event) => {
         });
     }
   } catch (err) {
+    const failure = classifyError(err);
     self.postMessage({
       type: "error",
       id: req.id,
       success: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: failure.message,
+      code: failure.code,
     });
   }
 };

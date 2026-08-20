@@ -55,3 +55,16 @@
 
 - **No Novelty Claimed:** Standard ISO 32000-1 AcroForm tree hierarchy, standard incremental update syntax (section 7.5.6), standard `wasm-bindgen` bindings.
 - **Engineering Contribution:** Independent Safe Rust engine (`#![forbid(unsafe_code)]`, 0 unwrap/expect in production code), single-pass contiguous xref grouping, sub-microsecond incremental serialization (355 ns), UTF-16 BE BOM automatic field name decoding.
+
+---
+
+## 5. Milestone Ledger Entry: v0.7
+
+- **Starting SHA:** `efb56d36d181a6f28b0422e30b0d1ba1e6f27b7c`
+- **Milestone SHA:** commit containing this ledger entry
+- **Classification:** `CONVENTIONAL_ENGINEERING`, `SECURITY_HARDENING`, `PERFORMANCE_OPTIMIZATION`
+- **Fuzz result:** 18,292,731 bounded executions; 0 crashes, hangs, OOMs, or unique reproducers.
+- **Differential result:** StarPDF and pdf-lib reopen and agree on mutated form values; PDF.js renders the incremental result and shows a bounded-region pixel change.
+- **Preservation result:** every incremental result retains the input as an exact byte prefix.
+- **Refusal result:** invalid geometry, non-finite numbers, oversized annotation data, wrong-page removals, excess mutations, and excess output growth return deterministic typed errors without partial output.
+- **Observed mechanism:** combining explicit appearance outcomes across an atomic mutation batch avoids treating a logical-only update as visually complete. This is classified as `CONVENTIONAL_ENGINEERING`; no patentability claim is made.

@@ -36,3 +36,7 @@ StarPDF represents an independent, resource-bounded native Rust engine compiled 
 1. **Standard Technology Use:** WebAssembly (`wasm-bindgen`) and Web Worker message passing are standard web engineering practices and constitute no novel claim.
 2. **PDF Specification Compliance:** ISO 32000-1 parsing algorithms (XRef streams, Object streams, `/ToUnicode` CMaps, SFNT format 4/12 tables, AcroForm hierarchies, incremental updates under §7.5.6) follow standard open specifications.
 3. **Differential Findings:** Disagreements across engines in malformed edge cases reflect differences in leniency vs strict validation rather than proprietary inventions.
+
+## 4. v0.7 Boundary Update
+
+Form XObject appearance streams, AcroForm `/DA` parsing, annotation dictionaries, and incremental updates are standard PDF mechanisms (`STANDARD_PDF_IMPLEMENTATION`). Safe Rust validation, atomic mutation overlays, explicit appearance status propagation, typed worker errors, and visual differential testing are classified as `CONVENTIONAL_ENGINEERING` or `SECURITY_HARDENING`. No patentability claim is made.

@@ -237,10 +237,10 @@ fn test_acroform_radio_group_and_choices() {
     ]);
     objects.insert(widget2_ref, PdfObject::Dictionary(w2_dict));
 
-    // Radio parent field (flags bit 17 = 1 << 16: Radio)
+    // Radio parent field (flags bit 16 = 1 << 15: Radio)
     let mut radio_dict = BTreeMap::new();
     radio_dict.insert("FT".to_string(), PdfObject::Name("Btn".to_string()));
-    radio_dict.insert("Ff".to_string(), PdfObject::Integer(1 << 16));
+    radio_dict.insert("Ff".to_string(), PdfObject::Integer(1 << 15));
     radio_dict.insert("T".to_string(), PdfObject::String(b"gender".to_vec()));
     radio_dict.insert("V".to_string(), PdfObject::Name("Male".to_string()));
     radio_dict.insert(

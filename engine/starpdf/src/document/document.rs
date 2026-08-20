@@ -242,7 +242,8 @@ impl<'a> PdfDocument<'a> {
         &mut self,
         changes: &[crate::mutation::PdfChange],
     ) -> PdfResult<crate::mutation::MutationPlan> {
-        let mut engine = crate::mutation::MutationEngine::new(&mut self.store);
+        let page_refs = self.page_refs()?;
+        let mut engine = crate::mutation::MutationEngine::new(&mut self.store, &page_refs);
         engine.prepare_plan(changes)
     }
 

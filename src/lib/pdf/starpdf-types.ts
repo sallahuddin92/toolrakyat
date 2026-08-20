@@ -91,6 +91,26 @@ export interface StarPdfAnnotation {
   appearance_state?: string;
 }
 
+export interface StarPdfAddAnnotationInput {
+  subtype: "FreeText" | "Square" | "Circle" | "Line" | "Highlight" | "Underline" | "StrikeOut" | "Ink" | "Link";
+  rect: [number, number, number, number];
+  contents?: string;
+  font_size?: number;
+  color?: number[];
+  fill_color?: number[];
+  border_width?: number;
+  quad_points?: number[];
+  line_points?: [number, number, number, number];
+  ink_list?: [number, number][][];
+  uri?: string;
+}
+
+export interface StarPdfUpdateAnnotationInput {
+  rect?: [number, number, number, number];
+  contents?: string;
+  color?: number[];
+}
+
 /**
  * Worker Protocol Request Messages
  */
@@ -118,6 +138,9 @@ export type StarPdfWorkerRequest =
       onState: string;
     }
   | { type: "setChoice"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
+  | { type: "addAnnotation"; id: string; handle: number; pageIndex: number; input: StarPdfAddAnnotationInput }
+  | { type: "updateAnnotation"; id: string; handle: number; objectNum: number; objectGen: number; input: StarPdfUpdateAnnotationInput }
+  | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objectNum: number; objectGen: number }
   | { type: "exportIncremental"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
   | { type: "createMinimal"; id: string; text: string };
@@ -140,7 +163,16 @@ export type StarPdfWorkerResponse =
   | { type: "setCheckbox"; id: string; success: true }
   | { type: "setRadio"; id: string; success: true }
   | { type: "setChoice"; id: string; success: true }
+  | { type: "addAnnotation"; id: string; success: true }
+  | { type: "updateAnnotation"; id: string; success: true }
+  | { type: "removeAnnotation"; id: string; success: true }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "close"; id: string; success: true }
   | { type: "createMinimal"; id: string; success: true; bytes: Uint8Array }
-  | { type: "error"; id: string; success: false; error: string; code?: string };
+  | {
+      type: "error";
+      id: string;
+      success: false;
+      error: string;
+      code: "INVALID_HANDLE" | "RESOURCE_LIMIT" | "UNSUPPORTED" | "INVALID_PDF" | "ENGINE_ERROR";
+    };

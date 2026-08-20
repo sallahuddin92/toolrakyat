@@ -83,7 +83,7 @@ fn test_fuzz_mutation_engine_random_and_huge_strings() {
         starpdf::xref::table::XrefTable::new(),
     );
 
-    let mut engine = MutationEngine::new(&mut store);
+    let mut engine = MutationEngine::new(&mut store, &[]);
 
     // 1. Target not found
     let res = engine.prepare_plan(&[PdfChange::SetTextField {

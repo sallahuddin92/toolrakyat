@@ -40,7 +40,7 @@ fn test_mutation_text_field() {
     let objects = BTreeMap::from([(field_ref, PdfObject::Dictionary(field_dict))]);
     let mut store = create_test_store(source, objects);
 
-    let mut engine = MutationEngine::new(&mut store);
+    let mut engine = MutationEngine::new(&mut store, &[]);
     let plan = engine
         .prepare_plan(&[PdfChange::SetTextField {
             field_ref,
@@ -55,7 +55,10 @@ fn test_mutation_text_field() {
         dict.get("V"),
         Some(&PdfObject::String(b"NewValue".to_vec()))
     );
-    assert_eq!(plan.appearance_status, AppearanceStatus::LogicalOnlyUpdated);
+    assert_eq!(
+        plan.appearance_status,
+        AppearanceStatus::AppearanceRegenerated
+    );
 }
 
 #[test]
@@ -83,7 +86,7 @@ fn test_mutation_checkbox_toggle() {
     let objects = BTreeMap::from([(field_ref, PdfObject::Dictionary(field_dict))]);
     let mut store = create_test_store(source, objects);
 
-    let mut engine = MutationEngine::new(&mut store);
+    let mut engine = MutationEngine::new(&mut store, &[]);
     let plan = engine
         .prepare_plan(&[PdfChange::SetCheckbox {
             field_ref,
@@ -99,6 +102,6 @@ fn test_mutation_checkbox_toggle() {
     assert_eq!(dict.get("AS"), Some(&PdfObject::Name("Yes".to_string())));
     assert_eq!(
         plan.appearance_status,
-        AppearanceStatus::AppearanceStateUpdated
+        AppearanceStatus::AppearanceRegenerated
     );
 }

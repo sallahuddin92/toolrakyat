@@ -103,3 +103,27 @@ pub struct WasmAnnotation {
     pub name: Option<String>,
     pub appearance_state: Option<String>,
 }
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmAddAnnotationInput {
+    pub subtype: String,
+    pub rect: [f64; 4],
+    pub contents: Option<String>,
+    pub font_size: Option<f64>,
+    pub color: Option<Vec<f64>>,
+    pub fill_color: Option<Vec<f64>>,
+    pub border_width: Option<f64>,
+    pub quad_points: Option<Vec<f64>>,
+    pub line_points: Option<[f64; 4]>,
+    pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
+    pub uri: Option<String>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmUpdateAnnotationInput {
+    pub rect: Option<[f64; 4]>,
+    pub contents: Option<String>,
+    pub color: Option<Vec<f64>>,
+}

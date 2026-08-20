@@ -3,7 +3,10 @@ use miniz_oxide::deflate::compress_to_vec_zlib;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use starpdf::annotation::AnnotationParser;
+use starpdf::annotation::{AnnotationGenerator, AnnotationParser, AnnotationSpec};
+use starpdf::appearance::checkbox::CheckboxAppearance;
+use starpdf::appearance::da_parser::DefaultAppearance;
+use starpdf::appearance::text_field::TextFieldAppearance;
 use starpdf::content::ContentParser;
 use starpdf::document::{ObjectStreamReader, PdfDocument};
 use starpdf::filter::{DecompressLimits, FlateDecoder};
@@ -21,7 +24,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.6 Micro-Benchmark Suite             ");
+    println!("          StarPDF Engine v0.7 Micro-Benchmark Suite             ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -29,7 +32,6 @@ fn main() {
 
     // 1. Lexer Throughput
     {
-        // Warmup pass
         for _ in 0..500 {
             let mut lexer = Lexer::from_bytes(&sample_pdf);
             while let Ok(Some(_)) = lexer.next_token() {}
@@ -48,7 +50,7 @@ fn main() {
         let total_bytes = sample_pdf.len() * iterations;
         let mb_per_sec = (total_bytes as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
         println!(
-            "1. Lexer Throughput:         {:>8.2} MB/s  ({} tokens in {:.2?})",
+            "1.  Lexer Throughput:        {:>8.2} MB/s  ({} tokens in {:.2?})",
             mb_per_sec, token_count, elapsed
         );
     }
@@ -66,7 +68,7 @@ fn main() {
         let total_bytes = dict_data.len() * iterations;
         let mb_per_sec = (total_bytes as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
         println!(
-            "2. Object Parser:            {:>8.2} MB/s  ({} objects parsed in {:.2?})",
+            "2.  Object Parser:           {:>8.2} MB/s  ({} objects parsed in {:.2?})",
             mb_per_sec, iterations, elapsed
         );
     }
@@ -93,7 +95,7 @@ fn main() {
         let total_bytes = large_stream.len() * iterations;
         let mb_per_sec = (total_bytes as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
         println!(
-            "3. FlateDecode Throughput:   {:>8.2} MB/s  ({:.2?} for {} decompressions)",
+            "3.  FlateDecode Throughput:  {:>8.2} MB/s  ({:.2?} for {} decompressions)",
             mb_per_sec, elapsed, iterations
         );
     }
@@ -128,7 +130,7 @@ fn main() {
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "4. SFNT Cmap Parsing:        {:>8} ns/op  ({:.2?} for {} parses)",
+            "4.  SFNT Cmap Parsing:       {:>8} ns/op  ({:.2?} for {} parses)",
             ns_per_op, elapsed, iterations
         );
     }
@@ -163,7 +165,7 @@ ET
         let total_bytes = content_stream.len() * iterations;
         let mb_per_sec = (total_bytes as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64();
         println!(
-            "5. Text Extractor:           {:>8.2} MB/s  ({} spans extracted in {:.2?})",
+            "5.  Text Extractor:          {:>8.2} MB/s  ({} spans extracted in {:.2?})",
             mb_per_sec, span_count, elapsed
         );
     }
@@ -184,7 +186,7 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "6. Search Index Query:       {:>8} ns/op  ({:.2?} for {} queries, {} hits)",
+            "6.  Search Index Query:      {:>8} ns/op  ({:.2?} for {} queries, {} hits)",
             ns_per_op, elapsed, iterations, hit_count
         );
     }
@@ -224,7 +226,7 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "7. XRef Stream Parsing:      {:>8} ns/op  ({:.2?} for {} 100-entry streams)",
+            "7.  XRef Stream Parsing:     {:>8} ns/op  ({:.2?} for {} 100-entry streams)",
             ns_per_op, elapsed, iterations
         );
     }
@@ -261,7 +263,7 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / (iterations * 2) as u128;
         println!(
-            "8. ObjStm Object Extraction: {:>8} ns/op  ({:.2?} for {} extractions)",
+            "8.  ObjStm Object Extraction:{:>8} ns/op  ({:.2?} for {} extractions)",
             ns_per_op,
             elapsed,
             iterations * 2
@@ -278,7 +280,7 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "9. Document Open & XRef:     {:>8} ns/op  ({:.2?} for {} opens)",
+            "9.  Document Open & XRef:    {:>8} ns/op  ({:.2?} for {} opens)",
             ns_per_op, elapsed, iterations
         );
     }
@@ -319,7 +321,7 @@ ET
         let elapsed = start.elapsed();
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
-            "11. Incremental Serialization:{:>8} ns/op  ({:.2?} for {} updates)",
+            "11. Incremental Serialization:{:>7} ns/op  ({:.2?} for {} updates)",
             ns_per_op, elapsed, iterations
         );
     }
@@ -345,7 +347,7 @@ ET
             for (r, obj) in &objects {
                 store.insert_cached(*r, obj.clone());
             }
-            let mut engine = MutationEngine::new(&mut store);
+            let mut engine = MutationEngine::new(&mut store, &[]);
             let _ = engine
                 .prepare_plan(&[PdfChange::SetTextField {
                     field_ref,
@@ -357,6 +359,122 @@ ET
         let ns_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
             "12. Mutation Plan Eval:      {:>8} ns/op  ({:.2?} for {} plans)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
+    // 13. Text Appearance Generation
+    {
+        let rect = [50.0, 50.0, 250.0, 80.0];
+        let da = DefaultAppearance::default();
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = TextFieldAppearance::generate_stream(
+                rect,
+                "Sample Appearance Text Value",
+                &da,
+                0,
+                false,
+            )
+            .unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "13. Text Appearance Gen:     {:>8} ns/op  ({:.2?} for {} streams)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
+    // 14. Checkbox Appearance Generation
+    {
+        let rect = [10.0, 10.0, 30.0, 30.0];
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = CheckboxAppearance::generate_on_stream(rect).unwrap();
+            let _ = CheckboxAppearance::generate_off_stream(rect).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / (iterations * 2) as u128;
+        println!(
+            "14. Checkbox Appearance Gen: {:>8} ns/op  ({:.2?} for {} on/off streams)",
+            ns_per_op,
+            elapsed,
+            iterations * 2
+        );
+    }
+
+    // 15. Annotation Object Generation
+    {
+        let spec = AnnotationSpec::Square {
+            rect: [100.0, 100.0, 250.0, 200.0],
+            stroke_color: Some(vec![1.0, 0.0, 0.0]),
+            fill_color: Some(vec![0.9, 0.9, 0.9]),
+            border_width: Some(2.0),
+        };
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = AnnotationGenerator::generate_annotation_objects(&spec).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "15. Annotation Gen:          {:>8} ns/op  ({:.2?} for {} objects)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
+    // 16. Annotation Mutation Transaction Planning
+    {
+        let change = PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::Square {
+                rect: [100.0, 100.0, 250.0, 200.0],
+                stroke_color: Some(vec![1.0, 0.0, 0.0]),
+                fill_color: None,
+                border_width: Some(2.0),
+            },
+        };
+        let iterations = 10_000;
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = doc.apply_mutation(std::slice::from_ref(&change)).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "16. Annotation Mutation:     {:>8} ns/op  ({:.2?} for {} plans)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
+    // 17. Incremental Export + Reopen
+    {
+        let change = PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::FreeText {
+                rect: [100.0, 100.0, 250.0, 140.0],
+                text: "Benchmark note".to_string(),
+                font_size: Some(12.0),
+                color: Some(vec![0.0]),
+            },
+        };
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let plan = doc.apply_mutation(&[change]).unwrap();
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let output = doc.export_incremental(&plan).unwrap();
+            let _ = PdfDocument::from_bytes(&output).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "17. Export + Reopen:         {:>8} ns/op  ({:.2?} for {} roundtrips)",
             ns_per_op, elapsed, iterations
         );
     }

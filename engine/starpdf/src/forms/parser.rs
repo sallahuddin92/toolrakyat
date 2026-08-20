@@ -365,11 +365,11 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
                 }
             }
             Some("Btn") => {
-                if (flags & (1 << 16)) != 0 {
-                    // Bit 17: Radio
+                if (flags & (1 << 15)) != 0 {
+                    // Bit 16: Radio
                     FieldType::RadioButtonGroup
-                } else if (flags & (1 << 15)) != 0 {
-                    // Bit 16: Pushbutton
+                } else if (flags & (1 << 16)) != 0 {
+                    // Bit 17: Pushbutton
                     FieldType::PushButton
                 } else {
                     FieldType::Checkbox

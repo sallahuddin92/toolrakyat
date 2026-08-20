@@ -36,6 +36,7 @@
 )]
 
 pub mod annotation;
+pub mod appearance;
 pub mod content;
 pub mod document;
 pub mod error;
@@ -53,7 +54,11 @@ pub mod wasm;
 pub mod writer;
 pub mod xref;
 
-pub use annotation::{Annotation, AnnotationParser, AnnotationSubtype};
+pub use annotation::{
+    Annotation, AnnotationGenerator, AnnotationParser, AnnotationSpec, AnnotationSubtype,
+    AnnotationUpdateSpec,
+};
+pub use appearance::{AppearanceGenerator, AppearanceStatus, DefaultAppearance, PdfColor};
 pub use content::{ContentInstruction, ContentOperand, ContentOperator, ContentParser};
 pub use document::{
     DecodedObjectStream, ObjectStore, ObjectStoreMetrics, ObjectStreamReader, PageTree, PdfDocument,
@@ -65,7 +70,7 @@ pub use forms::{
     AcroForm, AcroFormParser, ChoiceOption, FieldType, FieldValue, FormField, WidgetAnnotation,
 };
 pub use io::{ByteCursor, ByteSource};
-pub use mutation::{AppearanceStatus, MutationEngine, MutationPlan, PdfChange};
+pub use mutation::{MutationEngine, MutationPlan, PdfChange};
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
     TextMatcher,
