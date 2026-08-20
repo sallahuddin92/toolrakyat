@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { suggestCategory, suggestCategories } from "./category-suggestions";
-import type { CategorySuggestion } from "./category-suggestions";
 
 // ---------------------------------------------------------------------------
 // Helpers

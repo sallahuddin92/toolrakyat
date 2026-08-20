@@ -84,26 +84,12 @@ describe("protectRoute", () => {
   it("redirects when no session", async () => {
     vi.mocked(verifySession).mockResolvedValue(null);
 
-    // protectRoute calls redirect(), which throws a NEXT_REDIRECT error.
-    // We catch it to verify it was called.
-    let redirectCalled = false;
     try {
       await protectRoute();
-    } catch (e: unknown) {
-      // Next.js redirect throws an error with a specific digest
-      if (
-        e instanceof Error &&
-        "digest" in e &&
-        String((e as Record<string, unknown>).digest).startsWith("NEXT_REDIRECT")
-      ) {
-        redirectCalled = true;
-      } else if (e instanceof Error && e.message.includes("redirect")) {
-        // Fallback: some test runners may not have the actual redirect impl
-        redirectCalled = true;
-      }
+    } catch {
+      // Next.js redirect throws an error (NEXT_REDIRECT)
     }
 
-    // If no redirect error was thrown, we check that verifySession was at least called
     expect(verifySession).toHaveBeenCalledOnce();
     // In the mock environment, redirect may not actually throw NEXT_REDIRECT;
     // the key assertion is that we reached the redirect path
