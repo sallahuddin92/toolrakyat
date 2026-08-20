@@ -15,111 +15,113 @@ impl TextMatcher {
             return Vec::new();
         }
 
-        // 1. Build concatenated string with mapping from char index to (span_index, char_in_span)
-        let mut full_text = String::new();
+        // 1. Build character array with mapping from char index to (span_index, char_in_span)
+        let mut char_vec: Vec<char> = Vec::new();
         let mut char_map: Vec<(usize, usize)> = Vec::new();
 
         for (span_idx, span) in page_text.spans.iter().enumerate() {
-            if !full_text.is_empty() && !full_text.ends_with(' ') {
-                full_text.push(' ');
+            if !char_vec.is_empty() && char_vec.last() != Some(&' ') {
+                char_vec.push(' ');
                 // Sentinel for inter-span separator space
                 char_map.push((span_idx, usize::MAX));
             }
 
             for (char_idx, ch) in span.text.chars().enumerate() {
-                full_text.push(ch);
+                char_vec.push(ch);
                 char_map.push((span_idx, char_idx));
             }
         }
 
-        // 2. Perform search
-        let hay = if options.case_sensitive {
-            full_text.clone()
+        let full_text: String = char_vec.iter().collect();
+
+        let query_chars: Vec<char> = if options.case_sensitive {
+            trimmed_query.chars().collect()
         } else {
-            full_text.to_lowercase()
+            trimmed_query.to_lowercase().chars().collect()
         };
 
-        let needle = if options.case_sensitive {
-            trimmed_query.to_string()
+        let hay_chars: Vec<char> = if options.case_sensitive {
+            char_vec.clone()
         } else {
-            trimmed_query.to_lowercase()
+            full_text.to_lowercase().chars().collect()
         };
+
+        if query_chars.is_empty() || hay_chars.len() < query_chars.len() {
+            return Vec::new();
+        }
 
         let mut results = Vec::new();
-        let mut search_start = 0;
+        let query_len = query_chars.len();
 
-        while let Some(found_pos) = hay[search_start..].find(&needle) {
-            let match_start_char = search_start + found_pos;
-            let match_end_char = match_start_char + needle.len();
-            search_start = match_start_char + 1;
+        for i in 0..=(hay_chars.len() - query_len) {
+            if hay_chars[i..i + query_len] == query_chars[..] {
+                let match_start_char = i;
+                let match_end_char = i + query_len;
 
-            if match_end_char > char_map.len() {
-                break;
-            }
+                let matched_text: String =
+                    char_vec[match_start_char..match_end_char].iter().collect();
 
-            // Extract the original matched text substring
-            let matched_text = full_text[match_start_char..match_end_char].to_string();
+                // Find participating span range
+                let mut span_sub_slices: Vec<(usize, usize, usize)> = Vec::new(); // (span_idx, min_char, max_char)
 
-            // Find participating span range
-            let mut span_sub_slices: Vec<(usize, usize, usize)> = Vec::new(); // (span_idx, min_char, max_char)
-
-            for char_idx in match_start_char..match_end_char {
-                let (span_idx, char_in_span) = char_map[char_idx];
-                if char_in_span == usize::MAX {
-                    continue; // Skip separator space
-                }
-
-                if let Some(last) = span_sub_slices.last_mut() {
-                    if last.0 == span_idx {
-                        last.2 = last.2.max(char_in_span + 1);
-                        continue;
+                for &item in char_map.iter().take(match_end_char).skip(match_start_char) {
+                    let (span_idx, char_in_span) = item;
+                    if char_in_span == usize::MAX {
+                        continue; // Skip separator space
                     }
+
+                    if let Some(last) = span_sub_slices.last_mut() {
+                        if last.0 == span_idx {
+                            last.2 = last.2.max(char_in_span + 1);
+                            continue;
+                        }
+                    }
+                    span_sub_slices.push((span_idx, char_in_span, char_in_span + 1));
                 }
-                span_sub_slices.push((span_idx, char_in_span, char_in_span + 1));
+
+                if span_sub_slices.is_empty() {
+                    continue;
+                }
+
+                let start_span_index = span_sub_slices.first().map_or(0, |s| s.0);
+                let end_span_index = span_sub_slices.last().map_or(0, |s| s.0);
+
+                // Generate bounding boxes for each span segment
+                let mut boxes = Vec::with_capacity(span_sub_slices.len());
+                let mut min_confidence: f64 = 1.0;
+
+                for &(span_idx, min_c, max_c) in &span_sub_slices {
+                    let span = &page_text.spans[span_idx];
+                    min_confidence = min_confidence.min(span.confidence);
+
+                    let total_chars = span.text.chars().count().max(1);
+                    let frac_start = min_c as f64 / total_chars as f64;
+                    let frac_len = (max_c - min_c) as f64 / total_chars as f64;
+
+                    let sub_width = span.width * frac_len;
+                    let rad = span.rotation.to_radians();
+                    let delta_x = (span.width * frac_start) * rad.cos();
+                    let delta_y = (span.width * frac_start) * rad.sin();
+
+                    boxes.push(SearchBoundingBox::new(
+                        page_text.page_index,
+                        span.x + delta_x,
+                        span.y + delta_y,
+                        sub_width,
+                        span.height,
+                        span.rotation,
+                    ));
+                }
+
+                results.push(SearchResult {
+                    page_index: page_text.page_index,
+                    matched_text,
+                    start_span_index,
+                    end_span_index,
+                    boxes,
+                    confidence: min_confidence,
+                });
             }
-
-            if span_sub_slices.is_empty() {
-                continue;
-            }
-
-            let start_span_index = span_sub_slices.first().map_or(0, |s| s.0);
-            let end_span_index = span_sub_slices.last().map_or(0, |s| s.0);
-
-            // Generate bounding boxes for each span segment
-            let mut boxes = Vec::with_capacity(span_sub_slices.len());
-            let mut min_confidence: f64 = 1.0;
-
-            for &(span_idx, min_c, max_c) in &span_sub_slices {
-                let span = &page_text.spans[span_idx];
-                min_confidence = min_confidence.min(span.confidence);
-
-                let total_chars = span.text.chars().count().max(1);
-                let frac_start = min_c as f64 / total_chars as f64;
-                let frac_len = (max_c - min_c) as f64 / total_chars as f64;
-
-                let sub_width = span.width * frac_len;
-                let rad = span.rotation.to_radians();
-                let delta_x = (span.width * frac_start) * rad.cos();
-                let delta_y = (span.width * frac_start) * rad.sin();
-
-                boxes.push(SearchBoundingBox::new(
-                    page_text.page_index,
-                    span.x + delta_x,
-                    span.y + delta_y,
-                    sub_width,
-                    span.height,
-                    span.rotation,
-                ));
-            }
-
-            results.push(SearchResult {
-                page_index: page_text.page_index,
-                matched_text,
-                start_span_index,
-                end_span_index,
-                boxes,
-                confidence: min_confidence,
-            });
         }
 
         results
