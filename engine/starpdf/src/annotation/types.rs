@@ -1,5 +1,42 @@
 use crate::syntax::object::ObjectRef;
 
+/// Line ending styles implemented by the v0.8 appearance generator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineEndingStyle {
+    #[default]
+    None,
+    Square,
+    Circle,
+    Diamond,
+    OpenArrow,
+    ClosedArrow,
+}
+
+impl LineEndingStyle {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "None" => Some(Self::None),
+            "Square" => Some(Self::Square),
+            "Circle" => Some(Self::Circle),
+            "Diamond" => Some(Self::Diamond),
+            "OpenArrow" => Some(Self::OpenArrow),
+            "ClosedArrow" => Some(Self::ClosedArrow),
+            _ => None,
+        }
+    }
+
+    pub const fn as_name(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Square => "Square",
+            Self::Circle => "Circle",
+            Self::Diamond => "Diamond",
+            Self::OpenArrow => "OpenArrow",
+            Self::ClosedArrow => "ClosedArrow",
+        }
+    }
+}
+
 /// Standard annotation subtypes defined in ISO 32000-1 §12.5.6.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnnotationSubtype {
@@ -74,6 +111,12 @@ pub struct Annotation {
     pub flags: u32,
     pub appearance_state: Option<String>,
     pub color: Option<Vec<f64>>,
+    pub interior_color: Option<Vec<f64>>,
+    pub border_width: Option<f64>,
+    pub line_points: Option<[f64; 4]>,
+    pub line_endings: Option<[LineEndingStyle; 2]>,
+    pub quad_points: Vec<f64>,
+    pub ink_list: Vec<Vec<[f64; 2]>>,
     pub is_hidden: bool,
     pub is_invisible: bool,
     pub is_print: bool,
@@ -118,7 +161,10 @@ pub enum AnnotationSpec {
     Line {
         line_points: [f64; 4],
         stroke_color: Option<Vec<f64>>,
+        fill_color: Option<Vec<f64>>,
         stroke_width: Option<f64>,
+        line_endings: [LineEndingStyle; 2],
+        contents: Option<String>,
     },
     Ink {
         rect: [f64; 4],
@@ -143,12 +189,26 @@ impl AnnotationSpec {
             | Self::Circle { rect, .. }
             | Self::Ink { rect, .. }
             | Self::Link { rect, .. } => *rect,
-            Self::Line { line_points, .. } => {
+            Self::Line {
+                line_points,
+                stroke_width,
+                line_endings,
+                ..
+            } => {
                 let x1 = line_points[0].min(line_points[2]);
                 let y1 = line_points[1].min(line_points[3]);
                 let x2 = line_points[0].max(line_points[2]);
                 let y2 = line_points[1].max(line_points[3]);
-                [x1, y1, x2, y2]
+                let ending_pad = if line_endings
+                    .iter()
+                    .any(|ending| *ending != LineEndingStyle::None)
+                {
+                    8.0
+                } else {
+                    2.0
+                };
+                let pad = stroke_width.unwrap_or(1.0).clamp(0.1, 20.0) + ending_pad;
+                [x1 - pad, y1 - pad, x2 + pad, y2 + pad]
             }
         }
     }
@@ -160,4 +220,10 @@ pub struct AnnotationUpdateSpec {
     pub rect: Option<[f64; 4]>,
     pub contents: Option<String>,
     pub color: Option<Vec<f64>>,
+    pub fill_color: Option<Vec<f64>>,
+    pub border_width: Option<f64>,
+    pub line_points: Option<[f64; 4]>,
+    pub line_endings: Option<[LineEndingStyle; 2]>,
+    pub quad_points: Option<Vec<f64>>,
+    pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
 }

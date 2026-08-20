@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 #[cfg(feature = "wasm")]
+use crate::appearance::AppearanceStatus;
+#[cfg(feature = "wasm")]
 use crate::document::PdfDocument;
 #[cfg(feature = "wasm")]
 use crate::error::{PdfError, PdfResult};
@@ -19,6 +21,7 @@ const MAX_PENDING_CHANGES: usize = 500;
 pub struct DocumentHandleEntry {
     pub raw_bytes: Vec<u8>,
     pub pending_changes: Vec<PdfChange>,
+    pub last_appearance_status: AppearanceStatus,
 }
 
 #[cfg(feature = "wasm")]
@@ -60,6 +63,7 @@ impl DocumentRegistry {
             DocumentHandleEntry {
                 raw_bytes: bytes,
                 pending_changes: Vec::new(),
+                last_appearance_status: AppearanceStatus::AppearancePreserved,
             },
         );
 
@@ -113,13 +117,27 @@ impl DocumentRegistry {
             .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
 
         let mut doc = PdfDocument::from_bytes(&entry.raw_bytes)?;
-        let new_bytes = doc.mutate_and_export(&entry.pending_changes)?;
+        let plan = doc.apply_mutation(&entry.pending_changes)?;
+        let status = plan.appearance_status;
+        let new_bytes = doc.export_incremental(&plan)?;
 
         // Update handle state so subsequent mutations build incrementally
         entry.raw_bytes.clone_from(&new_bytes);
         entry.pending_changes.clear();
+        entry.last_appearance_status = status;
 
         Ok(new_bytes)
+    }
+
+    pub fn last_appearance_status(&self, handle: u32) -> PdfResult<AppearanceStatus> {
+        let map = self
+            .handles
+            .lock()
+            .map_err(|_| PdfError::InvalidOperation("DocumentRegistry lock poisoned".into()))?;
+        let entry = map
+            .get(&handle)
+            .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
+        Ok(entry.last_appearance_status)
     }
 
     pub fn close(&self, handle: u32) -> PdfResult<bool> {

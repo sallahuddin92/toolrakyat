@@ -16,11 +16,11 @@ pub enum AppearanceStatus {
 impl AppearanceStatus {
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::ValueUpdated => "VALUE_UPDATED",
-            Self::StateUpdated => "STATE_UPDATED",
-            Self::AppearanceRegenerated => "APPEARANCE_REGENERATED",
-            Self::AppearancePreserved => "APPEARANCE_PRESERVED",
-            Self::AppearanceUnsupported => "APPEARANCE_UNSUPPORTED",
+            Self::ValueUpdated => "AP_NOT_REQUIRED",
+            Self::StateUpdated => "AP_NOT_REQUIRED",
+            Self::AppearanceRegenerated => "AP_REGENERATED",
+            Self::AppearancePreserved => "AP_PRESERVED",
+            Self::AppearanceUnsupported => "AP_UNSUPPORTED",
         }
     }
 

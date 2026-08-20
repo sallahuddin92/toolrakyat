@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 
-use crate::annotation::generator::AnnotationGenerator;
 use crate::annotation::generator::MAX_ANNOTATION_CONTENTS_LEN;
+use crate::annotation::generator::{AnnotationAppearance, AnnotationGenerator};
 use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec};
+use crate::appearance::choice::{ChoiceAppearance, MAX_LIST_OPTIONS, MAX_MULTI_SELECT_INDEXES};
 use crate::appearance::da_parser::DefaultAppearance;
 use crate::appearance::generator::AppearanceGenerator;
 use crate::appearance::status::AppearanceStatus;
+use crate::appearance::text_field::{TextFieldAppearance, TextLayoutOptions, MAX_COMB_CELLS};
 use crate::document::object_store::ObjectStore;
 use crate::error::{PdfError, PdfResult};
+use crate::font::appearance::AppearanceFontResolver;
 use crate::forms::field::FieldType;
 use crate::mutation::change::PdfChange;
 use crate::mutation::result::MutationPlan;
@@ -95,7 +98,26 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                             "Choice field value exceeds maximum permitted length".into(),
                         ));
                     }
-                    self.mutate_choice(*field_ref, value, &mut modified_objects)?;
+                    self.mutate_choice(
+                        *field_ref,
+                        std::slice::from_ref(value),
+                        &mut modified_objects,
+                    )?;
+                    overall_status =
+                        overall_status.combine(AppearanceStatus::AppearanceRegenerated);
+                }
+                PdfChange::SetChoiceValues { field_ref, values } => {
+                    if values.is_empty() || values.len() > MAX_MULTI_SELECT_INDEXES {
+                        return Err(PdfError::InvalidOperation(format!(
+                            "Choice selection must contain 1..={MAX_MULTI_SELECT_INDEXES} values"
+                        )));
+                    }
+                    if values.iter().any(|value| value.len() > MAX_FIELD_VALUE_LEN) {
+                        return Err(PdfError::InvalidOperation(
+                            "Choice field value exceeds maximum permitted length".into(),
+                        ));
+                    }
+                    self.mutate_choice(*field_ref, values, &mut modified_objects)?;
                     overall_status =
                         overall_status.combine(AppearanceStatus::AppearanceRegenerated);
                 }
@@ -113,8 +135,9 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     overall_status = overall_status.combine(status);
                 }
                 PdfChange::UpdateAnnotation { annot_ref, update } => {
-                    self.mutate_update_annotation(*annot_ref, update, &mut modified_objects)?;
-                    overall_status = overall_status.combine(AppearanceStatus::AppearancePreserved);
+                    let status =
+                        self.mutate_update_annotation(*annot_ref, update, &mut modified_objects)?;
+                    overall_status = overall_status.combine(status);
                 }
                 PdfChange::RemoveAnnotation {
                     page_index,
@@ -153,7 +176,6 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         );
 
         // 2. Parse field properties
-        let rect = self.extract_rect_from_dict(&dict)?;
         let da_str = dict
             .get("DA")
             .and_then(|v| v.as_string_lossy())
@@ -170,27 +192,83 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .and_then(|v| v.as_integer())
             .map_or(0, |i| i.max(0) as u32);
         let multiline = (flags & (1 << 12)) != 0;
-
-        let field_type = FieldType::Text {
-            multiline,
-            password: (flags & (1 << 13)) != 0,
+        let password = (flags & (1 << 13)) != 0;
+        let comb = (flags & (1 << 24)) != 0;
+        if comb && (multiline || password) {
+            return Err(PdfError::InvalidOperation(
+                "Comb text fields cannot be multiline or password fields".into(),
+            ));
+        }
+        let comb_max_len = if comb {
+            let raw = dict
+                .get("MaxLen")
+                .and_then(PdfObject::as_integer)
+                .ok_or_else(|| {
+                    PdfError::InvalidOperation("Comb text field requires a positive /MaxLen".into())
+                })?;
+            let value = usize::try_from(raw).map_err(|_| {
+                PdfError::InvalidOperation("Comb /MaxLen must be a positive integer".into())
+            })?;
+            if value == 0 || value > MAX_COMB_CELLS {
+                return Err(PdfError::InvalidOperation(format!(
+                    "Comb /MaxLen must be within 1..={MAX_COMB_CELLS}"
+                )));
+            }
+            Some(value)
+        } else {
+            None
         };
 
-        // 3. Regenerate /AP Form XObject if widget dimensions are present
-        if rect[2] > rect[0] && rect[3] > rect[1] {
-            let (ap_obj, _) = AppearanceGenerator::generate_widget_ap(
-                &field_type,
+        let rendered_value = if password {
+            "*".repeat(value.chars().count())
+        } else {
+            value.to_string()
+        };
+
+        let widget_refs = self.widget_refs_from_field(&dict)?;
+        let appearance_targets = if widget_refs.is_empty() {
+            vec![field_ref]
+        } else {
+            widget_refs
+        };
+        let field_properties = dict.clone();
+        modified.insert(field_ref, PdfObject::Dictionary(dict));
+
+        // 3. Regenerate each widget's /AP. Terminal fields can either be their own
+        // widget or own separate widget annotations through /Kids.
+        for widget_ref in appearance_targets {
+            let mut widget_dict = self.get_dict_for_modification(widget_ref, modified)?;
+            let rect = self.extract_rect_from_dict(&widget_dict)?;
+            if rect[2] <= rect[0] || rect[3] <= rect[1] {
+                continue;
+            }
+            let resolved_font = AppearanceFontResolver::resolve(
+                self.store,
+                &field_properties,
+                &self.page_refs,
+                &da.font_name,
+                &rendered_value,
+            )?;
+            let stream = TextFieldAppearance::generate_stream_with_font(
                 rect,
-                value,
+                &rendered_value,
                 &da,
                 quadding,
-                None,
-                false,
+                TextLayoutOptions {
+                    multiline,
+                    comb_max_len,
+                },
+                Some(&resolved_font),
             )?;
-            dict.insert("AP".to_string(), ap_obj);
+            widget_dict.insert(
+                "AP".to_string(),
+                PdfObject::Dictionary(BTreeMap::from([(
+                    "N".to_string(),
+                    PdfObject::Stream(stream),
+                )])),
+            );
+            modified.insert(widget_ref, PdfObject::Dictionary(widget_dict));
         }
-
-        modified.insert(field_ref, PdfObject::Dictionary(dict));
         Ok(())
     }
 
@@ -319,16 +397,79 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
     fn mutate_choice(
         &mut self,
         field_ref: ObjectRef,
-        value: &str,
+        values: &[String],
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<()> {
         let mut dict = self.get_dict_for_modification(field_ref, modified)?;
-        dict.insert(
-            "V".to_string(),
-            PdfObject::String(value.as_bytes().to_vec()),
-        );
+        let flags = dict
+            .get("Ff")
+            .and_then(PdfObject::as_integer)
+            .map_or(0, |value| value.max(0) as u32);
+        let combo = (flags & (1 << 17)) != 0;
+        let multi_select = (flags & (1 << 21)) != 0;
+        if values.len() > 1 && (!multi_select || combo) {
+            return Err(PdfError::InvalidOperation(
+                "Multiple values require a multi-select list box".into(),
+            ));
+        }
+        let options = self.resolve_choice_options(&dict)?;
+        if !combo && options.is_empty() {
+            return Err(PdfError::InvalidOperation(
+                "List box is missing required /Opt entries".into(),
+            ));
+        }
+        let mut selected = Vec::with_capacity(values.len());
+        let mut display_values = Vec::with_capacity(values.len());
+        for value in values {
+            let matched = options
+                .iter()
+                .enumerate()
+                .find_map(|(index, (export, display))| {
+                    (export == value).then(|| (index, display.clone()))
+                });
+            if let Some((index, display)) = matched {
+                selected.push(index);
+                display_values.push(display);
+            } else if combo {
+                display_values.push(value.clone());
+            } else {
+                return Err(PdfError::InvalidOperation(format!(
+                    "Choice value is not present in /Opt: {value}"
+                )));
+            }
+        }
+        selected.sort_unstable();
+        selected.dedup();
+        if !combo && selected.len() != values.len() {
+            return Err(PdfError::InvalidOperation(
+                "Choice selection contains duplicate values".into(),
+            ));
+        }
+        let value_object = if values.len() == 1 {
+            PdfObject::String(values[0].as_bytes().to_vec())
+        } else {
+            PdfObject::Array(
+                values
+                    .iter()
+                    .map(|value| PdfObject::String(value.as_bytes().to_vec()))
+                    .collect(),
+            )
+        };
+        dict.insert("V".to_string(), value_object);
+        if selected.is_empty() {
+            dict.remove("I");
+        } else {
+            dict.insert(
+                "I".to_string(),
+                PdfObject::Array(
+                    selected
+                        .iter()
+                        .map(|index| PdfObject::Integer(*index as i64))
+                        .collect(),
+                ),
+            );
+        }
 
-        let rect = self.extract_rect_from_dict(&dict)?;
         let da_str = dict
             .get("DA")
             .and_then(|v| v.as_string_lossy())
@@ -340,24 +481,132 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .and_then(|v| v.as_integer())
             .map_or(0, |i| i as i32);
 
-        if rect[2] > rect[0] && rect[3] > rect[1] {
-            let (ap_obj, _) = AppearanceGenerator::generate_widget_ap(
-                &FieldType::Choice {
-                    combo: true,
-                    multi_select: false,
-                },
-                rect,
-                value,
-                &da,
-                quadding,
-                None,
-                false,
-            )?;
-            dict.insert("AP".to_string(), ap_obj);
-        }
-
+        let coverage_text = if combo {
+            display_values[0].clone()
+        } else {
+            options
+                .iter()
+                .map(|(_, display)| display.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let widget_refs = self.widget_refs_from_field(&dict)?;
+        let appearance_targets = if widget_refs.is_empty() {
+            vec![field_ref]
+        } else {
+            widget_refs
+        };
+        let field_properties = dict.clone();
         modified.insert(field_ref, PdfObject::Dictionary(dict));
+
+        for widget_ref in appearance_targets {
+            let mut widget_dict = self.get_dict_for_modification(widget_ref, modified)?;
+            let rect = self.extract_rect_from_dict(&widget_dict)?;
+            if rect[2] > rect[0] && rect[3] > rect[1] {
+                let resolved_font = AppearanceFontResolver::resolve(
+                    self.store,
+                    &field_properties,
+                    &self.page_refs,
+                    &da.font_name,
+                    &coverage_text,
+                )?;
+                let stream = if combo {
+                    TextFieldAppearance::generate_stream_with_font(
+                        rect,
+                        &display_values[0],
+                        &da,
+                        quadding,
+                        TextLayoutOptions::default(),
+                        Some(&resolved_font),
+                    )?
+                } else {
+                    let top_index = field_properties
+                        .get("TI")
+                        .and_then(PdfObject::as_integer)
+                        .and_then(|value| usize::try_from(value).ok())
+                        .unwrap_or(0);
+                    let labels: Vec<String> =
+                        options.iter().map(|(_, display)| display.clone()).collect();
+                    ChoiceAppearance::generate_list_stream_with_font(
+                        rect,
+                        &labels,
+                        &selected,
+                        top_index,
+                        &da,
+                        Some(&resolved_font),
+                    )?
+                };
+                widget_dict.insert(
+                    "AP".to_string(),
+                    PdfObject::Dictionary(BTreeMap::from([(
+                        "N".to_string(),
+                        PdfObject::Stream(stream),
+                    )])),
+                );
+            }
+            modified.insert(widget_ref, PdfObject::Dictionary(widget_dict));
+        }
         Ok(())
+    }
+
+    fn resolve_choice_options(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Vec<(String, String)>> {
+        let Some(opt) = dict.get("Opt") else {
+            return Ok(Vec::new());
+        };
+        let resolved = self.store.resolve_object(opt)?;
+        let array = resolved.as_array().ok_or_else(|| PdfError::TypeMismatch {
+            expected: "array",
+            actual: resolved.type_name(),
+        })?;
+        if array.len() > MAX_LIST_OPTIONS {
+            return Err(PdfError::InvalidOperation(format!(
+                "Choice options exceed maximum of {MAX_LIST_OPTIONS}"
+            )));
+        }
+        let mut result = Vec::with_capacity(array.len());
+        let mut total_bytes = 0usize;
+        for item in array {
+            match item {
+                PdfObject::Array(pair) if pair.len() >= 2 => {
+                    let export = pair[0].as_string_lossy().ok_or_else(|| {
+                        PdfError::InvalidOperation("Choice export value must be a string".into())
+                    })?;
+                    let display = pair[1].as_string_lossy().ok_or_else(|| {
+                        PdfError::InvalidOperation("Choice display value must be a string".into())
+                    })?;
+                    total_bytes = total_bytes
+                        .checked_add(export.len())
+                        .and_then(|value| value.checked_add(display.len()))
+                        .ok_or_else(|| {
+                            PdfError::InvalidOperation("Choice option bytes overflow".into())
+                        })?;
+                    result.push((export, display));
+                }
+                PdfObject::String(_) | PdfObject::Name(_) => {
+                    let value = item.as_string_lossy().ok_or_else(|| {
+                        PdfError::InvalidOperation("Choice option must be text".into())
+                    })?;
+                    total_bytes = total_bytes.checked_add(value.len()).ok_or_else(|| {
+                        PdfError::InvalidOperation("Choice option bytes overflow".into())
+                    })?;
+                    result.push((value.clone(), value));
+                }
+                _ => {
+                    return Err(PdfError::InvalidOperation(
+                        "Malformed choice /Opt entry".into(),
+                    ))
+                }
+            }
+            if total_bytes > MAX_FIELD_VALUE_LEN {
+                return Err(PdfError::InvalidOperation(
+                    "Choice option text exceeds maximum aggregate byte limit".into(),
+                ));
+            }
+        }
+        Ok(result)
     }
 
     fn mutate_appearance_state(
@@ -427,9 +676,14 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         annot_ref: ObjectRef,
         update: &AnnotationUpdateSpec,
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
-    ) -> PdfResult<()> {
+    ) -> PdfResult<AppearanceStatus> {
         let mut dict = self.get_dict_for_modification(annot_ref, modified)?;
         Self::validate_annotation_dictionary(&dict)?;
+        let subtype = dict
+            .get("Subtype")
+            .and_then(PdfObject::as_name)
+            .unwrap_or("")
+            .to_string();
 
         if let Some(rect) = update.rect {
             Self::validate_rect(rect, "Annotation update rectangle")?;
@@ -466,8 +720,143 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             dict.insert("C".to_string(), PdfObject::Array(col_objs));
         }
 
+        if let Some(fill_color) = &update.fill_color {
+            if crate::appearance::PdfColor::parse_from_slice(fill_color).is_none() {
+                return Err(PdfError::InvalidOperation(
+                    "Annotation interior color must contain 1, 3, or 4 finite components".into(),
+                ));
+            }
+            dict.insert(
+                "IC".to_string(),
+                PdfObject::Array(fill_color.iter().map(|v| PdfObject::Real(*v)).collect()),
+            );
+        }
+
+        if let Some(width) = update.border_width {
+            if !width.is_finite() || !(0.0..=20.0).contains(&width) {
+                return Err(PdfError::InvalidOperation(
+                    "Annotation border width must be finite and within 0..=20".into(),
+                ));
+            }
+            dict.insert(
+                "BS".to_string(),
+                PdfObject::Dictionary(BTreeMap::from([("W".to_string(), PdfObject::Real(width))])),
+            );
+            dict.insert(
+                "Border".to_string(),
+                PdfObject::Array(vec![
+                    PdfObject::Integer(0),
+                    PdfObject::Integer(0),
+                    PdfObject::Real(width),
+                ]),
+            );
+        }
+
+        if let Some(points) = update.line_points {
+            if !points.iter().all(|value| value.is_finite())
+                || ((points[0] - points[2]).abs() < f64::EPSILON
+                    && (points[1] - points[3]).abs() < f64::EPSILON)
+            {
+                return Err(PdfError::InvalidOperation(
+                    "Line endpoints must be finite and distinct".into(),
+                ));
+            }
+            dict.insert(
+                "L".to_string(),
+                PdfObject::Array(points.iter().map(|value| PdfObject::Real(*value)).collect()),
+            );
+            if update.rect.is_none() {
+                let pad = update.border_width.unwrap_or(1.0).clamp(0.1, 20.0) + 8.0;
+                dict.insert(
+                    "Rect".to_string(),
+                    PdfObject::Array(vec![
+                        PdfObject::Real(points[0].min(points[2]) - pad),
+                        PdfObject::Real(points[1].min(points[3]) - pad),
+                        PdfObject::Real(points[0].max(points[2]) + pad),
+                        PdfObject::Real(points[1].max(points[3]) + pad),
+                    ]),
+                );
+            }
+        }
+
+        if let Some(endings) = update.line_endings {
+            dict.insert(
+                "LE".to_string(),
+                PdfObject::Array(
+                    endings
+                        .iter()
+                        .map(|ending| PdfObject::Name(ending.as_name().to_string()))
+                        .collect(),
+                ),
+            );
+        }
+
+        if let Some(quad_points) = &update.quad_points {
+            dict.insert(
+                "QuadPoints".to_string(),
+                PdfObject::Array(
+                    quad_points
+                        .iter()
+                        .map(|value| PdfObject::Real(*value))
+                        .collect(),
+                ),
+            );
+        }
+
+        if let Some(ink_list) = &update.ink_list {
+            let paths = ink_list
+                .iter()
+                .map(|path| {
+                    PdfObject::Array(
+                        path.iter()
+                            .flat_map(|point| point.iter())
+                            .map(|value| PdfObject::Real(*value))
+                            .collect(),
+                    )
+                })
+                .collect();
+            dict.insert("InkList".to_string(), PdfObject::Array(paths));
+        }
+
+        let visual_change = update.rect.is_some()
+            || update.color.is_some()
+            || update.fill_color.is_some()
+            || update.border_width.is_some()
+            || update.line_points.is_some()
+            || update.line_endings.is_some()
+            || update.quad_points.is_some()
+            || update.ink_list.is_some()
+            || (subtype == "FreeText" && update.contents.is_some());
+
+        let status = if visual_change {
+            match AnnotationGenerator::regenerate_from_dictionary(&dict)? {
+                AnnotationAppearance::Regenerated(stream) => {
+                    let stream_ref = self.allocate_object_ref()?;
+                    modified.insert(stream_ref, PdfObject::Stream(stream));
+                    dict.insert(
+                        "AP".to_string(),
+                        PdfObject::Dictionary(BTreeMap::from([(
+                            "N".to_string(),
+                            PdfObject::Reference(stream_ref),
+                        )])),
+                    );
+                    AppearanceStatus::AppearanceRegenerated
+                }
+                AnnotationAppearance::NotRequired => AppearanceStatus::ValueUpdated,
+                AnnotationAppearance::Unsupported => {
+                    return Err(PdfError::InvalidOperation(format!(
+                        "Unsupported appearance regeneration for annotation subtype /{subtype}"
+                    )))
+                }
+            }
+        } else if dict.contains_key("AP") {
+            AppearanceStatus::AppearancePreserved
+        } else {
+            AppearanceStatus::ValueUpdated
+        };
+
         modified.insert(annot_ref, PdfObject::Dictionary(dict));
-        Ok(())
+        Ok(status)
     }
 
     fn mutate_remove_annotation(
@@ -579,6 +968,33 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             ));
         }
         Ok(rect)
+    }
+
+    fn widget_refs_from_field(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Vec<ObjectRef>> {
+        let Some(kids_object) = dict.get("Kids") else {
+            return Ok(Vec::new());
+        };
+        let resolved = self.store.resolve_object(kids_object)?;
+        let kids = resolved.as_array().ok_or_else(|| PdfError::TypeMismatch {
+            expected: "array",
+            actual: resolved.type_name(),
+        })?;
+        if kids.len() > MAX_WIDGET_REFS_PER_CHANGE {
+            return Err(PdfError::InvalidOperation(format!(
+                "Field widget count exceeds maximum of {MAX_WIDGET_REFS_PER_CHANGE}"
+            )));
+        }
+        let mut refs = Vec::with_capacity(kids.len());
+        for kid in kids {
+            let kid_ref = kid.as_reference().ok_or_else(|| {
+                PdfError::InvalidOperation("Field /Kids entry must be an indirect reference".into())
+            })?;
+            refs.push(kid_ref);
+        }
+        Ok(refs)
     }
 
     fn validate_state_name(state_name: &str) -> PdfResult<()> {

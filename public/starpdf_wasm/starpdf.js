@@ -96,6 +96,29 @@ export function starpdf_get_annotations(handle, page_index) {
 
 /**
  * @param {number} handle
+ * @returns {string}
+ */
+export function starpdf_get_appearance_status(handle) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ret = wasm.starpdf_get_appearance_status(handle);
+        var ptr1 = ret[0];
+        var len1 = ret[1];
+        if (ret[3]) {
+            ptr1 = 0; len1 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred2_0 = ptr1;
+        deferred2_1 = len1;
+        return getStringFromWasm0(ptr1, len1);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * @param {number} handle
  * @returns {any}
  */
 export function starpdf_get_form_fields(handle) {
@@ -201,6 +224,21 @@ export function starpdf_set_choice(handle, obj_num, obj_gen, value) {
     const ptr0 = passStringToWasm0(value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.starpdf_set_choice(handle, obj_num, obj_gen, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {bigint} obj_num
+ * @param {number} obj_gen
+ * @param {any} values_val
+ * @returns {boolean}
+ */
+export function starpdf_set_choice_values(handle, obj_num, obj_gen, values_val) {
+    const ret = wasm.starpdf_set_choice_values(handle, obj_num, obj_gen, values_val);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

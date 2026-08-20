@@ -47,3 +47,12 @@ StarPDF is designed to process untrusted PDF files entirely within the client br
 - The production source contains zero `.unwrap()`/`.expect()` calls and retains `#![forbid(unsafe_code)]`.
 
 Classification: `SECURITY_HARDENING`.
+
+## 5. v0.8 Hostile-Input Findings
+
+- Embedded SFNT input is capped at 16 MiB and 64 tables; every table offset/length is checked before access. Subsets are capped at 4,096 glyphs/16 MiB, include bounded composite closure, rebuild checksums, and are reparsed before use.
+- Appearance resources, ancestry, stream bytes, comb cells, multiline lines, list options/indexes, annotation geometry, widgets, generated objects, and mutation growth have explicit limits.
+- Missing glyphs, CFF subsetting, unsupported font filters, non-identity Type0 mappings, malformed `/Opt` or `/I`, non-finite geometry, and impossible line/font data return typed errors and abort the full batch.
+- Four bounded libFuzzer targets, including a final affected resolver rerun, recorded 2,214,760 clean executions with no crash, hang, OOM, or regression artifact. The production source retains zero exact `.unwrap()`/`.expect()` calls and forbids unsafe Rust.
+
+Classification: `SECURITY_HARDENING`.

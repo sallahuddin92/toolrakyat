@@ -27,6 +27,7 @@ struct InheritedAttributes {
     default_appearance: Option<String>,
     quadding: Option<i32>,
     options: Option<Vec<ChoiceOption>>,
+    max_len: Option<usize>,
 }
 
 pub struct AcroFormParser<'a, 'b> {
@@ -205,6 +206,11 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
         let current_options = self
             .parse_options(field_dict)
             .or_else(|| inherited.options.clone());
+        let current_max_len = field_dict
+            .get("MaxLen")
+            .and_then(PdfObject::as_integer)
+            .and_then(|value| usize::try_from(value).ok())
+            .or(inherited.max_len);
 
         let current_inherited = InheritedAttributes {
             field_type: current_ft.clone(),
@@ -212,6 +218,7 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             default_appearance: current_da.clone(),
             quadding: current_quadding,
             options: current_options.clone(),
+            max_len: current_max_len,
         };
 
         // Partial name /T
@@ -328,9 +335,12 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
 
         let value = self.parse_field_value(dict.get("V"), &field_type)?;
         let default_value = self.parse_field_value(dict.get("DV"), &field_type)?;
+        let options = inherited.options.clone().unwrap_or_default();
+        let selected_indices = self.parse_choice_indices(dict, &field_type, &value, &options)?;
 
         let is_read_only = (flags & (1 << 0)) != 0; // Bit 1
         let is_required = (flags & (1 << 1)) != 0; // Bit 2
+        let is_comb = matches!(field_type, FieldType::Text { .. }) && (flags & (1 << 24)) != 0;
 
         self.fields_collected.push(FormField {
             object_ref,
@@ -345,7 +355,10 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             flags,
             default_appearance: inherited.default_appearance.clone(),
             quadding: inherited.quadding,
-            options: inherited.options.clone().unwrap_or_default(),
+            max_len: inherited.max_len,
+            is_comb,
+            options,
+            selected_indices,
             widgets,
             is_read_only,
             is_required,
@@ -491,6 +504,64 @@ impl<'a, 'b> AcroFormParser<'a, 'b> {
             }
         }
         Some(options)
+    }
+
+    fn parse_choice_indices(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+        field_type: &FieldType,
+        value: &FieldValue,
+        options: &[ChoiceOption],
+    ) -> PdfResult<Vec<usize>> {
+        if !matches!(field_type, FieldType::Choice { .. }) {
+            return Ok(Vec::new());
+        }
+        let Some(index_object) = dict.get("I") else {
+            return Ok(Vec::new());
+        };
+        let indexes = self.resolve_array(index_object)?;
+        if indexes.len() > 1_000 {
+            return Err(PdfError::InvalidOperation(
+                "Choice /I exceeds maximum of 1000 indexes".into(),
+            ));
+        }
+        let mut parsed = Vec::with_capacity(indexes.len());
+        for index in indexes {
+            let raw = index.as_integer().ok_or_else(|| {
+                PdfError::InvalidOperation("Choice /I entries must be integers".into())
+            })?;
+            let index = usize::try_from(raw).map_err(|_| {
+                PdfError::InvalidOperation("Choice /I contains a negative index".into())
+            })?;
+            if index >= options.len() {
+                return Err(PdfError::InvalidOperation(
+                    "Choice /I index is outside the /Opt range".into(),
+                ));
+            }
+            if parsed.last().is_some_and(|previous| *previous >= index) {
+                return Err(PdfError::InvalidOperation(
+                    "Choice /I indexes must be strictly increasing".into(),
+                ));
+            }
+            parsed.push(index);
+        }
+        if let FieldValue::Choice(values) = value {
+            let indexed_values: Vec<&str> = parsed
+                .iter()
+                .map(|index| options[*index].export_value.as_str())
+                .collect();
+            if indexed_values.len() != values.len()
+                || indexed_values
+                    .iter()
+                    .zip(values)
+                    .any(|(indexed, value)| *indexed != value)
+            {
+                return Err(PdfError::InvalidOperation(
+                    "Choice /V and /I selections are inconsistent".into(),
+                ));
+            }
+        }
+        Ok(parsed)
     }
 
     fn parse_widget(

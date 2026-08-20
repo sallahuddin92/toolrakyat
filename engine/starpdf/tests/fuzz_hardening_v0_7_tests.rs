@@ -178,7 +178,10 @@ fn test_v0_7_annotation_resource_limits_and_non_finite_values_are_rejected() {
         AnnotationSpec::Line {
             line_points: [0.0, 0.0, f64::INFINITY, 10.0],
             stroke_color: None,
+            fill_color: None,
             stroke_width: Some(f64::NAN),
+            line_endings: Default::default(),
+            contents: None,
         },
     ];
 

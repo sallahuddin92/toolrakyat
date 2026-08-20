@@ -8,6 +8,7 @@ export const starpdf_export_incremental: (a: number) => [number, number, number,
 export const starpdf_extract_all_text: (a: number) => [number, number, number];
 export const starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
 export const starpdf_get_annotations: (a: number, b: number) => [number, number, number];
+export const starpdf_get_appearance_status: (a: number) => [number, number, number, number];
 export const starpdf_get_form_fields: (a: number) => [number, number, number];
 export const starpdf_get_info: (a: number) => [number, number, number];
 export const starpdf_get_page_count: (a: number) => [number, number, number];
@@ -16,6 +17,7 @@ export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: num
 export const starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
 export const starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+export const starpdf_set_choice_values: (a: number, b: bigint, c: number, d: any) => [number, number, number];
 export const starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
 export const starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
 export const starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];

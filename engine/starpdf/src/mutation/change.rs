@@ -20,6 +20,11 @@ pub enum PdfChange {
     },
     /// Mutates the selected value (`/V`) of a choice (combo/list) field and regenerates its `/AP /N` stream.
     SetChoice { field_ref: ObjectRef, value: String },
+    /// Mutates one or more list-box values and synchronizes `/V`, `/I`, and `/AP`.
+    SetChoiceValues {
+        field_ref: ObjectRef,
+        values: Vec<String>,
+    },
     /// Mutates the active appearance state (`/AS`) of a widget annotation directly.
     SetAppearanceState {
         widget_ref: ObjectRef,

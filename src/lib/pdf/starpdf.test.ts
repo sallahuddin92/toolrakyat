@@ -10,10 +10,10 @@ function loadTestAsset(filename: string): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe("StarPDF v0.7 WASM Client Runtime & Appearance Engine", () => {
-  it("retrieves engine version 0.7.0", async () => {
+describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
+  it("retrieves engine version 0.8.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.7.0");
+    expect(version).toBe("0.8.0");
   });
 
   it("creates minimal PDF and opens it", async () => {
@@ -146,6 +146,7 @@ describe("StarPDF v0.7 WASM Client Runtime & Appearance Engine", () => {
     });
 
     const step2Bytes = await step1Doc.exportIncremental();
+    expect(await step1Doc.getAppearanceStatus()).toBe("AP_REGENERATED");
     await step1Doc.close();
 
     const step2Doc = await StarPdfClient.open(step2Bytes);
@@ -166,6 +167,33 @@ describe("StarPDF v0.7 WASM Client Runtime & Appearance Engine", () => {
     expect(annots3[0].subtype).toBe("FreeText");
 
     await step3Doc.close();
+  });
+
+  it("creates and reopens a Line annotation with supported endings and appearance status", async () => {
+    const bytes = await StarPdfClient.createMinimalPdf("Line WASM Test");
+    const doc = await StarPdfClient.open(bytes);
+    await doc.addAnnotation(0, {
+      subtype: "Line",
+      rect: [40, 80, 260, 160],
+      line_points: [50, 90, 250, 150],
+      line_endings: ["OpenArrow", "ClosedArrow"],
+      contents: "Measured line",
+      color: [0.1, 0.2, 0.8],
+      fill_color: [0.9, 0.2, 0.2],
+      border_width: 3,
+    });
+    const output = await doc.exportIncremental();
+    expect(await doc.getAppearanceStatus()).toBe("AP_REGENERATED");
+    await doc.close();
+
+    const reopened = await StarPdfClient.open(output);
+    const annotations = await reopened.getAnnotations(0);
+    const line = annotations.find((annotation) => annotation.subtype === "Line");
+    expect(line?.line_points).toEqual([50, 90, 250, 150]);
+    expect(line?.line_endings).toEqual(["OpenArrow", "ClosedArrow"]);
+    expect(line?.border_width).toBe(3);
+    expect(line?.interior_color).toEqual([0.9, 0.2, 0.2]);
+    await reopened.close();
   });
 
   it("opens multi-page document and extracts text across all pages", async () => {

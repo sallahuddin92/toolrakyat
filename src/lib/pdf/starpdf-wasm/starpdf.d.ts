@@ -15,6 +15,8 @@ export function starpdf_extract_page_text(handle: number, page_index: number): a
 
 export function starpdf_get_annotations(handle: number, page_index: number): any;
 
+export function starpdf_get_appearance_status(handle: number): string;
+
 export function starpdf_get_form_fields(handle: number): any;
 
 export function starpdf_get_info(handle: number): any;
@@ -30,6 +32,8 @@ export function starpdf_search(handle: number, query: string, case_sensitive: bo
 export function starpdf_set_checkbox(handle: number, obj_num: bigint, obj_gen: number, checked: boolean): boolean;
 
 export function starpdf_set_choice(handle: number, obj_num: bigint, obj_gen: number, value: string): boolean;
+
+export function starpdf_set_choice_values(handle: number, obj_num: bigint, obj_gen: number, values_val: any): boolean;
 
 export function starpdf_set_radio(handle: number, parent_num: bigint, parent_gen: number, widget_num: bigint, widget_gen: number, on_state: string): boolean;
 
@@ -52,6 +56,7 @@ export interface InitOutput {
     readonly starpdf_extract_all_text: (a: number) => [number, number, number];
     readonly starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
     readonly starpdf_get_annotations: (a: number, b: number) => [number, number, number];
+    readonly starpdf_get_appearance_status: (a: number) => [number, number, number, number];
     readonly starpdf_get_form_fields: (a: number) => [number, number, number];
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
@@ -60,6 +65,7 @@ export interface InitOutput {
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
     readonly starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+    readonly starpdf_set_choice_values: (a: number, b: bigint, c: number, d: any) => [number, number, number];
     readonly starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
     readonly starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
     readonly starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];

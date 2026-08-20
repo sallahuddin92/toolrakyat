@@ -1,8 +1,10 @@
+pub mod appearance;
 pub mod cmap;
 pub mod encoding;
 pub mod font;
 pub mod resource;
 pub mod sfnt;
+pub mod subset;
 
 pub use cmap::UnicodeCMap;
 pub use encoding::SimpleEncoding;

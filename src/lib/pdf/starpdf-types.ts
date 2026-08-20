@@ -76,7 +76,10 @@ export interface StarPdfFormField {
   value: string;
   is_read_only: boolean;
   is_required: boolean;
+  max_len?: number;
+  is_comb: boolean;
   options: StarPdfChoiceOption[];
+  selected_indices: number[];
   widgets: StarPdfWidget[];
 }
 
@@ -89,6 +92,13 @@ export interface StarPdfAnnotation {
   contents?: string;
   name?: string;
   appearance_state?: string;
+  color?: number[];
+  interior_color?: number[];
+  border_width?: number;
+  line_points?: [number, number, number, number];
+  line_endings?: StarPdfAddAnnotationInput["line_endings"];
+  quad_points: number[];
+  ink_list: [number, number][][];
 }
 
 export interface StarPdfAddAnnotationInput {
@@ -101,6 +111,7 @@ export interface StarPdfAddAnnotationInput {
   border_width?: number;
   quad_points?: number[];
   line_points?: [number, number, number, number];
+  line_endings?: ["None" | "Square" | "Circle" | "Diamond" | "OpenArrow" | "ClosedArrow", "None" | "Square" | "Circle" | "Diamond" | "OpenArrow" | "ClosedArrow"];
   ink_list?: [number, number][][];
   uri?: string;
 }
@@ -109,6 +120,12 @@ export interface StarPdfUpdateAnnotationInput {
   rect?: [number, number, number, number];
   contents?: string;
   color?: number[];
+  fill_color?: number[];
+  border_width?: number;
+  line_points?: [number, number, number, number];
+  line_endings?: StarPdfAddAnnotationInput["line_endings"];
+  quad_points?: number[];
+  ink_list?: [number, number][][];
 }
 
 /**
@@ -138,10 +155,12 @@ export type StarPdfWorkerRequest =
       onState: string;
     }
   | { type: "setChoice"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
+  | { type: "setChoiceValues"; id: string; handle: number; objectNum: number; objectGen: number; values: string[] }
   | { type: "addAnnotation"; id: string; handle: number; pageIndex: number; input: StarPdfAddAnnotationInput }
   | { type: "updateAnnotation"; id: string; handle: number; objectNum: number; objectGen: number; input: StarPdfUpdateAnnotationInput }
   | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objectNum: number; objectGen: number }
   | { type: "exportIncremental"; id: string; handle: number }
+  | { type: "getAppearanceStatus"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
   | { type: "createMinimal"; id: string; text: string };
 
@@ -163,10 +182,12 @@ export type StarPdfWorkerResponse =
   | { type: "setCheckbox"; id: string; success: true }
   | { type: "setRadio"; id: string; success: true }
   | { type: "setChoice"; id: string; success: true }
+  | { type: "setChoiceValues"; id: string; success: true }
   | { type: "addAnnotation"; id: string; success: true }
   | { type: "updateAnnotation"; id: string; success: true }
   | { type: "removeAnnotation"; id: string; success: true }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
+  | { type: "getAppearanceStatus"; id: string; success: true; status: "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED" }
   | { type: "close"; id: string; success: true }
   | { type: "createMinimal"; id: string; success: true; bytes: Uint8Array }
   | {
