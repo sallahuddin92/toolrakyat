@@ -161,6 +161,7 @@ export type StarPdfWorkerRequest =
   | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objectNum: number; objectGen: number }
   | { type: "exportIncremental"; id: string; handle: number }
   | { type: "getAppearanceStatus"; id: string; handle: number }
+  | { type: "getGlyphMappingQuality"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
   | { type: "createMinimal"; id: string; text: string };
 
@@ -188,6 +189,7 @@ export type StarPdfWorkerResponse =
   | { type: "removeAnnotation"; id: string; success: true }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "getAppearanceStatus"; id: string; success: true; status: "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED" }
+  | { type: "getGlyphMappingQuality"; id: string; success: true; quality: "EXACT" | "FALLBACK" | "UNREPRESENTABLE" | "NOT_APPLICABLE" }
   | { type: "close"; id: string; success: true }
   | { type: "createMinimal"; id: string; success: true; bytes: Uint8Array }
   | {

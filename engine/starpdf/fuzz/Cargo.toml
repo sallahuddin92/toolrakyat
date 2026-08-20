@@ -150,3 +150,21 @@ name = "fuzz_embedded_font_resolver"
 path = "fuzz_targets/fuzz_embedded_font_resolver.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_rotated_widget"
+path = "fuzz_targets/fuzz_rotated_widget.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_type0_auto_embedding"
+path = "fuzz_targets/fuzz_type0_auto_embedding.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_search_fragment_recovery"
+path = "fuzz_targets/fuzz_search_fragment_recovery.rs"
+test = false
+doc = false

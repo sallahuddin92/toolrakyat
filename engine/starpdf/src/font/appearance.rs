@@ -9,6 +9,16 @@ pub const MAX_EMBEDDED_FONT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_APPEARANCE_RESOURCES: usize = 256;
 const MAX_RESOURCE_ANCESTORS: usize = 64;
 
+#[derive(Debug, Clone)]
+pub struct EmbeddedFontSource {
+    pub source_ref: Option<ObjectRef>,
+    pub top_dictionary: BTreeMap<String, PdfObject>,
+    pub descendant_dictionary: Option<BTreeMap<String, PdfObject>>,
+    pub descriptor_dictionary: BTreeMap<String, PdfObject>,
+    pub font_file_key: String,
+    pub font_stream_dictionary: BTreeMap<String, PdfObject>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlyphMappingQuality {
     Exact,
@@ -24,6 +34,14 @@ impl GlyphMappingQuality {
             Self::Unrepresentable => "UNREPRESENTABLE",
         }
     }
+
+    pub const fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unrepresentable, _) | (_, Self::Unrepresentable) => Self::Unrepresentable,
+            (Self::Fallback, _) | (_, Self::Fallback) => Self::Fallback,
+            _ => Self::Exact,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +50,7 @@ pub struct AppearanceFont {
     pub resource_object: PdfObject,
     pub font: Font,
     pub quality: GlyphMappingQuality,
+    pub embedded_source: Option<EmbeddedFontSource>,
 }
 
 impl AppearanceFont {
@@ -40,8 +59,8 @@ impl AppearanceFont {
         for character in text.chars() {
             if self.font.is_composite {
                 if !self.font.composite_identity_mapping {
-                    return Err(PdfError::InvalidOperation(
-                        "UNREPRESENTABLE composite appearance font requires Identity-H/Identity-V and an identity CIDToGIDMap"
+                    return Err(PdfError::UnsupportedCompositeMapping(
+                        "appearance font requires Identity-H/Identity-V and an identity CIDToGIDMap"
                             .into(),
                     ));
                 }
@@ -81,9 +100,8 @@ impl AppearanceFont {
 
     pub fn text_width(&self, text: &str, font_size: f64) -> PdfResult<f64> {
         if self.font.is_composite && !self.font.composite_identity_mapping {
-            return Err(PdfError::InvalidOperation(
-                "UNREPRESENTABLE composite appearance font requires Identity-H/Identity-V and an identity CIDToGIDMap"
-                    .into(),
+            return Err(PdfError::UnsupportedCompositeMapping(
+                "appearance font requires Identity-H/Identity-V and an identity CIDToGIDMap".into(),
             ));
         }
         let mut total = 0.0;
@@ -177,6 +195,7 @@ impl AppearanceFontResolver {
             resource_object: Self::standard_font_object(),
             font: fallback,
             quality: GlyphMappingQuality::Fallback,
+            embedded_source: None,
         };
         resolved.verify_text(text)?;
         Ok(resolved)
@@ -275,12 +294,90 @@ impl AppearanceFontResolver {
                 expected: "font dictionary",
                 actual: resolved_font.type_name(),
             })?;
-        let font = Font::from_dict(font_name, font_dict, store)?;
+        let top_dictionary = font_dict.clone();
+        let embedded_source =
+            Self::resolve_embedded_source(store, &top_dictionary, resource_object.as_reference())?;
+        let font = Font::from_dict(font_name, &top_dictionary, store)?;
         Ok(Some(AppearanceFont {
             resource_name: font_name.to_string(),
             resource_object,
             font,
             quality: GlyphMappingQuality::Exact,
+            embedded_source,
+        }))
+    }
+
+    fn resolve_embedded_source(
+        store: &mut ObjectStore<'_>,
+        top_dictionary: &BTreeMap<String, PdfObject>,
+        source_ref: Option<ObjectRef>,
+    ) -> PdfResult<Option<EmbeddedFontSource>> {
+        let descendant_dictionary =
+            if top_dictionary.get("Subtype").and_then(PdfObject::as_name) == Some("Type0") {
+                let descendants = top_dictionary.get("DescendantFonts").ok_or_else(|| {
+                    PdfError::UnsupportedCompositeMapping(
+                        "Type0 font is missing /DescendantFonts".into(),
+                    )
+                })?;
+                let descendants = store.resolve_object(descendants)?;
+                let descendants = descendants.as_array().ok_or_else(|| {
+                    PdfError::UnsupportedCompositeMapping(
+                        "Type0 /DescendantFonts must be an array".into(),
+                    )
+                })?;
+                if descendants.len() != 1 {
+                    return Err(PdfError::UnsupportedCompositeMapping(
+                        "Type0 appearance fonts require exactly one descendant CIDFont".into(),
+                    ));
+                }
+                let descendant = store.resolve_object(&descendants[0])?;
+                Some(
+                    descendant
+                        .as_dict()
+                        .ok_or_else(|| {
+                            PdfError::UnsupportedCompositeMapping(
+                                "Type0 descendant must be a CIDFont dictionary".into(),
+                            )
+                        })?
+                        .clone(),
+                )
+            } else {
+                None
+            };
+        let font_owner = descendant_dictionary.as_ref().unwrap_or(top_dictionary);
+        let Some(descriptor_object) = font_owner.get("FontDescriptor") else {
+            return Ok(None);
+        };
+        let descriptor = store.resolve_object(descriptor_object)?;
+        let descriptor_dictionary = descriptor
+            .as_dict()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "font descriptor dictionary",
+                actual: descriptor.type_name(),
+            })?
+            .clone();
+        let (font_file_key, font_file) = if let Some(file) = descriptor_dictionary.get("FontFile2")
+        {
+            ("FontFile2".to_string(), file)
+        } else if let Some(file) = descriptor_dictionary.get("FontFile3") {
+            ("FontFile3".to_string(), file)
+        } else {
+            return Ok(None);
+        };
+        let font_file = store.resolve_object(font_file)?;
+        let stream = font_file
+            .as_stream()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "embedded font stream",
+                actual: font_file.type_name(),
+            })?;
+        Ok(Some(EmbeddedFontSource {
+            source_ref,
+            top_dictionary: top_dictionary.clone(),
+            descendant_dictionary,
+            descriptor_dictionary,
+            font_file_key,
+            font_stream_dictionary: stream.dict.clone(),
         }))
     }
 

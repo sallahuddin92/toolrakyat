@@ -19,6 +19,7 @@ pub enum PdfError {
     RecursionLimitExceeded,
     CircularReference(String),
     MalformedInput(String),
+    UnsupportedCompositeMapping(String),
     InvalidOperation(String),
 }
 
@@ -46,6 +47,9 @@ impl fmt::Display for PdfError {
             Self::RecursionLimitExceeded => write!(f, "Parser recursion depth limit exceeded"),
             Self::CircularReference(msg) => write!(f, "Circular reference detected: {msg}"),
             Self::MalformedInput(msg) => write!(f, "Malformed PDF data: {msg}"),
+            Self::UnsupportedCompositeMapping(msg) => {
+                write!(f, "UNSUPPORTED_COMPOSITE_MAPPING: {msg}")
+            }
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

@@ -12,6 +12,8 @@ use crate::document::PdfDocument;
 #[cfg(feature = "wasm")]
 use crate::error::{PdfError, PdfResult};
 #[cfg(feature = "wasm")]
+use crate::font::appearance::GlyphMappingQuality;
+#[cfg(feature = "wasm")]
 use crate::mutation::PdfChange;
 
 #[cfg(feature = "wasm")]
@@ -22,6 +24,7 @@ pub struct DocumentHandleEntry {
     pub raw_bytes: Vec<u8>,
     pub pending_changes: Vec<PdfChange>,
     pub last_appearance_status: AppearanceStatus,
+    pub last_glyph_mapping_quality: Option<GlyphMappingQuality>,
 }
 
 #[cfg(feature = "wasm")]
@@ -64,6 +67,7 @@ impl DocumentRegistry {
                 raw_bytes: bytes,
                 pending_changes: Vec::new(),
                 last_appearance_status: AppearanceStatus::AppearancePreserved,
+                last_glyph_mapping_quality: None,
             },
         );
 
@@ -119,12 +123,14 @@ impl DocumentRegistry {
         let mut doc = PdfDocument::from_bytes(&entry.raw_bytes)?;
         let plan = doc.apply_mutation(&entry.pending_changes)?;
         let status = plan.appearance_status;
+        let mapping_quality = plan.glyph_mapping_quality;
         let new_bytes = doc.export_incremental(&plan)?;
 
         // Update handle state so subsequent mutations build incrementally
         entry.raw_bytes.clone_from(&new_bytes);
         entry.pending_changes.clear();
         entry.last_appearance_status = status;
+        entry.last_glyph_mapping_quality = mapping_quality;
 
         Ok(new_bytes)
     }
@@ -138,6 +144,20 @@ impl DocumentRegistry {
             .get(&handle)
             .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
         Ok(entry.last_appearance_status)
+    }
+
+    pub fn last_glyph_mapping_quality(
+        &self,
+        handle: u32,
+    ) -> PdfResult<Option<GlyphMappingQuality>> {
+        let map = self
+            .handles
+            .lock()
+            .map_err(|_| PdfError::InvalidOperation("DocumentRegistry lock poisoned".into()))?;
+        let entry = map
+            .get(&handle)
+            .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
+        Ok(entry.last_glyph_mapping_quality)
     }
 
     pub fn close(&self, handle: u32) -> PdfResult<bool> {

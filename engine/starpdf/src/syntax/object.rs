@@ -176,6 +176,14 @@ impl PdfObject {
     }
 
     #[inline]
+    pub fn as_stream_mut(&mut self) -> Option<&mut StreamObject> {
+        match self {
+            Self::Stream(stream) => Some(stream),
+            _ => None,
+        }
+    }
+
+    #[inline]
     pub fn as_reference(&self) -> Option<ObjectRef> {
         match self {
             Self::Reference(r) => Some(*r),

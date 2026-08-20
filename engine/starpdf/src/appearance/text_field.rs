@@ -88,7 +88,13 @@ impl TextFieldAppearance {
         content.extend_from_slice(color_op.as_bytes());
 
         if let Some(font) = resolved_font {
-            font.verify_text(text)?;
+            if options.multiline {
+                for line in text.split(['\r', '\n']).filter(|line| !line.is_empty()) {
+                    font.verify_text(line)?;
+                }
+            } else {
+                font.verify_text(text)?;
+            }
         }
         let font_key = resolved_font.map_or_else(
             || da.font_name.trim_start_matches('/'),

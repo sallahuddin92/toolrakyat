@@ -1,0 +1,2 @@
+macOS Quartz/CUPS producer fixture
+Search token: QUARTZ-SIMPLE-IOTA

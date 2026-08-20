@@ -30,7 +30,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.8.0".to_string()
+    "0.9.0".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -562,6 +562,19 @@ pub fn starpdf_get_appearance_status(handle: u32) -> Result<String, JsValue> {
     REGISTRY
         .last_appearance_status(handle)
         .map(|status| status.as_str().to_string())
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_glyph_mapping_quality(handle: u32) -> Result<String, JsValue> {
+    REGISTRY
+        .last_glyph_mapping_quality(handle)
+        .map(|quality| {
+            quality
+                .map_or("NOT_APPLICABLE", |value| value.as_str())
+                .to_string()
+        })
         .map_err(to_js_error)
 }
 

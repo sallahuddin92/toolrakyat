@@ -86,6 +86,38 @@ fn test_search_multi_span_phrase() {
 }
 
 #[test]
+fn test_search_joins_overlapping_producer_fragments_without_inventing_space() {
+    let mut page = PageText::new(0);
+    page.spans.push(TextSpan::new(
+        0,
+        "CHROME-BET".into(),
+        50.0,
+        700.0,
+        100.0,
+        12.0,
+        0.0,
+        "/F1".into(),
+        12.0,
+        1.0,
+    ));
+    page.spans.push(TextSpan::new(
+        0,
+        "A".into(),
+        145.0,
+        700.0,
+        10.0,
+        12.0,
+        0.0,
+        "/F1".into(),
+        12.0,
+        1.0,
+    ));
+    let results = page.search("CHROME-BETA", &SearchOptions::default());
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].boxes.len(), 2);
+}
+
+#[test]
 fn test_search_multi_line_phrase_preserves_separate_boxes() {
     let mut page = PageText::new(0);
     // Line 1: "First Line Ending" at y=700

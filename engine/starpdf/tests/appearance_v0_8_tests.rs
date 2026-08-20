@@ -353,6 +353,123 @@ fn embedded_true_type_resolves_from_field_resources_and_reuses_reference() {
         .unwrap();
     assert_eq!(fonts.get("Embed"), Some(&PdfObject::Reference(font_ref)));
     assert!(String::from_utf8_lossy(&appearance.data).contains("<4142> Tj"));
+
+    let field_ref = ObjectRef::new(7_004, 0);
+    let first_widget_ref = ObjectRef::new(7_005, 0);
+    let second_widget_ref = ObjectRef::new(7_006, 0);
+    let page_ref = document.page_ref(0).unwrap();
+    let mut page = document.page_dict(0).unwrap();
+    page.insert("Rotate".to_string(), PdfObject::Integer(90));
+    document
+        .store_mut()
+        .insert_cached(page_ref, PdfObject::Dictionary(page));
+    let mut mutation_field = field;
+    mutation_field.extend([
+        ("FT".to_string(), PdfObject::Name("Tx".to_string())),
+        (
+            "DA".to_string(),
+            PdfObject::String(b"/Embed 12 Tf 0 g".to_vec()),
+        ),
+        (
+            "Rect".to_string(),
+            PdfObject::Array(vec![
+                PdfObject::Real(20.0),
+                PdfObject::Real(20.0),
+                PdfObject::Real(200.0),
+                PdfObject::Real(50.0),
+            ]),
+        ),
+        (
+            "Kids".to_string(),
+            PdfObject::Array(vec![
+                PdfObject::Reference(first_widget_ref),
+                PdfObject::Reference(second_widget_ref),
+            ]),
+        ),
+    ]);
+    document
+        .store_mut()
+        .insert_cached(field_ref, PdfObject::Dictionary(mutation_field));
+    for (widget_ref, rotation) in [(first_widget_ref, 90), (second_widget_ref, 270)] {
+        document.store_mut().insert_cached(
+            widget_ref,
+            PdfObject::Dictionary(BTreeMap::from([
+                ("Subtype".to_string(), PdfObject::Name("Widget".to_string())),
+                ("Parent".to_string(), PdfObject::Reference(field_ref)),
+                ("P".to_string(), PdfObject::Reference(page_ref)),
+                (
+                    "Rect".to_string(),
+                    PdfObject::Array(vec![
+                        PdfObject::Real(20.0),
+                        PdfObject::Real(20.0),
+                        PdfObject::Real(200.0),
+                        PdfObject::Real(50.0),
+                    ]),
+                ),
+                (
+                    "MK".to_string(),
+                    PdfObject::Dictionary(BTreeMap::from([(
+                        "R".to_string(),
+                        PdfObject::Integer(rotation),
+                    )])),
+                ),
+            ])),
+        );
+    }
+    let plan = document
+        .apply_mutation(&[PdfChange::SetTextField {
+            field_ref,
+            value: "AB".to_string(),
+        }])
+        .unwrap();
+    assert_eq!(plan.glyph_mapping_quality, Some(GlyphMappingQuality::Exact));
+    let mut subset_font_refs = Vec::new();
+    for widget_ref in [first_widget_ref, second_widget_ref] {
+        let appearance = plan
+            .modified_objects
+            .get(&widget_ref)
+            .and_then(PdfObject::as_dict)
+            .and_then(|dict| dict.get("AP"))
+            .and_then(PdfObject::as_dict)
+            .and_then(|dict| dict.get("N"))
+            .and_then(PdfObject::as_stream)
+            .unwrap();
+        assert_eq!(
+            appearance
+                .dict
+                .get("BBox")
+                .and_then(PdfObject::as_array)
+                .unwrap(),
+            &[
+                PdfObject::Real(0.0),
+                PdfObject::Real(0.0),
+                PdfObject::Real(30.0),
+                PdfObject::Real(180.0),
+            ]
+        );
+        let subset_fonts = appearance
+            .dict
+            .get("Resources")
+            .and_then(PdfObject::as_dict)
+            .and_then(|dict| dict.get("Font"))
+            .and_then(PdfObject::as_dict)
+            .unwrap();
+        assert_eq!(subset_fonts.len(), 1);
+        let (resource_name, resource) = subset_fonts.iter().next().unwrap();
+        assert!(resource_name.starts_with("SPF"));
+        subset_font_refs.push(resource.as_reference().unwrap());
+    }
+    assert_eq!(subset_font_refs[0], subset_font_refs[1]);
+    let subset_font_ref = subset_font_refs[0];
+    let subset_font = plan
+        .modified_objects
+        .get(&subset_font_ref)
+        .and_then(PdfObject::as_dict)
+        .unwrap();
+    assert!(subset_font
+        .get("BaseFont")
+        .and_then(PdfObject::as_name)
+        .is_some_and(|name| name.contains("+Synthetic")));
 }
 
 #[test]
@@ -368,6 +485,326 @@ fn true_type_subsetter_produces_reopenable_bounded_font() {
     );
     assert!(TrueTypeSubsetter::subset(&font, &[999]).is_err());
     assert!(TrueTypeSubsetter::subset(&font[..20], &[1]).is_err());
+}
+
+#[test]
+fn subset_rotation_and_annotation_survive_three_incremental_exports() {
+    let original = MinimalWriter::create_minimal_pdf("Sequential v0.9").unwrap();
+    let mut document = PdfDocument::from_bytes(&original).unwrap();
+    let page_ref = document.page_ref(0).unwrap();
+    let font_ref = ObjectRef::new(7_101, 0);
+    let descriptor_ref = ObjectRef::new(7_102, 0);
+    let stream_ref = ObjectRef::new(7_103, 0);
+    let field_ref = ObjectRef::new(7_104, 0);
+    let widget_ref = ObjectRef::new(7_105, 0);
+    let font_bytes = synthetic_true_type();
+    let initial = starpdf::mutation::MutationPlan {
+        modified_objects: BTreeMap::from([
+            (
+                stream_ref,
+                PdfObject::Stream(StreamObject {
+                    dict: BTreeMap::from([(
+                        "Length".to_string(),
+                        PdfObject::Integer(font_bytes.len() as i64),
+                    )]),
+                    stream_offset: 0,
+                    stream_length: font_bytes.len(),
+                    data: font_bytes,
+                }),
+            ),
+            (
+                descriptor_ref,
+                PdfObject::Dictionary(BTreeMap::from([(
+                    "FontFile2".to_string(),
+                    PdfObject::Reference(stream_ref),
+                )])),
+            ),
+            (
+                font_ref,
+                PdfObject::Dictionary(BTreeMap::from([
+                    ("Type".to_string(), PdfObject::Name("Font".to_string())),
+                    (
+                        "Subtype".to_string(),
+                        PdfObject::Name("TrueType".to_string()),
+                    ),
+                    (
+                        "BaseFont".to_string(),
+                        PdfObject::Name("Synthetic".to_string()),
+                    ),
+                    (
+                        "Encoding".to_string(),
+                        PdfObject::Name("WinAnsiEncoding".to_string()),
+                    ),
+                    (
+                        "FontDescriptor".to_string(),
+                        PdfObject::Reference(descriptor_ref),
+                    ),
+                ])),
+            ),
+            (
+                field_ref,
+                PdfObject::Dictionary(BTreeMap::from([
+                    ("FT".to_string(), PdfObject::Name("Tx".to_string())),
+                    (
+                        "DA".to_string(),
+                        PdfObject::String(b"/Embed 12 Tf 0 g".to_vec()),
+                    ),
+                    (
+                        "Kids".to_string(),
+                        PdfObject::Array(vec![PdfObject::Reference(widget_ref)]),
+                    ),
+                    (
+                        "DR".to_string(),
+                        PdfObject::Dictionary(BTreeMap::from([(
+                            "Font".to_string(),
+                            PdfObject::Dictionary(BTreeMap::from([(
+                                "Embed".to_string(),
+                                PdfObject::Reference(font_ref),
+                            )])),
+                        )])),
+                    ),
+                ])),
+            ),
+            (
+                widget_ref,
+                PdfObject::Dictionary(BTreeMap::from([
+                    ("Subtype".to_string(), PdfObject::Name("Widget".to_string())),
+                    ("Parent".to_string(), PdfObject::Reference(field_ref)),
+                    ("P".to_string(), PdfObject::Reference(page_ref)),
+                    (
+                        "Rect".to_string(),
+                        PdfObject::Array(vec![
+                            PdfObject::Real(20.0),
+                            PdfObject::Real(20.0),
+                            PdfObject::Real(200.0),
+                            PdfObject::Real(50.0),
+                        ]),
+                    ),
+                    (
+                        "MK".to_string(),
+                        PdfObject::Dictionary(BTreeMap::from([(
+                            "R".to_string(),
+                            PdfObject::Integer(90),
+                        )])),
+                    ),
+                ])),
+            ),
+        ]),
+        appearance_status: AppearanceStatus::AppearancePreserved,
+        glyph_mapping_quality: None,
+    };
+    let seeded = document.export_incremental(&initial).unwrap();
+
+    let mut generation = seeded;
+    for (index, value) in ["A", "AB", "B"].into_iter().enumerate() {
+        let mut reopened = PdfDocument::from_bytes(&generation).unwrap();
+        let mut changes = vec![PdfChange::SetTextField {
+            field_ref,
+            value: value.to_string(),
+        }];
+        if index == 2 {
+            changes.push(PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::Square {
+                    rect: [10.0, 10.0, 30.0, 30.0],
+                    stroke_color: None,
+                    fill_color: None,
+                    border_width: Some(1.0),
+                },
+            });
+        }
+        let next = reopened.mutate_and_export(&changes).unwrap();
+        assert!(next.starts_with(&generation));
+        let mut verified = PdfDocument::from_bytes(&next).unwrap();
+        assert_eq!(verified.page_count().unwrap(), 1);
+        generation = next;
+    }
+    let mut final_document = PdfDocument::from_bytes(&generation).unwrap();
+    assert_eq!(final_document.page_annotations(0).unwrap().len(), 1);
+    let widget = final_document.store_mut().resolve(widget_ref).unwrap();
+    let appearance = widget
+        .as_dict()
+        .and_then(|dict| dict.get("AP"))
+        .and_then(PdfObject::as_dict)
+        .and_then(|dict| dict.get("N"));
+    assert!(appearance.is_some());
+}
+
+#[test]
+fn rotated_checkbox_and_choice_emit_supported_matrices() {
+    let bytes = MinimalWriter::create_minimal_pdf("Rotated controls").unwrap();
+    let mut document = PdfDocument::from_bytes(&bytes).unwrap();
+    let checkbox_ref = ObjectRef::new(8_801, 0);
+    let choice_ref = ObjectRef::new(8_802, 0);
+    for (reference, field_type, rotation) in [(checkbox_ref, "Btn", 180), (choice_ref, "Ch", 270)] {
+        let mut dict = BTreeMap::from([
+            ("FT".to_string(), PdfObject::Name(field_type.to_string())),
+            (
+                "Rect".to_string(),
+                PdfObject::Array(vec![
+                    PdfObject::Real(10.0),
+                    PdfObject::Real(10.0),
+                    PdfObject::Real(130.0),
+                    PdfObject::Real(40.0),
+                ]),
+            ),
+            (
+                "MK".to_string(),
+                PdfObject::Dictionary(BTreeMap::from([(
+                    "R".to_string(),
+                    PdfObject::Integer(rotation),
+                )])),
+            ),
+        ]);
+        if reference == choice_ref {
+            dict.insert(
+                "DA".to_string(),
+                PdfObject::String(b"/Helv 12 Tf 0 g".to_vec()),
+            );
+            dict.insert(
+                "Opt".to_string(),
+                PdfObject::Array(vec![PdfObject::String(b"Alpha".to_vec())]),
+            );
+        }
+        document
+            .store_mut()
+            .insert_cached(reference, PdfObject::Dictionary(dict));
+    }
+    let plan = document
+        .apply_mutation(&[
+            PdfChange::SetCheckbox {
+                field_ref: checkbox_ref,
+                widget_refs: vec![checkbox_ref],
+                checked: true,
+            },
+            PdfChange::SetChoice {
+                field_ref: choice_ref,
+                value: "Alpha".to_string(),
+            },
+        ])
+        .unwrap();
+    let checkbox = plan
+        .modified_objects
+        .get(&checkbox_ref)
+        .and_then(PdfObject::as_dict)
+        .unwrap();
+    let states = checkbox
+        .get("AP")
+        .and_then(PdfObject::as_dict)
+        .and_then(|dict| dict.get("N"))
+        .and_then(PdfObject::as_dict)
+        .unwrap();
+    for state in states.values() {
+        assert!(state
+            .as_stream()
+            .and_then(|stream| stream.dict.get("Matrix"))
+            .is_some());
+    }
+    let choice_matrix = plan
+        .modified_objects
+        .get(&choice_ref)
+        .and_then(PdfObject::as_dict)
+        .and_then(|dict| dict.get("AP"))
+        .and_then(PdfObject::as_dict)
+        .and_then(|dict| dict.get("N"))
+        .and_then(PdfObject::as_stream)
+        .and_then(|stream| stream.dict.get("Matrix"));
+    assert!(choice_matrix.is_some());
+}
+
+#[test]
+fn subset_resource_limit_failure_is_atomic() {
+    let bytes = MinimalWriter::create_minimal_pdf("Resource limit").unwrap();
+    let mut document = PdfDocument::from_bytes(&bytes).unwrap();
+    let descriptor_ref = ObjectRef::new(9_800, 0);
+    let stream_ref = ObjectRef::new(9_801, 0);
+    let font_bytes = synthetic_true_type();
+    document.store_mut().insert_cached(
+        stream_ref,
+        PdfObject::Stream(StreamObject {
+            dict: BTreeMap::new(),
+            stream_offset: 0,
+            stream_length: font_bytes.len(),
+            data: font_bytes,
+        }),
+    );
+    document.store_mut().insert_cached(
+        descriptor_ref,
+        PdfObject::Dictionary(BTreeMap::from([(
+            "FontFile2".to_string(),
+            PdfObject::Reference(stream_ref),
+        )])),
+    );
+    let mut changes = vec![PdfChange::AddAnnotation {
+        page_index: 0,
+        spec: AnnotationSpec::Square {
+            rect: [10.0, 10.0, 30.0, 30.0],
+            stroke_color: None,
+            fill_color: None,
+            border_width: None,
+        },
+    }];
+    for index in 0..65u64 {
+        let font_ref = ObjectRef::new(10_000 + index, 0);
+        let field_ref = ObjectRef::new(11_000 + index, 0);
+        document.store_mut().insert_cached(
+            font_ref,
+            PdfObject::Dictionary(BTreeMap::from([
+                (
+                    "Subtype".to_string(),
+                    PdfObject::Name("TrueType".to_string()),
+                ),
+                (
+                    "BaseFont".to_string(),
+                    PdfObject::Name("Synthetic".to_string()),
+                ),
+                (
+                    "Encoding".to_string(),
+                    PdfObject::Name("WinAnsiEncoding".to_string()),
+                ),
+                (
+                    "FontDescriptor".to_string(),
+                    PdfObject::Reference(descriptor_ref),
+                ),
+            ])),
+        );
+        document.store_mut().insert_cached(
+            field_ref,
+            PdfObject::Dictionary(BTreeMap::from([
+                ("FT".to_string(), PdfObject::Name("Tx".to_string())),
+                (
+                    "DA".to_string(),
+                    PdfObject::String(b"/Embed 12 Tf 0 g".to_vec()),
+                ),
+                (
+                    "Rect".to_string(),
+                    PdfObject::Array(vec![
+                        PdfObject::Integer(0),
+                        PdfObject::Integer(0),
+                        PdfObject::Integer(100),
+                        PdfObject::Integer(20),
+                    ]),
+                ),
+                (
+                    "DR".to_string(),
+                    PdfObject::Dictionary(BTreeMap::from([(
+                        "Font".to_string(),
+                        PdfObject::Dictionary(BTreeMap::from([(
+                            "Embed".to_string(),
+                            PdfObject::Reference(font_ref),
+                        )])),
+                    )])),
+                ),
+            ])),
+        );
+        changes.push(PdfChange::SetTextField {
+            field_ref,
+            value: "A".to_string(),
+        });
+    }
+    let error = document.apply_mutation(&changes).unwrap_err();
+    assert!(error.to_string().contains("Font resources per mutation"));
+    assert!(document.page_annotations(0).unwrap().is_empty());
 }
 
 #[test]

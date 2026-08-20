@@ -10,10 +10,10 @@ function loadTestAsset(filename: string): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
-  it("retrieves engine version 0.8.0", async () => {
+describe("StarPDF v0.9 WASM Client Runtime & Appearance Engine", () => {
+  it("retrieves engine version 0.9.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.8.0");
+    expect(version).toBe("0.9.0");
   });
 
   it("creates minimal PDF and opens it", async () => {
@@ -70,12 +70,13 @@ describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
     const textField = fields.find((f) => f.name === "full_name")!;
     const checkField = fields.find((f) => f.name === "agree")!;
 
-    await doc.setTextField(textField.object_num, textField.object_gen, "Ahmad Albab v0.7");
+    await doc.setTextField(textField.object_num, textField.object_gen, "Ahmad Albab v0.9");
     await doc.setCheckbox(checkField.object_num, checkField.object_gen, true);
 
     const mutatedBytes = await doc.exportIncremental();
     expect(mutatedBytes.length).toBeGreaterThan(bytes.length);
     expect(mutatedBytes.slice(0, bytes.length)).toEqual(bytes);
+    expect(await doc.getGlyphMappingQuality()).toBe("EXACT");
 
     await doc.close();
 
@@ -86,7 +87,7 @@ describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
 
     const reopenedFields = await reopenedDoc.getFormFields();
     const updatedTextField = reopenedFields.find((f) => f.name === "full_name");
-    expect(updatedTextField?.value).toBe("Ahmad Albab v0.7");
+    expect(updatedTextField?.value).toBe("Ahmad Albab v0.9");
 
     const updatedCheckField = reopenedFields.find((f) => f.name === "agree");
     expect(updatedCheckField?.value).toBe("true");
@@ -99,7 +100,7 @@ describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
     const referenceText = referenceForm.getTextField("full_name");
     const referenceCheckbox = referenceForm.getCheckBox("agree");
     expect(referenceText).toBeInstanceOf(PDFTextField);
-    expect(referenceText.getText()).toBe("Ahmad Albab v0.7");
+    expect(referenceText.getText()).toBe("Ahmad Albab v0.9");
     expect(referenceCheckbox).toBeInstanceOf(PDFCheckBox);
     expect(referenceCheckbox.isChecked()).toBe(true);
 
@@ -147,6 +148,7 @@ describe("StarPDF v0.8 WASM Client Runtime & Appearance Engine", () => {
 
     const step2Bytes = await step1Doc.exportIncremental();
     expect(await step1Doc.getAppearanceStatus()).toBe("AP_REGENERATED");
+    expect(await step1Doc.getGlyphMappingQuality()).toBe("NOT_APPLICABLE");
     await step1Doc.close();
 
     const step2Doc = await StarPdfClient.open(step2Bytes);

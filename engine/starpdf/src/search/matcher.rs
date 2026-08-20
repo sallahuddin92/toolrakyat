@@ -20,7 +20,11 @@ impl TextMatcher {
         let mut char_map: Vec<(usize, usize)> = Vec::new();
 
         for (span_idx, span) in page_text.spans.iter().enumerate() {
-            if !char_vec.is_empty() && char_vec.last() != Some(&' ') {
+            let joins_previous_fragment = span_idx
+                .checked_sub(1)
+                .and_then(|index| page_text.spans.get(index))
+                .is_some_and(|previous| Self::overlapping_line_fragment(previous, span));
+            if !char_vec.is_empty() && char_vec.last() != Some(&' ') && !joins_previous_fragment {
                 char_vec.push(' ');
                 // Sentinel for inter-span separator space
                 char_map.push((span_idx, usize::MAX));
@@ -125,5 +129,26 @@ impl TextMatcher {
         }
 
         results
+    }
+
+    fn overlapping_line_fragment(
+        previous: &crate::text::span::TextSpan,
+        current: &crate::text::span::TextSpan,
+    ) -> bool {
+        if previous.text.ends_with(char::is_whitespace)
+            || current.text.starts_with(char::is_whitespace)
+            || (previous.rotation - current.rotation).abs() > 0.01
+        {
+            return false;
+        }
+        let radians = previous.rotation.to_radians();
+        let previous_end_x = previous.x + previous.width * radians.cos();
+        let previous_end_y = previous.y + previous.width * radians.sin();
+        let advance_gap = (current.x - previous_end_x) * radians.cos()
+            + (current.y - previous_end_y) * radians.sin();
+        let cross_gap = -(current.x - previous_end_x) * radians.sin()
+            + (current.y - previous_end_y) * radians.cos();
+        advance_gap <= previous.font_size.max(current.font_size).max(1.0) * 0.1
+            && cross_gap.abs() <= previous.height.max(current.height).max(4.0) * 0.8
     }
 }
