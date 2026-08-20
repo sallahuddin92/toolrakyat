@@ -44,6 +44,37 @@ export function starpdf_create_minimal_pdf(text) {
 
 /**
  * @param {number} handle
+ * @param {number} page_index
+ * @returns {Uint8Array}
+ */
+export function starpdf_delete_page(handle, page_index) {
+    const ret = wasm.starpdf_delete_page(handle, page_index);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {number} destination_index
+ * @returns {Uint8Array}
+ */
+export function starpdf_duplicate_page(handle, page_index, destination_index) {
+    const ret = wasm.starpdf_duplicate_page(handle, page_index, destination_index);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
  * @returns {Uint8Array}
  */
 export function starpdf_export_incremental(handle) {
@@ -79,6 +110,21 @@ export function starpdf_extract_page_text(handle, page_index) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {any} page_indices
+ * @returns {Uint8Array}
+ */
+export function starpdf_extract_pages(handle, page_indices) {
+    const ret = wasm.starpdf_extract_pages(handle, page_indices);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
 }
 
 /**
@@ -186,6 +232,40 @@ export function starpdf_get_security_info(handle) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {number} width
+ * @param {number} height
+ * @param {number} rotation
+ * @returns {Uint8Array}
+ */
+export function starpdf_insert_blank_page(handle, page_index, width, height, rotation) {
+    const ret = wasm.starpdf_insert_blank_page(handle, page_index, width, height, rotation);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
+ * @param {number} from_index
+ * @param {number} to_index
+ * @returns {Uint8Array}
+ */
+export function starpdf_move_page(handle, from_index, to_index) {
+    const ret = wasm.starpdf_move_page(handle, from_index, to_index);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
 }
 
 /**
@@ -365,6 +445,10 @@ function __wbg_get_imports() {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg_Number_3890faa6d3ff057d: function(arg0) {
+            const ret = Number(arg0);
+            return ret;
+        },
         __wbg_String_8564e559799eccda: function(arg0, arg1) {
             const ret = String(arg1);
             const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -464,6 +548,10 @@ function __wbg_get_imports() {
         },
         __wbg_isArray_6339f732981044bf: function(arg0) {
             const ret = Array.isArray(arg0);
+            return ret;
+        },
+        __wbg_isSafeInteger_f3d6cd19ccfe4512: function(arg0) {
+            const ret = Number.isSafeInteger(arg0);
             return ret;
         },
         __wbg_iterator_5cebbb86e33c6dd6: function() {

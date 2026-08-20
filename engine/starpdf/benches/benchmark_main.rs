@@ -28,7 +28,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("         StarPDF Engine v0.11A Micro-Benchmark Suite            ");
+    println!("         StarPDF Engine v0.12A Micro-Benchmark Suite            ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -1070,6 +1070,148 @@ ET
         let elapsed = start.elapsed();
         println!(
             "43. Effective Trailer Lookup:{:>8} ns/op  ({:.2?} for {} lookups)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    let page_fixture = include_bytes!("../../../test-assets/multi-page.test.pdf");
+
+    // 44. Incremental page deletion
+    {
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.delete_page(0).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "44. Delete Page:             {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 45. Incremental page reorder
+    {
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.move_page(0, 1).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "45. Move Page:               {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 46. Complete-build page duplication
+    {
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.duplicate_page(0, 1).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "46. Duplicate Page:          {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 47. Incremental blank-page insertion
+    {
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.insert_blank_page(1, 612.0, 792.0, 0).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "47. Insert Blank Page:       {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 48. Single-page extraction and standalone serialization
+    let extracted_one = {
+        let iterations = 200;
+        let start = Instant::now();
+        let mut last = Vec::new();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            last = doc.extract_pages(&[0]).unwrap();
+            std::hint::black_box(&last);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "48. Extract 1 + Write:       {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+        last
+    };
+
+    // 49. Ten-page repeated-selection extraction
+    {
+        let selection = [0usize, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.extract_pages(&selection).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "49. Extract 10 + Write:      {:>8} ns/op  ({:.2?} for {} operations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 50. Standalone writer path (graph remap plus complete serialization)
+    {
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(page_fixture).unwrap();
+            std::hint::black_box(doc.extract_pages(&[1]).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "50. Standalone PDF Write:    {:>8} ns/op  ({:.2?} for {} writes)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 51. Generated-output reopen
+    {
+        let iterations = 1_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&extracted_one).unwrap();
+            std::hint::black_box(doc.page_count().unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "51. Page Output Reopen:      {:>8} ns/op  ({:.2?} for {} reopens)",
             elapsed.as_nanos() / iterations as u128,
             elapsed,
             iterations

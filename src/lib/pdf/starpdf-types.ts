@@ -207,6 +207,11 @@ export type StarPdfWorkerRequest =
   | { type: "updateAnnotation"; id: string; handle: number; objectNum: number; objectGen: number; input: StarPdfUpdateAnnotationInput }
   | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objectNum: number; objectGen: number }
   | { type: "exportIncremental"; id: string; handle: number }
+  | { type: "deletePage"; id: string; handle: number; pageIndex: number }
+  | { type: "movePage"; id: string; handle: number; fromIndex: number; toIndex: number }
+  | { type: "duplicatePage"; id: string; handle: number; pageIndex: number; destinationIndex: number }
+  | { type: "insertBlankPage"; id: string; handle: number; pageIndex: number; width: number; height: number; rotation: 0 | 90 | 180 | 270 }
+  | { type: "extractPages"; id: string; handle: number; pageIndices: number[] }
   | { type: "getAppearanceStatus"; id: string; handle: number }
   | { type: "getGlyphMappingQuality"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
@@ -236,6 +241,11 @@ export type StarPdfWorkerResponse =
   | { type: "updateAnnotation"; id: string; success: true }
   | { type: "removeAnnotation"; id: string; success: true }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
+  | { type: "deletePage"; id: string; success: true; bytes: Uint8Array }
+  | { type: "movePage"; id: string; success: true; bytes: Uint8Array }
+  | { type: "duplicatePage"; id: string; success: true; bytes: Uint8Array }
+  | { type: "insertBlankPage"; id: string; success: true; bytes: Uint8Array }
+  | { type: "extractPages"; id: string; success: true; bytes: Uint8Array }
   | { type: "getAppearanceStatus"; id: string; success: true; status: "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED" }
   | { type: "getGlyphMappingQuality"; id: string; success: true; quality: "EXACT" | "FALLBACK" | "UNREPRESENTABLE" | "NOT_APPLICABLE" }
   | { type: "close"; id: string; success: true }

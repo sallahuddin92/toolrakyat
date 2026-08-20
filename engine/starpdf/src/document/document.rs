@@ -326,6 +326,94 @@ impl<'a> PdfDocument<'a> {
         self.export_incremental(&plan)
     }
 
+    /// Applies an ordered, atomic page-operation plan. Intermediate outputs remain private and
+    /// are returned only after the complete plan reopens successfully.
+    pub fn apply_page_operations(
+        &mut self,
+        plan: &crate::page_ops::PageOperationPlan,
+        limits: &crate::page_ops::PageOperationLimits,
+    ) -> PdfResult<Vec<u8>> {
+        let mut current = self.source.as_bytes().to_vec();
+        for edit in &plan.edits {
+            let next = match edit {
+                crate::page_ops::PageEdit::DuplicatePage { index, insert_at } => {
+                    crate::page_ops::DocumentBuilder::duplicate_page(
+                        &current, *index, *insert_at, limits,
+                    )?
+                }
+                other => {
+                    let mut document = PdfDocument::from_bytes(&current)?;
+                    crate::page_ops::IncrementalPageEditor::apply(
+                        &mut document,
+                        &crate::page_ops::PageOperationPlan::new(other.clone()),
+                        limits,
+                    )?
+                }
+            };
+            current = next;
+        }
+        {
+            let mut reopened = PdfDocument::from_bytes(&current)?;
+            crate::validate::StructuralValidator::validate(&mut reopened)?;
+        }
+        Ok(current)
+    }
+
+    pub fn delete_page(&mut self, page_index: usize) -> PdfResult<Vec<u8>> {
+        self.apply_page_operations(
+            &crate::page_ops::PageOperationPlan::new(crate::page_ops::PageEdit::DeletePage {
+                index: page_index,
+            }),
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn move_page(&mut self, from_index: usize, to_index: usize) -> PdfResult<Vec<u8>> {
+        self.apply_page_operations(
+            &crate::page_ops::PageOperationPlan::new(crate::page_ops::PageEdit::MovePage {
+                from_index,
+                to_index,
+            }),
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn duplicate_page(&mut self, page_index: usize, insert_at: usize) -> PdfResult<Vec<u8>> {
+        self.apply_page_operations(
+            &crate::page_ops::PageOperationPlan::new(crate::page_ops::PageEdit::DuplicatePage {
+                index: page_index,
+                insert_at,
+            }),
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn insert_blank_page(
+        &mut self,
+        index: usize,
+        width: f64,
+        height: f64,
+        rotation: i32,
+    ) -> PdfResult<Vec<u8>> {
+        self.apply_page_operations(
+            &crate::page_ops::PageOperationPlan::new(crate::page_ops::PageEdit::InsertBlankPage {
+                index,
+                width,
+                height,
+                rotation,
+            }),
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
+    pub fn extract_pages(&mut self, page_indices: &[usize]) -> PdfResult<Vec<u8>> {
+        crate::page_ops::DocumentBuilder::extract_pages(
+            self.source.as_bytes(),
+            page_indices,
+            &crate::page_ops::PageOperationLimits::default(),
+        )
+    }
+
     fn decompress_stream_data(
         &self,
         stream: &crate::syntax::object::StreamObject,

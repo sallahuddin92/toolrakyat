@@ -110,6 +110,32 @@ impl DocumentRegistry {
         Ok(())
     }
 
+    pub fn transform_and_replace<F>(&self, handle: u32, transform: F) -> PdfResult<Vec<u8>>
+    where
+        F: FnOnce(&mut PdfDocument) -> PdfResult<Vec<u8>>,
+    {
+        let mut map = self
+            .handles
+            .lock()
+            .map_err(|_| PdfError::InvalidOperation("DocumentRegistry lock poisoned".into()))?;
+        let entry = map
+            .get_mut(&handle)
+            .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
+        if !entry.pending_changes.is_empty() {
+            return Err(PdfError::InvalidOperation(
+                "Export pending field or annotation changes before applying page operations".into(),
+            ));
+        }
+
+        let mut document = PdfDocument::from_bytes(&entry.raw_bytes)?;
+        let output = transform(&mut document)?;
+        let _ = PdfDocument::from_bytes(&output)?;
+        entry.raw_bytes.clone_from(&output);
+        entry.last_appearance_status = AppearanceStatus::AppearancePreserved;
+        entry.last_glyph_mapping_quality = None;
+        Ok(output)
+    }
+
     pub fn export_and_apply_changes(&self, handle: u32) -> PdfResult<Vec<u8>> {
         let mut map = self
             .handles

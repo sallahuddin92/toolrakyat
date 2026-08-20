@@ -1,10 +1,13 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::document::object_store::ObjectStore;
 use crate::error::{PdfError, PdfResult};
 use crate::syntax::object::{ObjectRef, PdfObject};
 
 pub struct PageTree;
+
+pub const MAX_PAGE_TREE_DEPTH: usize = 32;
+pub const MAX_DOCUMENT_PAGES: usize = 10_000;
 
 impl PageTree {
     /// Counts total pages starting from the root /Pages node.
@@ -159,5 +162,118 @@ impl PageTree {
                 expected: "dictionary",
                 actual: page_obj.type_name(),
             })
+    }
+
+    /// Validates the complete page tree and returns page references in logical order.
+    /// Unlike the ordinary lookup fast path, this verifies every `/Count`, `/Kids`, node type,
+    /// and parent relationship before page operations are planned.
+    pub fn validate_and_collect(
+        store: &mut ObjectStore<'_>,
+        root_pages_ref: ObjectRef,
+    ) -> PdfResult<Vec<ObjectRef>> {
+        let mut pages = Vec::new();
+        let mut visited = BTreeSet::new();
+        let total =
+            Self::collect_validated(store, root_pages_ref, None, 0, &mut visited, &mut pages)?;
+        if total == 0 {
+            return Err(PdfError::PageOperation(
+                "document page tree contains no pages".into(),
+            ));
+        }
+        Ok(pages)
+    }
+
+    fn collect_validated(
+        store: &mut ObjectStore<'_>,
+        node_ref: ObjectRef,
+        expected_parent: Option<ObjectRef>,
+        depth: usize,
+        visited: &mut BTreeSet<ObjectRef>,
+        pages: &mut Vec<ObjectRef>,
+    ) -> PdfResult<usize> {
+        if depth > MAX_PAGE_TREE_DEPTH {
+            return Err(PdfError::RecursionLimitExceeded);
+        }
+        if !visited.insert(node_ref) {
+            return Err(PdfError::CircularReference(format!(
+                "cycle in page tree at {node_ref}"
+            )));
+        }
+        let object = store.resolve(node_ref)?.clone();
+        let dict = object.as_dict().ok_or_else(|| PdfError::TypeMismatch {
+            expected: "page-tree dictionary",
+            actual: object.type_name(),
+        })?;
+        let parent = dict.get("Parent").and_then(PdfObject::as_reference);
+        if expected_parent.is_some() && parent != expected_parent {
+            return Err(PdfError::PageOperation(format!(
+                "page-tree node {node_ref} has an inconsistent /Parent"
+            )));
+        }
+
+        match dict.get("Type").and_then(PdfObject::as_name) {
+            Some("Page") => {
+                if pages.len() >= MAX_DOCUMENT_PAGES {
+                    return Err(PdfError::PageResourceLimit(format!(
+                        "page count exceeds {MAX_DOCUMENT_PAGES}"
+                    )));
+                }
+                pages.push(node_ref);
+                Ok(1)
+            }
+            Some("Pages") => {
+                let kids = dict
+                    .get("Kids")
+                    .and_then(PdfObject::as_array)
+                    .ok_or_else(|| {
+                        PdfError::PageOperation(format!(
+                            "page-tree node {node_ref} is missing a /Kids array"
+                        ))
+                    })?;
+                if kids.len() > MAX_DOCUMENT_PAGES {
+                    return Err(PdfError::PageResourceLimit(format!(
+                        "page-tree /Kids count exceeds {MAX_DOCUMENT_PAGES}"
+                    )));
+                }
+                let mut actual = 0usize;
+                for kid in kids {
+                    let kid_ref = kid.as_reference().ok_or_else(|| {
+                        PdfError::PageOperation(format!(
+                            "page-tree node {node_ref} contains a direct or malformed child"
+                        ))
+                    })?;
+                    actual = actual
+                        .checked_add(Self::collect_validated(
+                            store,
+                            kid_ref,
+                            Some(node_ref),
+                            depth + 1,
+                            visited,
+                            pages,
+                        )?)
+                        .ok_or_else(|| {
+                            PdfError::PageResourceLimit("page count arithmetic overflow".into())
+                        })?;
+                }
+                let declared = dict
+                    .get("Count")
+                    .and_then(PdfObject::as_integer)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| {
+                        PdfError::PageOperation(format!(
+                            "page-tree node {node_ref} has an invalid /Count"
+                        ))
+                    })?;
+                if declared != actual {
+                    return Err(PdfError::PageOperation(format!(
+                        "page-tree node {node_ref} declares /Count {declared}, resolved {actual}"
+                    )));
+                }
+                Ok(actual)
+            }
+            other => Err(PdfError::PageOperation(format!(
+                "object {node_ref} has invalid page-tree /Type {other:?}"
+            ))),
+        }
     }
 }

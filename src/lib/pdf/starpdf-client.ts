@@ -15,9 +15,12 @@ import initWasm, {
   starpdf_add_annotation,
   starpdf_close,
   starpdf_create_minimal_pdf,
+  starpdf_delete_page,
+  starpdf_duplicate_page,
   starpdf_export_incremental,
   starpdf_extract_all_text,
   starpdf_extract_page_text,
+  starpdf_extract_pages,
   starpdf_get_annotations,
   starpdf_get_appearance_status,
   starpdf_get_glyph_mapping_quality,
@@ -26,6 +29,8 @@ import initWasm, {
   starpdf_get_page_count,
   starpdf_get_security_info,
   starpdf_open,
+  starpdf_insert_blank_page,
+  starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_search,
   starpdf_set_checkbox,
@@ -275,6 +280,47 @@ export class StarPdfDocumentHandle {
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_export_incremental(this._handle);
+  }
+
+  async deletePage(pageIndex: number): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_delete_page(this._handle, pageIndex);
+  }
+
+  async movePage(fromIndex: number, toIndex: number): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_move_page(this._handle, fromIndex, toIndex);
+  }
+
+  async duplicatePage(pageIndex: number, destinationIndex: number): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_duplicate_page(this._handle, pageIndex, destinationIndex);
+  }
+
+  async insertBlankPage(
+    pageIndex: number,
+    width: number,
+    height: number,
+    rotation: 0 | 90 | 180 | 270 = 0
+  ): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_insert_blank_page(
+      this._handle,
+      pageIndex,
+      width,
+      height,
+      rotation
+    );
+  }
+
+  async extractPages(pageIndices: number[]): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_extract_pages(this._handle, pageIndices);
   }
 
   async getAppearanceStatus(): Promise<
