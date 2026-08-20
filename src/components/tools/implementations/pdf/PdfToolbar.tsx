@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Loader2,
   Check,
+  Search,
 } from "lucide-react";
 import { type ExportMode } from "@/lib/pdf/pdf-types";
 
@@ -24,6 +25,12 @@ interface PdfToolbarProps {
   pageCount: number;
   scale: number;
   isExporting: boolean;
+  searchQuery?: string;
+  searchResultCount?: number;
+  activeSearchIndex?: number;
+  onSearchChange?: (query: string) => void;
+  onNextSearchResult?: () => void;
+  onPrevSearchResult?: () => void;
   onPageChange: (pageNumber: number) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -40,6 +47,12 @@ export function PdfToolbar({
   pageCount,
   scale,
   isExporting,
+  searchQuery = "",
+  searchResultCount = 0,
+  activeSearchIndex = 0,
+  onSearchChange,
+  onNextSearchResult,
+  onPrevSearchResult,
   onPageChange,
   onZoomIn,
   onZoomOut,
@@ -50,6 +63,7 @@ export function PdfToolbar({
   onOpenNewFile,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [showSearchInput, setShowSearchInput] = useState(false);
   const zoomPercentage = Math.round(scale * 100);
 
   return (
@@ -85,7 +99,7 @@ export function PdfToolbar({
         </div>
       </div>
 
-      {/* Center: Page Navigation & Zoom Controls */}
+      {/* Center: Page Navigation, Zoom Controls & Search */}
       <div className="flex items-center gap-1 sm:gap-3">
         {/* Page Nav */}
         <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
@@ -99,11 +113,11 @@ export function PdfToolbar({
             title="Previous Page"
             aria-label="Previous Page"
           >
-            <ChevronLeft className="size-4" />
+            <ChevronLeft className="size-3.5" />
           </Button>
 
           <span className="text-xs text-slate-700 font-medium px-1.5 tabular-nums">
-            {currentPage} <span className="text-slate-400">/</span> {pageCount}
+            {currentPage} / {pageCount}
           </span>
 
           <Button
@@ -116,7 +130,7 @@ export function PdfToolbar({
             title="Next Page"
             aria-label="Next Page"
           >
-            <ChevronRight className="size-4" />
+            <ChevronRight className="size-3.5" />
           </Button>
         </div>
 
@@ -178,6 +192,76 @@ export function PdfToolbar({
             <Minimize2 className="size-3.5" />
           </Button>
         </div>
+
+        {/* StarPDF Native Search Input */}
+        {onSearchChange && (
+          <div className="flex items-center gap-1">
+            {showSearchInput ? (
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-0.5 animate-in fade-in duration-100">
+                <Search className="size-3 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search in document..."
+                  value={searchQuery}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  className="bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none w-28 sm:w-36 h-6"
+                  autoFocus
+                />
+                {searchResultCount > 0 && (
+                  <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap pl-1">
+                    {activeSearchIndex + 1}/{searchResultCount}
+                  </span>
+                )}
+                {searchResultCount > 0 && onPrevSearchResult && onNextSearchResult && (
+                  <div className="flex items-center gap-0.5 pl-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={onPrevSearchResult}
+                      className="size-5 rounded text-slate-500"
+                      title="Previous hit"
+                    >
+                      <ChevronLeft className="size-3" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={onNextSearchResult}
+                      className="size-5 rounded text-slate-500"
+                      title="Next hit"
+                    >
+                      <ChevronRight className="size-3" />
+                    </Button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSearchInput(false);
+                    onSearchChange("");
+                  }}
+                  className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSearchInput(true)}
+                className="size-8 text-slate-500 hover:text-slate-900 rounded-lg"
+                title="Search text (StarPDF WASM)"
+                aria-label="Search text"
+              >
+                <Search className="size-3.5" />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right: Export Menu */}
