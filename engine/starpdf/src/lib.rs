@@ -46,6 +46,7 @@ pub mod forms;
 pub mod io;
 pub mod mutation;
 pub mod search;
+pub mod security;
 pub mod syntax;
 pub mod text;
 pub mod validate;

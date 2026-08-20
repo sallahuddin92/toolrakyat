@@ -17,6 +17,7 @@ import initWasm, {
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
+  starpdf_get_security_info,
   starpdf_open,
   starpdf_remove_annotation,
   starpdf_search,
@@ -36,6 +37,8 @@ function classifyError(err) {
   const message = err instanceof Error ? err.message : String(err);
   if (/handle/i.test(message)) return { code: "INVALID_HANDLE", message };
   if (/limit|maximum|exceed/i.test(message)) return { code: "RESOURCE_LIMIT", message };
+  if (/ENCRYPTED_DOCUMENT/i.test(message)) return { code: "ENCRYPTED_DOCUMENT", message };
+  if (/SIGNATURE|SIGNED_/i.test(message)) return { code: "SIGNED_DOCUMENT", message };
   if (/unsupported/i.test(message)) return { code: "UNSUPPORTED", message };
   if (/parse|syntax|header|xref|PDF/i.test(message)) return { code: "INVALID_PDF", message };
   return { code: "ENGINE_ERROR", message };
@@ -70,6 +73,11 @@ self.onmessage = async (event) => {
       case "info": {
         const info = starpdf_get_info(req.handle);
         self.postMessage({ type: "info", id: req.id, success: true, info });
+        break;
+      }
+      case "securityInfo": {
+        const securityInfo = starpdf_get_security_info(req.handle);
+        self.postMessage({ type: "securityInfo", id: req.id, success: true, securityInfo });
         break;
       }
       case "pageCount": {

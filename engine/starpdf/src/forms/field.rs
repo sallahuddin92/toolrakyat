@@ -23,6 +23,27 @@ pub enum FieldValue {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldGraphClassification {
+    CanonicalField,
+    MultiWidgetField,
+    OrphanWidget,
+    AmbiguousWidgetGroup,
+    MalformedFieldGraph,
+}
+
+impl FieldGraphClassification {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CanonicalField => "CANONICAL_FIELD",
+            Self::MultiWidgetField => "MULTI_WIDGET_FIELD",
+            Self::OrphanWidget => "ORPHAN_WIDGET",
+            Self::AmbiguousWidgetGroup => "AMBIGUOUS_WIDGET_GROUP",
+            Self::MalformedFieldGraph => "MALFORMED_FIELD_GRAPH",
+        }
+    }
+}
+
 /// Represents an option within a Choice (Combo/List) field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -52,6 +73,7 @@ pub struct FormField {
     pub widgets: Vec<WidgetAnnotation>,
     pub is_read_only: bool,
     pub is_required: bool,
+    pub graph_classification: FieldGraphClassification,
 }
 
 impl FormField {

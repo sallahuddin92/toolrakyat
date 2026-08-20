@@ -242,9 +242,62 @@ impl<'a> PdfDocument<'a> {
         &mut self,
         changes: &[crate::mutation::PdfChange],
     ) -> PdfResult<crate::mutation::MutationPlan> {
+        let security = self.security_info()?;
+        if security.encryption_state != crate::security::EncryptionState::NotEncrypted {
+            return Err(PdfError::EncryptedDocumentUnsupported(
+                security.encryption_state.as_str().to_string(),
+            ));
+        }
+        if security.signature_state == crate::security::SignatureState::SignedStructureMalformed {
+            return Err(PdfError::SignatureMutationUnsupported(
+                "signature structure or ByteRange is malformed".into(),
+            ));
+        }
+        let fields = self.form_fields()?;
+        for change in changes {
+            let target = match change {
+                crate::mutation::PdfChange::SetTextField { field_ref, .. }
+                | crate::mutation::PdfChange::SetCheckbox { field_ref, .. }
+                | crate::mutation::PdfChange::SetChoice { field_ref, .. }
+                | crate::mutation::PdfChange::SetChoiceValues { field_ref, .. } => Some(*field_ref),
+                crate::mutation::PdfChange::SetRadio { parent_ref, .. } => Some(*parent_ref),
+                _ => None,
+            };
+            if target.is_some_and(|reference| {
+                fields.iter().any(|field| {
+                    field.object_ref == reference
+                        && matches!(field.field_type, crate::forms::FieldType::Signature)
+                })
+            }) {
+                return Err(PdfError::SignatureMutationUnsupported(
+                    "signature fields are inspection-only".into(),
+                ));
+            }
+            if matches!(change, crate::mutation::PdfChange::SetRadio { .. })
+                && target.is_some_and(|reference| {
+                    fields.iter().any(|field| {
+                        field.object_ref == reference
+                            && matches!(
+                                field.graph_classification,
+                                crate::forms::FieldGraphClassification::AmbiguousWidgetGroup
+                                    | crate::forms::FieldGraphClassification::MalformedFieldGraph
+                            )
+                    })
+                })
+            {
+                return Err(PdfError::AmbiguousFieldGraph(
+                    "radio group membership is malformed or not proven by object relationships"
+                        .into(),
+                ));
+            }
+        }
         let page_refs = self.page_refs()?;
         let mut engine = crate::mutation::MutationEngine::new(&mut self.store, &page_refs);
         engine.prepare_plan(changes)
+    }
+
+    pub fn security_info(&mut self) -> PdfResult<crate::security::DocumentSecurityInfo> {
+        crate::security::DocumentSecurityInfo::inspect(&mut self.store, self.source.len())
     }
 
     /// Writes an incremental update based on a prepared MutationPlan.

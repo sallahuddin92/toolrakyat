@@ -9,7 +9,7 @@ use crate::syntax::object::PdfObject;
 use crate::syntax::parser::Parser;
 use crate::syntax::token::Token;
 use crate::xref::stream::XrefStreamParser;
-use crate::xref::table::XrefTable;
+use crate::xref::table::{XrefKind, XrefRevision, XrefTable};
 
 pub struct XrefResolver;
 
@@ -144,17 +144,45 @@ impl XrefResolver {
                     PdfObject::Stream(stream) => {
                         XrefStreamParser::parse_into_table(&stream, table, limits)?;
 
+                        let prev_offset = Self::validated_previous_offset(
+                            stream.dict.get("Prev"),
+                            offset,
+                            source.len(),
+                            "Prev",
+                        )?;
+                        let xrefstm_offset = Self::validated_previous_offset(
+                            stream.dict.get("XRefStm"),
+                            offset,
+                            source.len(),
+                            "XRefStm",
+                        )?;
+                        table.revisions.push(XrefRevision {
+                            revision_index: table.revisions.len(),
+                            kind: XrefKind::Stream,
+                            xref_offset: offset,
+                            prev_offset,
+                            xrefstm_offset,
+                        });
+
+                        if let Some(xrefstm) = xrefstm_offset {
+                            Self::parse_xref_chain_at_offset(
+                                source,
+                                xrefstm,
+                                table,
+                                visited_offsets,
+                                limits,
+                            )?;
+                        }
+
                         // Check for chained /Prev in stream dict
-                        if let Some(prev) = stream.dict.get("Prev").and_then(|v| v.as_i64()) {
-                            if prev > 0 {
-                                Self::parse_xref_chain_at_offset(
-                                    source,
-                                    prev as u64,
-                                    table,
-                                    visited_offsets,
-                                    limits,
-                                )?;
-                            }
+                        if let Some(prev) = prev_offset {
+                            Self::parse_xref_chain_at_offset(
+                                source,
+                                prev,
+                                table,
+                                visited_offsets,
+                                limits,
+                            )?;
                         }
                     }
                     other => {
@@ -181,9 +209,10 @@ impl XrefResolver {
         table: &mut XrefTable,
         visited_offsets: &mut BTreeSet<u64>,
         limits: &DecompressLimits,
-        _current_offset: u64,
+        current_offset: u64,
     ) -> PdfResult<()> {
         // Parse subsections
+        let mut entries_seen = 0usize;
         loop {
             lexer.skip_whitespace_and_comments();
             let first_token = match lexer.peek_token()? {
@@ -207,6 +236,15 @@ impl XrefResolver {
                         }
                         None => return Err(PdfError::UnexpectedEof),
                     };
+                    entries_seen = entries_seen.checked_add(count).ok_or_else(|| {
+                        PdfError::InvalidXref("Classic xref entry count overflow".into())
+                    })?;
+                    if entries_seen > limits.max_xref_entries {
+                        return Err(PdfError::InvalidXref(format!(
+                            "Classic xref entry count {entries_seen} exceeds security limit {}",
+                            limits.max_xref_entries
+                        )));
+                    }
 
                     let start_obj = start_num as u64;
                     for i in 0..count {
@@ -287,32 +325,76 @@ impl XrefResolver {
             }
         };
 
+        let xrefstm_offset = Self::validated_previous_offset(
+            current_dict.get("XRefStm"),
+            current_offset,
+            source.len(),
+            "XRefStm",
+        )?;
+        let prev_offset = Self::validated_previous_offset(
+            current_dict.get("Prev"),
+            current_offset,
+            source.len(),
+            "Prev",
+        )?;
+        table.revisions.push(XrefRevision {
+            revision_index: table.revisions.len(),
+            kind: XrefKind::Classic,
+            xref_offset: current_offset,
+            prev_offset,
+            xrefstm_offset,
+        });
+
         // 1. Check for /XRefStm in current trailer (Hybrid-Reference PDFs)
-        if let Some(xref_stm_offset) = current_dict.get("XRefStm").and_then(|v| v.as_i64()) {
-            if xref_stm_offset > 0 {
-                Self::parse_xref_chain_at_offset(
-                    source,
-                    xref_stm_offset as u64,
-                    table,
-                    visited_offsets,
-                    limits,
-                )?;
+        if let Some(xref_stm_offset) = xrefstm_offset {
+            let before = table.revisions.len();
+            Self::parse_xref_chain_at_offset(
+                source,
+                xref_stm_offset,
+                table,
+                visited_offsets,
+                limits,
+            )?;
+            if let Some(revision) = table.revisions.get_mut(before) {
+                revision.kind = XrefKind::HybridStream;
             }
         }
 
         // 2. Check for chained /Prev xref tables if incremental update
-        if let Some(prev) = current_dict.get("Prev").and_then(|v| v.as_i64()) {
-            if prev > 0 {
-                Self::parse_xref_chain_at_offset(
-                    source,
-                    prev as u64,
-                    table,
-                    visited_offsets,
-                    limits,
-                )?;
-            }
+        if let Some(prev) = prev_offset {
+            Self::parse_xref_chain_at_offset(source, prev, table, visited_offsets, limits)?;
         }
 
         Ok(())
+    }
+
+    fn validated_previous_offset(
+        object: Option<&PdfObject>,
+        current_offset: u64,
+        source_len: usize,
+        key: &str,
+    ) -> PdfResult<Option<u64>> {
+        let Some(value) = object else {
+            return Ok(None);
+        };
+        let offset = value.as_i64().ok_or_else(|| {
+            PdfError::InvalidXref(format!("/{key} must be a non-negative integer offset"))
+        })?;
+        let offset = u64::try_from(offset)
+            .map_err(|_| PdfError::InvalidXref(format!("/{key} offset is negative")))?;
+        if offset == 0 {
+            return Ok(None);
+        }
+        if offset >= source_len as u64 {
+            return Err(PdfError::InvalidXref(format!(
+                "/{key} offset {offset} exceeds file length {source_len}"
+            )));
+        }
+        if offset >= current_offset {
+            return Err(PdfError::InvalidXref(format!(
+                "/{key} offset {offset} is not before current xref offset {current_offset}"
+            )));
+        }
+        Ok(Some(offset))
     }
 }

@@ -125,3 +125,54 @@ fn test_xref_stream_flate_compressed_with_index() {
         })
     );
 }
+
+#[test]
+fn test_xref_stream_rejects_unrepresentable_widths_and_index_ranges() {
+    let limits = DecompressLimits::default();
+    let mut wide_dict = BTreeMap::from([
+        ("Type".into(), PdfObject::Name("XRef".into())),
+        ("Size".into(), PdfObject::Integer(1)),
+        (
+            "W".into(),
+            PdfObject::Array(vec![
+                PdfObject::Integer(1),
+                PdfObject::Integer(9),
+                PdfObject::Integer(1),
+            ]),
+        ),
+    ]);
+    let wide_stream = StreamObject {
+        dict: wide_dict.clone(),
+        data: vec![0; 11],
+        stream_offset: 0,
+        stream_length: 11,
+    };
+    assert!(
+        XrefStreamParser::parse_into_table(&wide_stream, &mut XrefTable::new(), &limits).is_err()
+    );
+
+    wide_dict.insert(
+        "W".into(),
+        PdfObject::Array(vec![
+            PdfObject::Integer(1),
+            PdfObject::Integer(2),
+            PdfObject::Integer(1),
+        ]),
+    );
+    wide_dict.insert(
+        "Index".into(),
+        PdfObject::Array(vec![PdfObject::Integer(1), PdfObject::Integer(1)]),
+    );
+    let out_of_size_stream = StreamObject {
+        dict: wide_dict,
+        data: vec![0; 4],
+        stream_offset: 0,
+        stream_length: 4,
+    };
+    assert!(XrefStreamParser::parse_into_table(
+        &out_of_size_stream,
+        &mut XrefTable::new(),
+        &limits
+    )
+    .is_err());
+}

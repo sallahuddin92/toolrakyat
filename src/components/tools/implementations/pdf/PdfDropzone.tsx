@@ -131,7 +131,10 @@ export function PdfDropzone({
       </Card>
 
       {displayError && (
-        <div className="flex items-start gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">
+        <div
+          className="flex items-start gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm"
+          data-testid="starpdf-document-error"
+        >
           <AlertCircle className="size-5 shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-medium">Unable to open document</p>

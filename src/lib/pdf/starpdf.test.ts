@@ -10,10 +10,53 @@ function loadTestAsset(filename: string): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe("StarPDF v0.10 WASM Client Runtime & Appearance Engine", () => {
-  it("retrieves engine version 0.10.0", async () => {
+function loadComplexFixture(filename: string): Uint8Array {
+  const fixturePath = path.resolve(
+    process.cwd(),
+    "engine/starpdf/tests/fixtures/v0_11_complex",
+    filename,
+  );
+  return new Uint8Array(fs.readFileSync(fixturePath));
+}
+
+describe("StarPDF v0.11 WASM Client Runtime & Preservation Engine", () => {
+  it("retrieves engine version 0.11.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.10.0");
+    expect(version).toBe("0.11.0");
+  });
+
+  it("reports signed document metadata without claiming verification", async () => {
+    const doc = await StarPdfClient.open(loadComplexFixture("synthetic-signed-valid.pdf"));
+    const security = await doc.getSecurityInfo();
+    expect(security.signature_state).toBe("SIGNED_WITH_BYTE_RANGE");
+    expect(security.signature_count).toBe(1);
+    expect(security.cryptographic_verification).toBe("NOT_PERFORMED");
+    expect(security.mutation_allowed).toBe(true);
+    await doc.close();
+  });
+
+  it("detects encrypted metadata and refuses mutation explicitly", async () => {
+    const doc = await StarPdfClient.open(loadComplexFixture("synthetic-encrypted-standard.pdf"));
+    const security = await doc.getSecurityInfo();
+    expect(security.encryption_state).toBe("STANDARD_SECURITY_DETECTED");
+    expect(security.mutation_allowed).toBe(false);
+    await doc.addAnnotation(0, {
+      subtype: "Square",
+      rect: [10, 10, 20, 20],
+    });
+    await expect(doc.exportIncremental()).rejects.toThrow(
+      "ENCRYPTED_DOCUMENT_MUTATION_UNSUPPORTED",
+    );
+    await doc.close();
+  });
+
+  it("leaves ordinary PDFs unrestricted", async () => {
+    const doc = await StarPdfClient.open(await StarPdfClient.createMinimalPdf("ordinary"));
+    const security = await doc.getSecurityInfo();
+    expect(security.signature_state).toBe("UNSIGNED");
+    expect(security.encryption_state).toBe("NOT_ENCRYPTED");
+    expect(security.mutation_allowed).toBe(true);
+    await doc.close();
   });
 
   it("creates minimal PDF and opens it", async () => {

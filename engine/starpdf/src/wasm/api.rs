@@ -14,8 +14,8 @@ use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField,
-    WasmPageText, WasmSearchBoundingBox, WasmSearchResult, WasmTextSpan, WasmUpdateAnnotationInput,
-    WasmWidget,
+    WasmPageText, WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
+    WasmUpdateAnnotationInput, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -30,7 +30,37 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.10.0".to_string()
+    "0.11.0".to_string()
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let info = doc.security_info()?;
+            let dto = WasmSecurityInfo {
+                signature_state: info.signature_state.as_str().to_string(),
+                signature_count: info.signature_count,
+                byte_range_count: info.byte_ranges.len(),
+                encryption_state: info.encryption_state.as_str().to_string(),
+                encryption_filter: info.encryption_filter,
+                encryption_subfilter: info.encryption_subfilter,
+                permission_raw: info.permissions.raw,
+                permission_printing: info.permissions.printing,
+                permission_modification: info.permissions.modification,
+                permission_copying: info.permissions.copying,
+                permission_annotation_and_forms: info.permissions.annotation_and_forms,
+                mutation_allowed: info.mutation_allowed,
+                mutation_reason_code: info.mutation_reason_code,
+                signed_mutation_state: info.signed_mutation_state.as_str().to_string(),
+                cryptographic_verification: "NOT_PERFORMED".to_string(),
+                document_id_valid: info.document_id_valid,
+            };
+            serde_wasm_bindgen::to_value(&dto)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
 }
 
 #[cfg(feature = "wasm")]
@@ -277,6 +307,7 @@ pub fn starpdf_get_form_fields(handle: u32) -> Result<JsValue, JsValue> {
                         options,
                         selected_indices: f.selected_indices,
                         widgets,
+                        graph_classification: f.graph_classification.as_str().to_string(),
                     }
                 })
                 .collect();

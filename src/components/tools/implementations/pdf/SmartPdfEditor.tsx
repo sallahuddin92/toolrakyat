@@ -14,7 +14,7 @@ import {
 } from "@/lib/pdf/pdf-types";
 import { PdfError } from "@/lib/pdf/pdf-errors";
 import { StarPdfClient, type StarPdfDocumentHandle } from "@/lib/pdf/starpdf-client";
-import type { StarPdfSearchResult } from "@/lib/pdf/starpdf-types";
+import type { StarPdfSearchResult, StarPdfSecurityInfo } from "@/lib/pdf/starpdf-types";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -29,6 +29,7 @@ export function SmartPdfEditor() {
   const [inspectionResult, setInspectionResult] = useState<DocumentInspectionResult | null>(null);
   const [pdfProxy, setPdfProxy] = useState<PDFDocumentProxy | null>(null);
   const [starPdfDoc, setStarPdfDoc] = useState<StarPdfDocumentHandle | null>(null);
+  const [securityInfo, setSecurityInfo] = useState<StarPdfSecurityInfo | null>(null);
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
@@ -70,19 +71,31 @@ export function SmartPdfEditor() {
     async (bytes: Uint8Array, docFilename: string, docSize: number) => {
       setIsLoading(true);
       setError(null);
+      setSecurityInfo(null);
       setLoadingMessage("Parsing PDF structure & detecting form fields...");
 
       try {
-        // 1. Inspect using pdf-lib (AcroForms, metadata, dimensions)
-        const inspected = await inspectPdfDocument(bytes, docFilename, docSize);
-
-        // 2. Open StarPDF WASM document handle for validation & search
+        // 1. Open StarPDF first so security policy is established before other parsers/editors.
         let starDoc: StarPdfDocumentHandle | null = null;
         try {
           starDoc = await StarPdfClient.open(bytes);
+          const detectedSecurity = await starDoc.getSecurityInfo();
+          setSecurityInfo(detectedSecurity);
+          if (detectedSecurity.encryption_state !== "NOT_ENCRYPTED") {
+            await starDoc.close();
+            const message =
+              "This PDF is encrypted with an unsupported security handler. Editing is unavailable; StarPDF does not decrypt or bypass document security.";
+            setError(message);
+            setIsLoading(false);
+            toast.error(message);
+            return;
+          }
         } catch (starErr) {
           console.warn("StarPDF validation note:", starErr);
         }
+
+        // 2. Inspect using pdf-lib (AcroForms, metadata, dimensions)
+        const inspected = await inspectPdfDocument(bytes, docFilename, docSize);
 
         // 3. Load into PDF.js for canvas rendering (copy bytes buffer to prevent detached ArrayBuffer)
         setLoadingMessage("Initializing document viewer...");
@@ -272,6 +285,7 @@ export function SmartPdfEditor() {
     setFieldValues({});
     setIsModified(false);
     setError(null);
+    setSecurityInfo(null);
     setCurrentPage(1);
     setScale(1.0);
     setSearchQuery("");
@@ -297,6 +311,17 @@ export function SmartPdfEditor() {
       className="flex flex-col h-[820px] rounded-3xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs"
       data-testid="smartpdf-editor-workspace"
     >
+      {securityInfo && securityInfo.signature_state !== "UNSIGNED" ? (
+        <div
+          className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          data-testid="starpdf-signed-document-warning"
+          role="status"
+        >
+          This PDF contains a digital signature. StarPDF preserves the original signed bytes when
+          appending an update, but it does not verify cryptographic signature validity. A saved edit
+          is a post-signature revision.
+        </div>
+      ) : null}
       {/* Top Application Toolbar */}
       <PdfToolbar
         filename={filename}

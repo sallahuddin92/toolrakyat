@@ -13,6 +13,7 @@ export const starpdf_get_form_fields: (a: number) => [number, number, number];
 export const starpdf_get_glyph_mapping_quality: (a: number) => [number, number, number, number];
 export const starpdf_get_info: (a: number) => [number, number, number];
 export const starpdf_get_page_count: (a: number) => [number, number, number];
+export const starpdf_get_security_info: (a: number) => [number, number, number];
 export const starpdf_open: (a: number, b: number) => [number, number, number];
 export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
 export const starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];

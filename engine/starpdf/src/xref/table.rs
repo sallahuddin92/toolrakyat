@@ -2,6 +2,22 @@ use crate::syntax::object::PdfObject;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XrefKind {
+    Classic,
+    Stream,
+    HybridStream,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct XrefRevision {
+    pub revision_index: usize,
+    pub kind: XrefKind,
+    pub xref_offset: u64,
+    pub prev_offset: Option<u64>,
+    pub xrefstm_offset: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XrefEntry {
     Free {
         next_free_obj: u64,
@@ -30,6 +46,14 @@ impl XrefEntry {
             _ => None,
         }
     }
+
+    #[inline]
+    pub const fn generation(&self) -> u16 {
+        match self {
+            Self::Free { generation, .. } | Self::InUse { generation, .. } => *generation,
+            Self::Compressed { .. } => 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -37,6 +61,7 @@ pub struct XrefTable {
     pub entries: BTreeMap<u64, XrefEntry>,
     pub trailer: BTreeMap<String, PdfObject>,
     pub startxref_offset: u64,
+    pub revisions: Vec<XrefRevision>,
 }
 
 impl XrefTable {

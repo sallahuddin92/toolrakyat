@@ -28,7 +28,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.10 Micro-Benchmark Suite            ");
+    println!("         StarPDF Engine v0.11A Micro-Benchmark Suite            ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -899,6 +899,177 @@ ET
         let elapsed = start.elapsed();
         println!(
             "35. Inherited Mutation Plan:  {:>8} ns/op  ({:.2?} for {} plans)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 36. Multi-revision chain traversal
+    {
+        let fixture =
+            include_bytes!("../tests/fixtures/v0_11_complex/synthetic-hybrid-multi-revision.pdf");
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let table = starpdf::xref::XrefResolver::load_xref_and_trailer(
+                starpdf::io::source::ByteSource::new(fixture),
+            )
+            .unwrap();
+            assert_eq!(table.revisions.len(), 3);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "36. Revision Chain Traversal: {:>8} ns/op  ({:.2?} for {} traversals)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 37. Hybrid xref and latest-definition resolution
+    {
+        let fixture =
+            include_bytes!("../tests/fixtures/v0_11_complex/synthetic-hybrid-multi-revision.pdf");
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+            assert!(doc.page_dict(0).unwrap().contains_key("StarPDFRevision"));
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "37. Hybrid/Conflict Resolve:  {:>8} ns/op  ({:.2?} for {} resolutions)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 38. ByteRange validation
+    {
+        let byte_range = PdfObject::Array(vec![
+            PdfObject::Integer(0),
+            PdfObject::Integer(64),
+            PdfObject::Integer(128),
+            PdfObject::Integer(64),
+        ]);
+        let iterations = 100_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let ranges = starpdf::security::parse_byte_range(&byte_range, 1024).unwrap();
+            assert_eq!(ranges.len(), 2);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "38. ByteRange Parsing:        {:>8} ns/op  ({:.2?} for {} parses)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 39. Signature structure detection
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_11_complex/synthetic-signed-valid.pdf");
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+            assert_eq!(doc.security_info().unwrap().signature_count, 1);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "39. Signature Detection:      {:>8} ns/op  ({:.2?} for {} inspections)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 40. Encryption structure and permission detection
+    {
+        let fixture =
+            include_bytes!("../tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf");
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+            assert!(!doc.security_info().unwrap().mutation_allowed);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "40. Encryption Detection:     {:>8} ns/op  ({:.2?} for {} inspections)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 41. Orphan/ambiguous field graph classification
+    {
+        let fixture =
+            include_bytes!("../tests/fixtures/v0_11_complex/synthetic-ambiguous-orphan-radio.pdf");
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+            assert_eq!(doc.form_fields().unwrap().len(), 2);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "41. Field Graph Classification:{:>8} ns/op  ({:.2?} for {} classifications)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 42. Metadata-preserving mutation planning
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_11_complex/synthetic-metadata-rich.pdf");
+        let iterations = 2_000;
+        let change = PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::Square {
+                rect: [20.0, 20.0, 40.0, 40.0],
+                stroke_color: None,
+                fill_color: None,
+                border_width: None,
+            },
+        };
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+            assert!(!doc
+                .apply_mutation(std::slice::from_ref(&change))
+                .unwrap()
+                .modified_objects
+                .is_empty());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "42. Metadata Preserve Plan:   {:>8} ns/op  ({:.2?} for {} plans)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 43. Effective trailer lookup after mixed revision resolution
+    {
+        let fixture =
+            include_bytes!("../tests/fixtures/v0_11_complex/synthetic-hybrid-multi-revision.pdf");
+        let doc = PdfDocument::from_bytes(fixture).unwrap();
+        let iterations = 1_000_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            assert!(doc.trailer().get("Root").is_some());
+            assert!(doc.trailer().get("ID").is_some());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "43. Effective Trailer Lookup:{:>8} ns/op  ({:.2?} for {} lookups)",
             elapsed.as_nanos() / iterations as u128,
             elapsed,
             iterations

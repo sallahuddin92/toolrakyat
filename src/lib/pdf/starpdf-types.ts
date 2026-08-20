@@ -8,6 +8,39 @@ export interface StarPdfDocumentInfo {
   is_valid: boolean;
 }
 
+export interface StarPdfSecurityInfo {
+  signature_state:
+    | "UNSIGNED"
+    | "SIGNED_PRESENT"
+    | "SIGNED_WITH_BYTE_RANGE"
+    | "SIGNED_STRUCTURE_MALFORMED";
+  signature_count: number;
+  byte_range_count: number;
+  encryption_state:
+    | "NOT_ENCRYPTED"
+    | "STANDARD_SECURITY_DETECTED"
+    | "PUBLIC_KEY_SECURITY_DETECTED"
+    | "UNSUPPORTED_ENCRYPTION"
+    | "MALFORMED_ENCRYPTION_DICTIONARY";
+  encryption_filter?: string;
+  encryption_subfilter?: string;
+  permission_raw?: number;
+  permission_printing?: boolean;
+  permission_modification?: boolean;
+  permission_copying?: boolean;
+  permission_annotation_and_forms?: boolean;
+  mutation_allowed: boolean;
+  mutation_reason_code?: string;
+  signed_mutation_state:
+    | "NOT_APPLICABLE"
+    | "SIGNED_BYTES_PRESERVED"
+    | "POST_SIGNATURE_REVISION_ADDED"
+    | "SIGNATURE_VALIDITY_UNKNOWN"
+    | "MUTATION_REFUSED";
+  cryptographic_verification: "NOT_PERFORMED";
+  document_id_valid: boolean;
+}
+
 export interface StarPdfTextSpan {
   page_index: number;
   text: string;
@@ -84,6 +117,12 @@ export interface StarPdfFormField {
   options: StarPdfChoiceOption[];
   selected_indices: number[];
   widgets: StarPdfWidget[];
+  graph_classification:
+    | "CANONICAL_FIELD"
+    | "MULTI_WIDGET_FIELD"
+    | "ORPHAN_WIDGET"
+    | "AMBIGUOUS_WIDGET_GROUP"
+    | "MALFORMED_FIELD_GRAPH";
 }
 
 export interface StarPdfAnnotation {
@@ -142,6 +181,7 @@ export type StarPdfWorkerRequest =
   | { type: "init"; id: string; wasmUrl?: string }
   | { type: "open"; id: string; buffer: ArrayBuffer }
   | { type: "info"; id: string; handle: number }
+  | { type: "securityInfo"; id: string; handle: number }
   | { type: "pageCount"; id: string; handle: number }
   | { type: "extractPage"; id: string; handle: number; pageIndex: number }
   | { type: "extractAll"; id: string; handle: number }
@@ -179,6 +219,7 @@ export type StarPdfWorkerResponse =
   | { type: "init"; id: string; success: true; version: string }
   | { type: "open"; id: string; success: true; handle: number }
   | { type: "info"; id: string; success: true; info: StarPdfDocumentInfo }
+  | { type: "securityInfo"; id: string; success: true; securityInfo: StarPdfSecurityInfo }
   | { type: "pageCount"; id: string; success: true; pageCount: number }
   | { type: "extractPage"; id: string; success: true; pageText: StarPdfPageText }
   | { type: "extractAll"; id: string; success: true; pages: StarPdfPageText[] }
@@ -204,5 +245,5 @@ export type StarPdfWorkerResponse =
       id: string;
       success: false;
       error: string;
-      code: "INVALID_HANDLE" | "RESOURCE_LIMIT" | "UNSUPPORTED" | "INVALID_PDF" | "ENGINE_ERROR";
+      code: "INVALID_HANDLE" | "RESOURCE_LIMIT" | "UNSUPPORTED" | "SIGNED_DOCUMENT" | "ENCRYPTED_DOCUMENT" | "INVALID_PDF" | "ENGINE_ERROR";
     };
