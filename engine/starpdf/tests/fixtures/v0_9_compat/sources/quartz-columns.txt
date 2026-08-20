@@ -1,0 +1,4 @@
+QUARTZ-COLUMNS-KAPPA
+Column A        Column B        Column C
+alpha           beta            gamma
+one             two             three

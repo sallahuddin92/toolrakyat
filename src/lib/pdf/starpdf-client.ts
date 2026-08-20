@@ -19,6 +19,7 @@ import initWasm, {
   starpdf_extract_page_text,
   starpdf_get_annotations,
   starpdf_get_appearance_status,
+  starpdf_get_glyph_mapping_quality,
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
@@ -278,6 +279,18 @@ export class StarPdfDocumentHandle {
       | "AP_PRESERVED"
       | "AP_NOT_REQUIRED"
       | "AP_UNSUPPORTED";
+  }
+
+  async getGlyphMappingQuality(): Promise<
+    "EXACT" | "FALLBACK" | "UNREPRESENTABLE" | "NOT_APPLICABLE"
+  > {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_glyph_mapping_quality(this._handle) as
+      | "EXACT"
+      | "FALLBACK"
+      | "UNREPRESENTABLE"
+      | "NOT_APPLICABLE";
   }
 
   async close(): Promise<void> {

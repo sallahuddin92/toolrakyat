@@ -312,6 +312,7 @@ fn test_unknown_annotation_subtype_is_preserved_during_supported_update() {
             (unknown_ref, PdfObject::Dictionary(unknown_dict)),
         ]),
         appearance_status: AppearanceStatus::AppearancePreserved,
+        glyph_mapping_quality: None,
     };
     let with_unknown = doc.export_incremental(&initial_plan).unwrap();
 

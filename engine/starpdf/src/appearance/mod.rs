@@ -5,6 +5,7 @@ pub mod da_parser;
 pub mod fonts;
 pub mod generator;
 pub mod radio;
+pub mod rotation;
 pub mod status;
 pub mod text_field;
 

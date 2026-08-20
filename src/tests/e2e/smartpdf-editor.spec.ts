@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, rgb } from "pdf-lib";
 import sharp from "sharp";
 
 async function uploadPdfBytes(
@@ -33,7 +33,7 @@ async function createRichAppearanceFixture(): Promise<Buffer> {
   const font = await document.embedFont(fontBytes, { subset: false });
   const page = document.addPage([612, 792]);
   const form = document.getForm();
-  page.drawText("StarPDF v0.8 rich appearance fixture", {
+  page.drawText("StarPDF v0.9 rich appearance fixture", {
     x: 50,
     y: 748,
     size: 18,
@@ -45,13 +45,25 @@ async function createRichAppearanceFixture(): Promise<Buffer> {
   embedded.addToPage(page, {
     x: 50,
     y: 690,
-    width: 510,
+    width: 240,
+    height: 34,
+    font,
+    borderColor: rgb(0.1, 0.25, 0.55),
+    borderWidth: 1,
+  });
+  embedded.addToPage(page, {
+    x: 320,
+    y: 690,
+    width: 240,
     height: 34,
     font,
     borderColor: rgb(0.1, 0.25, 0.55),
     borderWidth: 1,
   });
   embedded.defaultUpdateAppearances(font);
+  const embeddedWidgets = embedded.acroField.getWidgets();
+  embeddedWidgets[0]?.getOrCreateAppearanceCharacteristics().setRotation(90);
+  embeddedWidgets[1]?.getOrCreateAppearanceCharacteristics().setRotation(270);
 
   const comb = form.createTextField("comb");
   comb.setMaxLength(6);
@@ -67,6 +79,7 @@ async function createRichAppearanceFixture(): Promise<Buffer> {
     borderWidth: 1,
   });
   comb.defaultUpdateAppearances(font);
+  comb.acroField.getWidgets()[0]?.getOrCreateAppearanceCharacteristics().setRotation(180);
 
   const multiline = form.createTextField("multiline");
   multiline.enableMultiline();
@@ -97,7 +110,45 @@ async function createRichAppearanceFixture(): Promise<Buffer> {
   });
   list.defaultUpdateAppearances(font);
 
-  return Buffer.from(await document.save({ useObjectStreams: false }));
+  return Buffer.from(
+    await document.save({
+      useObjectStreams: false,
+      updateFieldAppearances: false,
+    }),
+  );
+}
+
+async function createType0AppearanceFixture(): Promise<Buffer> {
+  const source = fs.readFileSync(
+    path.join(
+      process.cwd(),
+      "engine/starpdf/tests/fixtures/v0_9_compat/chrome-unicode.pdf",
+    ),
+  );
+  const document = await PDFDocument.load(source, { updateMetadata: false });
+  const page = document.getPage(0);
+  const field = document.getForm().createTextField("type0-identity-h");
+  field.setText("Original Type0 field");
+  field.addToPage(page, {
+    x: 50,
+    y: 620,
+    width: 300,
+    height: 42,
+    borderColor: rgb(0.1, 0.25, 0.55),
+    borderWidth: 1,
+  });
+
+  const pageResources = page.node.Resources();
+  if (!pageResources) throw new Error("Chrome Type0 fixture has no page resources");
+  field.acroField.dict.set(PDFName.of("DR"), pageResources);
+  field.acroField.setDefaultAppearance("/F5 14 Tf 0 g");
+
+  return Buffer.from(
+    await document.save({
+      useObjectStreams: false,
+      updateFieldAppearances: false,
+    }),
+  );
 }
 
 test.describe("SmartPDF — Advanced PDF Editor", () => {
@@ -249,7 +300,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test("StarPDF worker regenerates and visibly renders representative v0.8 annotation appearances", async ({
+  test("StarPDF worker regenerates and visibly renders representative v0.9 annotation appearances", async ({
     page,
   }) => {
     const fixture = fs.readFileSync(
@@ -469,7 +520,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       };
     }, Array.from(fixture));
 
-    expect(workerResult.version).toBe("0.8.0");
+    expect(workerResult.version).toBe("0.9.0");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
@@ -478,7 +529,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.reload();
     const mutatedCanvas = await uploadPdfBytes(
       page,
-      "starpdf-v0.8-mutated.pdf",
+      "starpdf-v0.9-mutated.pdf",
       Buffer.from(workerResult.output),
     );
     const mutatedPng = await mutatedCanvas.screenshot();
@@ -583,7 +634,9 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
         values: ["Alpha", "Gamma"],
       });
       const exported = await request({ type: "exportIncremental", handle });
+      if (!exported.success) throw new Error(`StarPDF export failed: ${String(exported.error)}`);
       const status = await request({ type: "getAppearanceStatus", handle });
+      const quality = await request({ type: "getGlyphMappingQuality", handle });
       const output = exported.bytes as Uint8Array;
       const reopen = await request({ type: "open", buffer: output.slice().buffer });
       const after = await request({
@@ -595,9 +648,22 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       worker.terminate();
 
       const finalFields = after.fields as Field[];
+      const appended = output.slice(inputBytes.length);
+      const countAscii = (needle: string) => {
+        const bytes = new TextEncoder().encode(needle);
+        let count = 0;
+        for (let offset = 0; offset + bytes.length <= appended.length; offset += 1) {
+          if (bytes.every((value, index) => appended[offset + index] === value)) count += 1;
+        }
+        return count;
+      };
       return {
         output: Array.from(output),
         status: status.status,
+        quality: quality.quality,
+        matrixCount: countAscii("/Matrix"),
+        embeddedFontCount: countAscii("/FontFile2"),
+        subsetResourceCount: countAscii("/SPF"),
         prefixPreserved: output
           .slice(0, inputBytes.length)
           .every((value, index) => value === inputBytes[index]),
@@ -610,6 +676,10 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     }, Array.from(fixture));
 
     expect(workerResult.status).toBe("AP_REGENERATED");
+    expect(workerResult.quality).toBe("EXACT");
+    expect(workerResult.matrixCount).toBeGreaterThanOrEqual(4);
+    expect(workerResult.embeddedFontCount).toBeGreaterThanOrEqual(1);
+    expect(workerResult.subsetResourceCount).toBeGreaterThanOrEqual(4);
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.comb).toEqual({ maxLen: 6, isComb: true });
     expect(workerResult.selected).toEqual([0, 2]);
@@ -617,7 +687,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.reload();
     const mutatedCanvas = await uploadPdfBytes(
       page,
-      "rich-fields-v0.8.pdf",
+      "rich-fields-v0.9.pdf",
       Buffer.from(workerResult.output),
     );
     const mutatedPng = await mutatedCanvas.screenshot();
@@ -636,5 +706,121 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       if (Math.abs(originalRegion[index] - mutatedRegion[index]) > 8) changedChannels += 1;
     }
     expect(changedChannels / originalRegion.length).toBeGreaterThan(0.01);
+  });
+
+  test("StarPDF automatically embeds and visibly renders a supported Identity-H Type0 appearance", async ({
+    page,
+  }) => {
+    const fixture = await createType0AppearanceFixture();
+    const originalCanvas = await uploadPdfBytes(page, "type0-field.pdf", fixture);
+    const originalPng = await originalCanvas.screenshot();
+
+    const workerResult = await page.evaluate(async (inputBytes) => {
+      type WorkerMessage = Record<string, unknown> & {
+        id: string;
+        success?: boolean;
+        type: string;
+      };
+      type Field = {
+        field_type: string;
+        name: string;
+        object_num: number;
+        object_gen: number;
+        value: string;
+      };
+      const worker = new Worker("/starpdf.worker.js", { type: "module" });
+      let requestId = 0;
+      const request = (message: Omit<WorkerMessage, "id">): Promise<WorkerMessage> => {
+        const id = `type0-${++requestId}`;
+        return new Promise((resolve, reject) => {
+          const onMessage = (event: MessageEvent<WorkerMessage>) => {
+            if (event.data.id !== id) return;
+            worker.removeEventListener("message", onMessage);
+            resolve(event.data);
+          };
+          worker.addEventListener("message", onMessage);
+          worker.addEventListener("error", reject, { once: true });
+          worker.postMessage({ ...message, id });
+        });
+      };
+
+      await request({ type: "init" });
+      const open = await request({
+        type: "open",
+        buffer: new Uint8Array(inputBytes).buffer,
+      });
+      const handle = open.handle as number;
+      const before = await request({ type: "getFormFields", handle });
+      const field = (before.fields as Field[]).find(
+        (candidate) => candidate.name === "type0-identity-h",
+      );
+      if (!field) throw new Error("Expected the generated Type0 field");
+      await request({
+        type: "setTextField",
+        handle,
+        objectNum: field.object_num,
+        objectGen: field.object_gen,
+        value: "Bahasa Melayu",
+      });
+      const exported = await request({ type: "exportIncremental", handle });
+      if (!exported.success) throw new Error(`StarPDF export failed: ${String(exported.error)}`);
+      const status = await request({ type: "getAppearanceStatus", handle });
+      const quality = await request({ type: "getGlyphMappingQuality", handle });
+      const output = exported.bytes as Uint8Array;
+      const reopen = await request({ type: "open", buffer: output.slice().buffer });
+      const after = await request({
+        type: "getFormFields",
+        handle: reopen.handle as number,
+      });
+      await request({ type: "close", handle });
+      await request({ type: "close", handle: reopen.handle as number });
+      worker.terminate();
+
+      const appended = output.slice(inputBytes.length);
+      const appendedAscii = new TextDecoder("latin1").decode(appended);
+      return {
+        output: Array.from(output),
+        status: status.status,
+        quality: quality.quality,
+        value: (after.fields as Field[]).find(
+          (candidate) => candidate.name === "type0-identity-h",
+        )?.value,
+        hasSubsetFont: appendedAscii.includes("/FontFile2"),
+        hasSubsetResource: appendedAscii.includes("/SPF"),
+        prefixPreserved: output
+          .slice(0, inputBytes.length)
+          .every((value, index) => value === inputBytes[index]),
+      };
+    }, Array.from(fixture));
+
+    expect(workerResult.status).toBe("AP_REGENERATED");
+    expect(workerResult.quality).toBe("EXACT");
+    expect(workerResult.value).toBe("Bahasa Melayu");
+    expect(workerResult.hasSubsetFont).toBe(true);
+    expect(workerResult.hasSubsetResource).toBe(true);
+    expect(workerResult.prefixPreserved).toBe(true);
+
+    await page.reload();
+    const mutatedCanvas = await uploadPdfBytes(
+      page,
+      "type0-field-v0.9.pdf",
+      Buffer.from(workerResult.output),
+    );
+    const mutatedPng = await mutatedCanvas.screenshot();
+    const metadata = await sharp(originalPng).metadata();
+    const region = {
+      left: 45,
+      top: 125,
+      width: Math.min(320, (metadata.width ?? 0) - 45),
+      height: 60,
+    };
+    expect(region.width).toBeGreaterThan(300);
+    const originalRegion = await sharp(originalPng).extract(region).raw().toBuffer();
+    const mutatedRegion = await sharp(mutatedPng).extract(region).raw().toBuffer();
+    let changedChannels = 0;
+    for (let index = 0; index < originalRegion.length; index += 1) {
+      if (Math.abs(originalRegion[index] - mutatedRegion[index]) > 8) changedChannels += 1;
+    }
+    expect(changedChannels / originalRegion.length).toBeGreaterThan(0.005);
   });
 });

@@ -7,6 +7,7 @@ use starpdf::annotation::{AnnotationGenerator, AnnotationParser, AnnotationSpec}
 use starpdf::appearance::checkbox::CheckboxAppearance;
 use starpdf::appearance::choice::ChoiceAppearance;
 use starpdf::appearance::da_parser::DefaultAppearance;
+use starpdf::appearance::rotation::WidgetRotation;
 use starpdf::appearance::text_field::{TextFieldAppearance, TextLayoutOptions};
 use starpdf::content::ContentParser;
 use starpdf::document::{ObjectStreamReader, PdfDocument};
@@ -27,7 +28,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.8 Micro-Benchmark Suite             ");
+    println!("          StarPDF Engine v0.9 Micro-Benchmark Suite             ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -689,6 +690,127 @@ ET
         );
     }
 
+    // 26. Rotated Widget Matrix Construction
+    {
+        let iterations = 100_000;
+        let mut stream = StreamObject {
+            dict: BTreeMap::new(),
+            data: Vec::new(),
+            stream_offset: 0,
+            stream_length: 0,
+        };
+        let start = Instant::now();
+        for index in 0..iterations {
+            let rotation = match index % 4 {
+                0 => WidgetRotation::Degrees0,
+                1 => WidgetRotation::Degrees90,
+                2 => WidgetRotation::Degrees180,
+                _ => WidgetRotation::Degrees270,
+            };
+            rotation
+                .apply_to_stream([10.0, 20.0, 210.0, 50.0], &mut stream)
+                .unwrap();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "26. Rotated Widget Matrix:   {:>8} ns/op  ({:.2?} for {} matrices)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 27. Composite Glyph Dependency Closure + Subset
+    {
+        let font = benchmark_composite_true_type();
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let subset = TrueTypeSubsetter::subset(&font, &[1]).unwrap();
+            assert!(subset.glyph_ids.contains(&2));
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "27. Composite Glyph Closure: {:>8} ns/op  ({:.2?} for {} subsets)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 28. Automatic Type0 Font Subset Appearance
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_9_compat/chrome-unicode.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let field_ref = configure_embedded_benchmark_field(&mut doc, false, 0);
+        let change = PdfChange::SetTextField {
+            field_ref,
+            value: "Benchmark".to_string(),
+        };
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.apply_mutation(std::slice::from_ref(&change)).unwrap();
+            assert!(plan.glyph_mapping_quality.is_some());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "28. Auto Type0 Font Embed:   {:>8} ns/op  ({:.2?} for {} plans)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 29. Repeated-Widget Subset Resource Deduplication
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_9_compat/chrome-unicode.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let field_ref = configure_embedded_benchmark_field(&mut doc, true, 90);
+        let change = PdfChange::SetTextField {
+            field_ref,
+            value: "Benchmark".to_string(),
+        };
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = doc.apply_mutation(std::slice::from_ref(&change)).unwrap();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "29. Font Resource Dedup:     {:>8} ns/op  ({:.2?} for {} two-widget plans)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 30. Incremental Export + Reopen With Embedded Subset
+    {
+        let fixture = include_bytes!("../tests/fixtures/v0_9_compat/chrome-unicode.pdf");
+        let mut doc = PdfDocument::from_bytes(fixture).unwrap();
+        let field_ref = configure_embedded_benchmark_field(&mut doc, false, 270);
+        let plan = doc
+            .apply_mutation(&[PdfChange::SetTextField {
+                field_ref,
+                value: "Benchmark".to_string(),
+            }])
+            .unwrap();
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let output = doc.export_incremental(&plan).unwrap();
+            let _ = PdfDocument::from_bytes(&output).unwrap();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "30. Subset Export+Reopen:    {:>8} ns/op  ({:.2?} for {} roundtrips)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
     println!("================================================================");
 }
 
@@ -725,4 +847,116 @@ fn benchmark_true_type() -> Vec<u8> {
         output.extend_from_slice(bytes);
     }
     output
+}
+
+fn benchmark_composite_true_type() -> Vec<u8> {
+    let mut head = vec![0u8; 54];
+    head[18..20].copy_from_slice(&1000u16.to_be_bytes());
+    head[50..52].copy_from_slice(&1i16.to_be_bytes());
+    let mut maxp = vec![0u8; 6];
+    maxp[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+    maxp[4..6].copy_from_slice(&3u16.to_be_bytes());
+    let mut loca = Vec::new();
+    for offset in [0u32, 12, 28, 40] {
+        loca.extend_from_slice(&offset.to_be_bytes());
+    }
+    let mut glyf = vec![0u8; 40];
+    glyf[12..14].copy_from_slice(&(-1i16).to_be_bytes());
+    glyf[22..24].copy_from_slice(&0u16.to_be_bytes());
+    glyf[24..26].copy_from_slice(&2u16.to_be_bytes());
+    let tables = vec![
+        (*b"glyf", glyf),
+        (*b"head", head),
+        (*b"loca", loca),
+        (*b"maxp", maxp),
+    ];
+    let mut output = vec![0u8; 12 + tables.len() * 16];
+    output[0..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+    output[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+    for (index, (tag, bytes)) in tables.iter().enumerate() {
+        while output.len() % 4 != 0 {
+            output.push(0);
+        }
+        let offset = output.len();
+        let record = 12 + index * 16;
+        output[record..record + 4].copy_from_slice(tag);
+        output[record + 8..record + 12].copy_from_slice(&(offset as u32).to_be_bytes());
+        output[record + 12..record + 16].copy_from_slice(&(bytes.len() as u32).to_be_bytes());
+        output.extend_from_slice(bytes);
+    }
+    output
+}
+
+fn configure_embedded_benchmark_field(
+    doc: &mut PdfDocument<'_>,
+    repeated: bool,
+    rotation: i64,
+) -> ObjectRef {
+    let field_ref = ObjectRef::new(9_000, 0);
+    let first_widget = ObjectRef::new(9_001, 0);
+    let second_widget = ObjectRef::new(9_002, 0);
+    let page_ref = doc.page_ref(0).unwrap();
+    let mut field = BTreeMap::from([
+        ("FT".to_string(), PdfObject::Name("Tx".to_string())),
+        (
+            "DA".to_string(),
+            PdfObject::String(b"/F5 12 Tf 0 g".to_vec()),
+        ),
+        (
+            "Rect".to_string(),
+            PdfObject::Array(vec![
+                PdfObject::Integer(0),
+                PdfObject::Integer(0),
+                PdfObject::Integer(180),
+                PdfObject::Integer(30),
+            ]),
+        ),
+    ]);
+    if repeated {
+        field.insert(
+            "Kids".to_string(),
+            PdfObject::Array(vec![
+                PdfObject::Reference(first_widget),
+                PdfObject::Reference(second_widget),
+            ]),
+        );
+        for widget_ref in [first_widget, second_widget] {
+            doc.store_mut().insert_cached(
+                widget_ref,
+                PdfObject::Dictionary(BTreeMap::from([
+                    ("Subtype".to_string(), PdfObject::Name("Widget".to_string())),
+                    ("Parent".to_string(), PdfObject::Reference(field_ref)),
+                    ("P".to_string(), PdfObject::Reference(page_ref)),
+                    (
+                        "Rect".to_string(),
+                        PdfObject::Array(vec![
+                            PdfObject::Integer(0),
+                            PdfObject::Integer(0),
+                            PdfObject::Integer(180),
+                            PdfObject::Integer(30),
+                        ]),
+                    ),
+                    (
+                        "MK".to_string(),
+                        PdfObject::Dictionary(BTreeMap::from([(
+                            "R".to_string(),
+                            PdfObject::Integer(rotation),
+                        )])),
+                    ),
+                ])),
+            );
+        }
+    } else if rotation != 0 {
+        field.insert("P".to_string(), PdfObject::Reference(page_ref));
+        field.insert(
+            "MK".to_string(),
+            PdfObject::Dictionary(BTreeMap::from([(
+                "R".to_string(),
+                PdfObject::Integer(rotation),
+            )])),
+        );
+    }
+    doc.store_mut()
+        .insert_cached(field_ref, PdfObject::Dictionary(field));
+    field_ref
 }

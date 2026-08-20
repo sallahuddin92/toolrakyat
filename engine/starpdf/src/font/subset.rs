@@ -7,6 +7,7 @@ use crate::font::SfntFont;
 
 pub const MAX_SUBSET_GLYPHS: usize = 4_096;
 pub const MAX_SUBSET_FONT_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_SOURCE_GLYPHS: usize = 65_535;
 const MAX_COMPOSITE_DEPTH: usize = 32;
 
 #[derive(Debug, Clone)]
@@ -53,9 +54,9 @@ impl TrueTypeSubsetter {
         let num_glyphs = read_u16_be(maxp, 4)
             .ok_or_else(|| PdfError::InvalidSyntax("Truncated maxp glyph count".into()))?
             as usize;
-        if num_glyphs == 0 {
+        if num_glyphs == 0 || num_glyphs > MAX_SOURCE_GLYPHS {
             return Err(PdfError::InvalidOperation(
-                "TrueType font contains no glyphs".into(),
+                "TrueType source glyph count is outside the supported range".into(),
             ));
         }
         let loca_format = read_i16_be(head, 50)
@@ -175,61 +176,95 @@ impl TrueTypeSubsetter {
         num_glyphs: usize,
         selected: &mut BTreeSet<u16>,
     ) -> PdfResult<()> {
-        for _ in 0..MAX_COMPOSITE_DEPTH {
-            let before = selected.len();
-            let current: Vec<u16> = selected.iter().copied().collect();
-            for glyph in current {
-                let start = offsets[usize::from(glyph)];
-                let end = offsets[usize::from(glyph) + 1];
-                let bytes = &glyf[start..end];
-                if bytes.len() < 10 || read_i16_be(bytes, 0).unwrap_or(0) >= 0 {
+        let roots: Vec<u16> = selected.iter().copied().collect();
+        let mut visiting = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+        for root in roots {
+            let mut stack = vec![(root, 0usize, false)];
+            while let Some((glyph, depth, exiting)) = stack.pop() {
+                if exiting {
+                    visiting.remove(&glyph);
+                    visited.insert(glyph);
                     continue;
                 }
-                let mut position = 10usize;
-                loop {
-                    let flags = read_u16_be(bytes, position).ok_or_else(|| {
-                        PdfError::InvalidSyntax("Truncated composite glyph flags".into())
-                    })?;
-                    let component = read_u16_be(bytes, position + 2).ok_or_else(|| {
-                        PdfError::InvalidSyntax("Truncated composite glyph ID".into())
-                    })?;
-                    if usize::from(component) >= num_glyphs {
-                        return Err(PdfError::InvalidSyntax(
-                            "Composite glyph references impossible glyph ID".into(),
+                if visited.contains(&glyph) {
+                    continue;
+                }
+                if !visiting.insert(glyph) {
+                    return Err(PdfError::CircularReference(
+                        "Cycle in TrueType composite glyph dependencies".into(),
+                    ));
+                }
+                if depth > MAX_COMPOSITE_DEPTH {
+                    return Err(PdfError::RecursionLimitExceeded);
+                }
+                selected.insert(glyph);
+                if selected.len() > MAX_SUBSET_GLYPHS {
+                    return Err(PdfError::InvalidOperation(
+                        "Composite glyph closure exceeds subset limit".into(),
+                    ));
+                }
+                stack.push((glyph, depth, true));
+                let dependencies = Self::composite_dependencies(glyf, offsets, num_glyphs, glyph)?;
+                for component in dependencies.into_iter().rev() {
+                    if visiting.contains(&component) {
+                        return Err(PdfError::CircularReference(
+                            "Cycle in TrueType composite glyph dependencies".into(),
                         ));
                     }
-                    selected.insert(component);
-                    let args = if flags & 0x0001 != 0 { 4 } else { 2 };
-                    let transform = if flags & 0x0008 != 0 {
-                        2
-                    } else if flags & 0x0040 != 0 {
-                        4
-                    } else if flags & 0x0080 != 0 {
-                        8
-                    } else {
-                        0
-                    };
-                    position = position.checked_add(4 + args + transform).ok_or_else(|| {
-                        PdfError::InvalidSyntax("Composite offset overflow".into())
-                    })?;
-                    if position > bytes.len() {
-                        return Err(PdfError::InvalidSyntax("Truncated composite glyph".into()));
-                    }
-                    if flags & 0x0020 == 0 {
-                        break;
-                    }
+                    stack.push((component, depth.saturating_add(1), false));
                 }
             }
-            if selected.len() == before {
-                return Ok(());
-            }
-            if selected.len() > MAX_SUBSET_GLYPHS {
-                return Err(PdfError::InvalidOperation(
-                    "Composite glyph closure exceeds subset limit".into(),
+        }
+        Ok(())
+    }
+
+    fn composite_dependencies(
+        glyf: &[u8],
+        offsets: &[usize],
+        num_glyphs: usize,
+        glyph: u16,
+    ) -> PdfResult<Vec<u16>> {
+        let start = offsets[usize::from(glyph)];
+        let end = offsets[usize::from(glyph) + 1];
+        let bytes = &glyf[start..end];
+        if bytes.len() < 10 || read_i16_be(bytes, 0).unwrap_or(0) >= 0 {
+            return Ok(Vec::new());
+        }
+        let mut dependencies = Vec::new();
+        let mut position = 10usize;
+        loop {
+            let flags = read_u16_be(bytes, position)
+                .ok_or_else(|| PdfError::InvalidSyntax("Truncated composite glyph flags".into()))?;
+            let component = read_u16_be(bytes, position + 2)
+                .ok_or_else(|| PdfError::InvalidSyntax("Truncated composite glyph ID".into()))?;
+            if usize::from(component) >= num_glyphs {
+                return Err(PdfError::InvalidSyntax(
+                    "Composite glyph references impossible glyph ID".into(),
                 ));
             }
+            dependencies.push(component);
+            let args = if flags & 0x0001 != 0 { 4 } else { 2 };
+            let transform = if flags & 0x0008 != 0 {
+                2
+            } else if flags & 0x0040 != 0 {
+                4
+            } else if flags & 0x0080 != 0 {
+                8
+            } else {
+                0
+            };
+            position = position
+                .checked_add(4 + args + transform)
+                .ok_or_else(|| PdfError::InvalidSyntax("Composite offset overflow".into()))?;
+            if position > bytes.len() {
+                return Err(PdfError::InvalidSyntax("Truncated composite glyph".into()));
+            }
+            if flags & 0x0020 == 0 {
+                break;
+            }
         }
-        Err(PdfError::RecursionLimitExceeded)
+        Ok(dependencies)
     }
 
     fn build_sfnt(original: &[u8], tables: &[([u8; 4], Vec<u8>)]) -> PdfResult<Vec<u8>> {
@@ -305,5 +340,54 @@ impl TrueTypeSubsetter {
     fn usize_to_u32(value: usize) -> PdfResult<u32> {
         u32::try_from(value)
             .map_err(|_| PdfError::InvalidOperation("Subset font offset exceeds u32".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn simple_glyph() -> Vec<u8> {
+        vec![0; 10]
+    }
+
+    fn composite_glyph(component: u16) -> Vec<u8> {
+        let mut bytes = Vec::from((-1i16).to_be_bytes());
+        bytes.extend_from_slice(&[0; 8]);
+        bytes.extend_from_slice(&0u16.to_be_bytes());
+        bytes.extend_from_slice(&component.to_be_bytes());
+        bytes.extend_from_slice(&[0; 2]);
+        bytes
+    }
+
+    #[test]
+    fn composite_dependency_closure_is_transitive_and_bounded() {
+        let glyphs = [simple_glyph(), composite_glyph(2), simple_glyph()];
+        let mut glyf = Vec::new();
+        let mut offsets = vec![0];
+        for glyph in glyphs {
+            glyf.extend_from_slice(&glyph);
+            offsets.push(glyf.len());
+        }
+        let mut selected = BTreeSet::from([1]);
+        TrueTypeSubsetter::include_composite_dependencies(&glyf, &offsets, 3, &mut selected)
+            .unwrap_or_else(|error| panic!("composite closure failed: {error}"));
+        assert_eq!(selected, BTreeSet::from([1, 2]));
+    }
+
+    #[test]
+    fn composite_dependency_cycle_is_rejected() {
+        let glyphs = [simple_glyph(), composite_glyph(2), composite_glyph(1)];
+        let mut glyf = Vec::new();
+        let mut offsets = vec![0];
+        for glyph in glyphs {
+            glyf.extend_from_slice(&glyph);
+            offsets.push(glyf.len());
+        }
+        let mut selected = BTreeSet::from([1]);
+        let error =
+            TrueTypeSubsetter::include_composite_dependencies(&glyf, &offsets, 3, &mut selected)
+                .unwrap_err();
+        assert!(matches!(error, PdfError::CircularReference(_)));
     }
 }

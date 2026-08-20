@@ -19,6 +19,8 @@ export function starpdf_get_appearance_status(handle: number): string;
 
 export function starpdf_get_form_fields(handle: number): any;
 
+export function starpdf_get_glyph_mapping_quality(handle: number): string;
+
 export function starpdf_get_info(handle: number): any;
 
 export function starpdf_get_page_count(handle: number): number;
@@ -58,6 +60,7 @@ export interface InitOutput {
     readonly starpdf_get_annotations: (a: number, b: number) => [number, number, number];
     readonly starpdf_get_appearance_status: (a: number) => [number, number, number, number];
     readonly starpdf_get_form_fields: (a: number) => [number, number, number];
+    readonly starpdf_get_glyph_mapping_quality: (a: number) => [number, number, number, number];
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];

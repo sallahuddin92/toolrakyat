@@ -34,6 +34,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
             starpdf::syntax::object::PdfObject::Dictionary(page_dict),
         )]),
         appearance_status: AppearanceStatus::ValueUpdated,
+        glyph_mapping_quality: None,
     };
 
     let updated_bytes = doc.export_incremental(&plan).unwrap();
@@ -66,6 +67,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
             starpdf::syntax::object::PdfObject::Dictionary(page_dict_2),
         )]),
         appearance_status: AppearanceStatus::ValueUpdated,
+        glyph_mapping_quality: None,
     };
 
     let second_updated_bytes = reopened.export_incremental(&plan_2).unwrap();

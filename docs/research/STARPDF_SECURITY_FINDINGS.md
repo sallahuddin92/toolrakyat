@@ -56,3 +56,12 @@ Classification: `SECURITY_HARDENING`.
 - Four bounded libFuzzer targets, including a final affected resolver rerun, recorded 2,214,760 clean executions with no crash, hang, OOM, or regression artifact. The production source retains zero exact `.unwrap()`/`.expect()` calls and forbids unsafe Rust.
 
 Classification: `SECURITY_HARDENING`.
+
+## 6. v0.9 Hostile-Input Findings
+
+- Composite glyph closure now uses an explicit iterative active-path set, a depth cap of 32, a 4,096-glyph cap, impossible-ID checks, and typed cycle refusal.
+- Automatic font generation is inside the atomic plan and is limited to 16 MiB source/subset data, 65,535 source glyphs, 64 generated subset resources, 256 recovered appearance resources/states, and checked object allocation.
+- Widget rotations accept only normalized quarter turns and reject arbitrary/non-finite geometry. Type0 appearance output requires a proved identity encoding and CID-to-GID mapping.
+- Nine final bounded campaigns executed 11,823,541 inputs with zero crash, hang, OOM, or reproducer. Production source retains zero exact `.unwrap()`/`.expect()` occurrences and forbids unsafe Rust.
+
+Classification: `SECURITY_HARDENING`.

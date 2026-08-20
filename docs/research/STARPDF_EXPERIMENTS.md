@@ -44,3 +44,7 @@ In the browser:
 The warm native run measured 134.18 MB/s lexer throughput, 61.84 MB/s object parsing, and 2,026.76 MB/s FlateDecode throughput. New operations measured 1,204 ns/text appearance, 906 ns/checkbox appearance, 1,860 ns/annotation generation, 2,891 ns/annotation mutation plan, and 6,093 ns/export-plus-reopen. Classification: `PERFORMANCE_OPTIMIZATION`.
 
 A Chromium visual roundtrip changed text, checkbox, and radio fields, added FreeText and Square annotations, exported incrementally, and reopened the result through StarPDF and PDF.js. The original input remained an exact byte prefix and the targeted rendered region changed by more than 2%. Classification: `EXPERIMENTAL_METHOD`.
+
+## 5. v0.9 Producer and appearance experiment
+
+Twelve locally authored PDFs from Chrome, LibreOffice, and Quartz/CUPS were evaluated through open, extraction, search, annotation mutation, incremental export, and reopen. The experiment exposed overlapping producer text fragments and AP-local embedded-font resources; both became bounded deterministic regressions. A PDF.js test then rendered exact embedded subsets across two rotated widgets and checked semantic state, AP matrices, font-resource objects, and a targeted region. Classification: `EXPERIMENTAL_METHOD`, `CONVENTIONAL_ENGINEERING`; patentability claims: **NONE**.

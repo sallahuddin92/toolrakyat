@@ -13,6 +13,7 @@ import initWasm, {
   starpdf_extract_page_text,
   starpdf_get_annotations,
   starpdf_get_appearance_status,
+  starpdf_get_glyph_mapping_quality,
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
@@ -161,6 +162,11 @@ self.onmessage = async (event) => {
       case "getAppearanceStatus": {
         const status = starpdf_get_appearance_status(req.handle);
         self.postMessage({ type: "getAppearanceStatus", id: req.id, success: true, status });
+        break;
+      }
+      case "getGlyphMappingQuality": {
+        const quality = starpdf_get_glyph_mapping_quality(req.handle);
+        self.postMessage({ type: "getGlyphMappingQuality", id: req.id, success: true, quality });
         break;
       }
       case "close": {

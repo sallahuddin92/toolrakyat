@@ -79,3 +79,13 @@
 - **Fuzz evidence:** four new/affected bounded targets, including a final resolver rerun, completed a clean recorded 2,214,760 executions with zero crashes or hangs.
 - **Performance evidence:** the second warm run measured 1,952 ns font resolution, 822 ns TrueType subset, 1,993 ns annotation AP regeneration, and 18,950 ns resource export/reopen. No reproducible unchanged-workload regression exceeded 15%.
 - **Novelty boundary:** appearance dictionaries, TrueType subsetting, font resource reuse, and atomic overlays are standard or conventional engineering. No `EXPERIMENTAL_METHOD` or `POTENTIAL_NOVELTY` evidence is asserted, and no patentability claim is made.
+
+## 7. Milestone Ledger Entry: v0.9
+
+- **Starting SHA:** `1dd30a3d42658a9087bc4b06080d9cc5fea41c40`
+- **Milestone SHA:** commit containing this ledger entry
+- **Classification:** `STANDARD_PDF_IMPLEMENTATION`, `CONVENTIONAL_ENGINEERING`, `SECURITY_HARDENING`, `PERFORMANCE_OPTIMIZATION`, `EXPERIMENTAL_METHOD`
+- **Compatibility evidence:** 12 locally authored fixtures from Chrome, LibreOffice, and Quartz/CUPS pass extraction, search, mutation, incremental export, and reopen. A bounded overlapping-span search recovery and widget-AP font-resource recovery were derived from observed producer structures.
+- **Production evidence:** automatic TrueType subset embedding, transaction-local deterministic resource reuse, bounded composite dependency closure, exact quarter-turn widget matrices, and proved Identity-H/Identity-V output render through PDF.js.
+- **Fuzz evidence:** three new and six affected 10-second campaigns completed 11,823,541 executions with zero crashes, hangs, or reproducers.
+- **Novelty boundary:** all implemented PDF/font structures are standard mechanisms; the integration and hardening are conventional/security engineering. `EXPERIMENTAL_METHOD` refers only to the producer/PDF.js validation procedure. No `POTENTIAL_NOVELTY` is asserted. Patentability claims: **NONE**.

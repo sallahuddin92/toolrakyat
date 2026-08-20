@@ -1,0 +1,3 @@
+Quartz Unicode fixture
+café résumé façade © €
+Search token: QUARTZ-UNICODE-LAMBDA
