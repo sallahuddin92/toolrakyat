@@ -222,18 +222,18 @@ export const tools: ToolDefinition[] = [
     slug: "editor",
     categoryId: "pdf",
     category: "PDF",
-    description: "Professional intelligence-driven PDF editor with OCR, structural analysis, table extraction, and true content editing.",
+    description: "In-browser PDF document viewer and interactive AcroForm editor with editable and flattened export.",
     icon: "SquarePen",
-    tags: ["pdf", "editor", "smart", "ocr", "extract tables", "edit text", "sign"],
+    tags: ["pdf", "editor", "forms", "acroform", "viewer", "export", "flatten"],
     isImplemented: true,
     isPopular: true,
     route: "/tools/pdf/editor",
     acceptedFileTypes: ["application/pdf"],
     maxFileSizeMB: 50,
-    privacyNote: DEFAULT_PRIVACY_NOTE,
-    seoTitle: "Professional Smart PDF Editor | ToolRakyat",
+    privacyNote: "All PDF processing occurs 100% locally in your browser. Your documents are never uploaded to any server.",
+    seoTitle: "Smart PDF Editor & Form Filler | ToolRakyat",
     seoDescription:
-      "Edit PDF content with intelligence. OCR scanned pages, extract tables, replace text, and export structure with ToolRakyat's professional-grade smart engine.",
+      "View PDF documents, fill interactive AcroForm fields, inspect properties, and export editable or flattened PDF files entirely in your browser.",
   },
 
   // Image
