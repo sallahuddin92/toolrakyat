@@ -3,8 +3,10 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import { hash } from "bcryptjs";
 import { DEFAULT_CATEGORIES } from "@/lib/akaunkemas-saas/schemas";
+import fs from "node:fs";
 
 async function main() {
+  fs.mkdirSync("./data", { recursive: true });
   const sqlite = new Database("./data/akaunkemas.db");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");

@@ -5,11 +5,9 @@
  * and has no persistence. Use createDbReceiptService() from ../receipts-db
  * for production code.
  */
-import { z } from "zod";
 import {
   type ReceiptService,
   type SavedReceipt,
-  type CreateReceiptInput,
   CreateReceiptInputSchema,
   UpdateReceiptInputSchema,
 } from "../receipts";

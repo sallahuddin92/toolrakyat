@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { loginAction } from "./actions";
 
 // ---------------------------------------------------------------------------
@@ -16,7 +15,7 @@ import { loginAction } from "./actions";
 // ---------------------------------------------------------------------------
 
 const loginSchema = z.object({
-  email: z.email(),
+  email: z.string().email("Invalid email address"),
   password: z.string().min(8),
 });
 
@@ -27,7 +26,6 @@ type LoginFormData = z.infer<typeof loginSchema>;
 // ---------------------------------------------------------------------------
 
 export default function LoginPage() {
-  const router = useRouter();
   const [formData, setFormData] = useState<LoginFormData>({
     email: process.env.NEXT_PUBLIC_DEMO_MODE === "true" ? "demo@akaunkemas.my" : "",
     password: "",

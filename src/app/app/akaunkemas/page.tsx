@@ -16,7 +16,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { createDbTransactionService } from "@/lib/akaunkemas-saas/services/transactions-db";
@@ -123,7 +122,7 @@ function WorkflowProgress({ steps }: { steps: WorkflowStep[] }) {
         />
       </div>
       <div className="flex items-center justify-between text-xs text-slate-500">
-        {steps.map((step, i) => (
+        {steps.map((step) => (
           <span
             key={step.label}
             className={cn(

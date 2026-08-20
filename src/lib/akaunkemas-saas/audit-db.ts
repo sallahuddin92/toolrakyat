@@ -1,6 +1,6 @@
 import { db, schema } from "@/lib/db";
 import { eq, and, desc } from "drizzle-orm";
-import type { AuditLogger, AuditEntry, AuditEvent, EntityType } from "./audit";
+import type { AuditLogger, AuditEvent, EntityType } from "./audit";
 
 // ---------------------------------------------------------------------------
 // Metadata Sanitization (reuses the same logic as audit.ts)

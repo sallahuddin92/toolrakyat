@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Upload, FileText, CheckCircle, AlertCircle, ArrowLeft,
-  ArrowRight, RotateCcw, ChevronDown,
+  ArrowRight, RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
 import { importTransactionsCsv } from "../transactions/actions";
@@ -60,6 +60,56 @@ function confidenceBadge(c: string) {
   return "bg-slate-50 text-slate-500 border-slate-200";
 }
 
+function StepIndicator({ step }: { step: Step }) {
+  const steps = [
+    { key: "upload", label: "Upload CSV", num: 1 },
+    { key: "review", label: "Review & Categorise", num: 2 },
+    { key: "result", label: "Import", num: 3 },
+  ];
+  return (
+    <div className="flex items-center gap-2 mb-6">
+      {steps.map((s, i) => {
+        const active = step === s.key;
+        const done =
+          (step === "review" && s.key === "upload") ||
+          (step === "result" && s.key !== "result");
+        return (
+          <div key={s.key} className="flex items-center gap-2">
+            <div
+              className={cn(
+                "flex size-7 items-center justify-center rounded-full text-xs font-semibold border-2 transition-colors",
+                active && "border-sky-500 bg-sky-500 text-white",
+                done && "border-green-500 bg-green-500 text-white",
+                !active && !done && "border-slate-200 text-slate-400",
+              )}
+            >
+              {done ? <CheckCircle className="size-3.5" /> : s.num}
+            </div>
+            <span
+              className={cn(
+                "text-xs font-medium",
+                active && "text-sky-700",
+                done && "text-green-700",
+                !active && !done && "text-slate-400",
+              )}
+            >
+              {s.label}
+            </span>
+            {i < steps.length - 1 && (
+              <div
+                className={cn(
+                  "w-8 h-px mx-1",
+                  done ? "bg-green-300" : "bg-slate-200",
+                )}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const SUPPORTED_BANKS = [
   "Maybank", "CIMB", "Public Bank", "RHB", "Hong Leong",
   "AmBank", "Bank Islam", "UOB Malaysia", "Standard Chartered",
@@ -73,7 +123,6 @@ const SUPPORTED_BANKS = [
 export default function ImportBankCsvPage() {
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
-  const [csvText, setCsvText] = useState<string>("");
   const [preview, setPreview] = useState<PreviewRow[]>([]);
   const [detectedColumns, setDetectedColumns] = useState<DetectedColumns | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -91,7 +140,6 @@ export default function ImportBankCsvPage() {
 
     try {
       const text = await selectedFile.text();
-      setCsvText(text);
       const parseResult = parseBankCsv(text);
 
       if (parseResult.transactions.length === 0) {
@@ -241,66 +289,11 @@ export default function ImportBankCsvPage() {
   function reset() {
     setStep("upload");
     setFile(null);
-    setCsvText("");
     setPreview([]);
     setDetectedColumns(null);
     setParseError(null);
     setResult(null);
     setImporting(false);
-  }
-
-  // -----------------------------------------------------------------------
-  // Step indicator
-  // -----------------------------------------------------------------------
-
-  function StepIndicator() {
-    const steps = [
-      { key: "upload", label: "Upload CSV", num: 1 },
-      { key: "review", label: "Review & Categorise", num: 2 },
-      { key: "result", label: "Import", num: 3 },
-    ];
-    return (
-      <div className="flex items-center gap-2 mb-6">
-        {steps.map((s, i) => {
-          const active = step === s.key;
-          const done =
-            (step === "review" && s.key === "upload") ||
-            (step === "result" && s.key !== "result");
-          return (
-            <div key={s.key} className="flex items-center gap-2">
-              <div
-                className={cn(
-                  "flex size-7 items-center justify-center rounded-full text-xs font-semibold border-2 transition-colors",
-                  active && "border-sky-500 bg-sky-500 text-white",
-                  done && "border-green-500 bg-green-500 text-white",
-                  !active && !done && "border-slate-200 text-slate-400",
-                )}
-              >
-                {done ? <CheckCircle className="size-3.5" /> : s.num}
-              </div>
-              <span
-                className={cn(
-                  "text-xs font-medium",
-                  active && "text-sky-700",
-                  done && "text-green-700",
-                  !active && !done && "text-slate-400",
-                )}
-              >
-                {s.label}
-              </span>
-              {i < steps.length - 1 && (
-                <div
-                  className={cn(
-                    "w-8 h-px mx-1",
-                    done ? "bg-green-300" : "bg-slate-200",
-                  )}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
   }
 
   // -----------------------------------------------------------------------
@@ -324,7 +317,7 @@ export default function ImportBankCsvPage() {
         </div>
       </div>
 
-      <StepIndicator />
+      <StepIndicator step={step} />
 
       {/* =================================================================
           Step 1 — Upload
@@ -563,16 +556,14 @@ export default function ImportBankCsvPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {preview.map((row, i) => {
-                        const effCat = effectiveCategory(row);
-                        return (
-                          <tr
-                            key={i}
-                            className={cn(
-                              "group text-xs transition-colors",
-                              row.suggestion.confidence === "low" && "bg-amber-50/30",
-                            )}
-                          >
+                      {preview.map((row, i) => (
+                        <tr
+                          key={i}
+                          className={cn(
+                            "group text-xs transition-colors",
+                            row.suggestion.confidence === "low" && "bg-amber-50/30",
+                          )}
+                        >
                             <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
                               {row.date}
                             </td>
@@ -641,8 +632,7 @@ export default function ImportBankCsvPage() {
                               </select>
                             </td>
                           </tr>
-                        );
-                      })}
+                        ))}
                     </tbody>
                   </table>
                 </div>
