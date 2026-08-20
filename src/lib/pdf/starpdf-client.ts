@@ -1,5 +1,7 @@
 import type {
+  StarPdfAnnotation,
   StarPdfDocumentInfo,
+  StarPdfFormField,
   StarPdfPageText,
   StarPdfSearchOptions,
   StarPdfSearchResult,
@@ -9,12 +11,19 @@ import type {
 import initWasm, {
   starpdf_close,
   starpdf_create_minimal_pdf,
+  starpdf_export_incremental,
   starpdf_extract_all_text,
   starpdf_extract_page_text,
+  starpdf_get_annotations,
+  starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
   starpdf_open,
   starpdf_search,
+  starpdf_set_checkbox,
+  starpdf_set_choice,
+  starpdf_set_radio,
+  starpdf_set_text_field,
   starpdf_validate,
   starpdf_version,
 } from "./starpdf-wasm/starpdf";
@@ -114,6 +123,88 @@ export class StarPdfDocumentHandle {
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_validate(this._handle);
+  }
+
+  async getFormFields(): Promise<StarPdfFormField[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_form_fields(this._handle) as StarPdfFormField[];
+  }
+
+  async getAnnotations(pageIndex: number): Promise<StarPdfAnnotation[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_annotations(this._handle, pageIndex) as StarPdfAnnotation[];
+  }
+
+  async setTextField(
+    objectNum: number,
+    objectGen: number,
+    value: string
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_set_text_field(
+      this._handle,
+      BigInt(objectNum),
+      objectGen,
+      value
+    );
+  }
+
+  async setCheckbox(
+    objectNum: number,
+    objectGen: number,
+    checked: boolean
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_set_checkbox(
+      this._handle,
+      BigInt(objectNum),
+      objectGen,
+      checked
+    );
+  }
+
+  async setRadio(
+    parentNum: number,
+    parentGen: number,
+    widgetNum: number,
+    widgetGen: number,
+    onState: string
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_set_radio(
+      this._handle,
+      BigInt(parentNum),
+      parentGen,
+      BigInt(widgetNum),
+      widgetGen,
+      onState
+    );
+  }
+
+  async setChoice(
+    objectNum: number,
+    objectGen: number,
+    value: string
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_set_choice(
+      this._handle,
+      BigInt(objectNum),
+      objectGen,
+      value
+    );
+  }
+
+  async exportIncremental(): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_export_incremental(this._handle);
   }
 
   async close(): Promise<void> {

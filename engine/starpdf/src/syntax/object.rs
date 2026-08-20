@@ -65,12 +65,22 @@ impl PdfObject {
     }
 
     #[inline]
+    pub fn as_integer(&self) -> Option<i64> {
+        self.as_i64()
+    }
+
+    #[inline]
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Real(r) => Some(*r),
             Self::Integer(i) => Some(*i as f64),
             _ => None,
         }
+    }
+
+    #[inline]
+    pub fn as_real(&self) -> Option<f64> {
+        self.as_f64()
     }
 
     #[inline]
@@ -94,6 +104,31 @@ impl PdfObject {
         match self {
             Self::String(bytes) => std::str::from_utf8(bytes).ok(),
             Self::Name(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_string_lossy(&self) -> Option<String> {
+        match self {
+            Self::String(bytes) => {
+                if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+                    let u16_units: Vec<u16> = bytes[2..]
+                        .chunks_exact(2)
+                        .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                        .collect();
+                    Some(String::from_utf16_lossy(&u16_units))
+                } else if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+                    let u16_units: Vec<u16> = bytes[2..]
+                        .chunks_exact(2)
+                        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                        .collect();
+                    Some(String::from_utf16_lossy(&u16_units))
+                } else {
+                    Some(String::from_utf8_lossy(bytes).to_string())
+                }
+            }
+            Self::Name(n) => Some(n.clone()),
             _ => None,
         }
     }

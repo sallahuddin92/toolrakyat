@@ -35,12 +35,15 @@
     clippy::doc_markdown
 )]
 
+pub mod annotation;
 pub mod content;
 pub mod document;
 pub mod error;
 pub mod filter;
 pub mod font;
+pub mod forms;
 pub mod io;
+pub mod mutation;
 pub mod search;
 pub mod syntax;
 pub mod text;
@@ -50,6 +53,7 @@ pub mod wasm;
 pub mod writer;
 pub mod xref;
 
+pub use annotation::{Annotation, AnnotationParser, AnnotationSubtype};
 pub use content::{ContentInstruction, ContentOperand, ContentOperator, ContentParser};
 pub use document::{
     DecodedObjectStream, ObjectStore, ObjectStoreMetrics, ObjectStreamReader, PageTree, PdfDocument,
@@ -57,7 +61,11 @@ pub use document::{
 pub use error::{PdfError, PdfResult};
 pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorParams};
 pub use font::{Font, PageResources, SimpleEncoding, UnicodeCMap};
+pub use forms::{
+    AcroForm, AcroFormParser, ChoiceOption, FieldType, FieldValue, FormField, WidgetAnnotation,
+};
 pub use io::{ByteCursor, ByteSource};
+pub use mutation::{AppearanceStatus, MutationEngine, MutationPlan, PdfChange};
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
     TextMatcher,
@@ -65,5 +73,5 @@ pub use search::{
 pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
 pub use text::{GraphicsState, Matrix2D, PageText, TextExtractor, TextSpan, TextState};
 pub use validate::StructuralValidator;
-pub use writer::{MinimalWriter, Serializer};
+pub use writer::{IncrementalWriter, MinimalWriter, Serializer};
 pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};

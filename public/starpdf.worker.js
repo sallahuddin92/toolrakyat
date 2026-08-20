@@ -7,12 +7,19 @@
 import initWasm, {
   starpdf_close,
   starpdf_create_minimal_pdf,
+  starpdf_export_incremental,
   starpdf_extract_all_text,
   starpdf_extract_page_text,
+  starpdf_get_annotations,
+  starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
   starpdf_open,
   starpdf_search,
+  starpdf_set_checkbox,
+  starpdf_set_choice,
+  starpdf_set_radio,
+  starpdf_set_text_field,
   starpdf_validate,
   starpdf_version,
 } from "/starpdf_wasm/starpdf.js";
@@ -73,6 +80,48 @@ self.onmessage = async (event) => {
       case "validate": {
         const isValid = starpdf_validate(req.handle);
         self.postMessage({ type: "validate", id: req.id, success: true, isValid });
+        break;
+      }
+      case "getFormFields": {
+        const fields = starpdf_get_form_fields(req.handle);
+        self.postMessage({ type: "getFormFields", id: req.id, success: true, fields });
+        break;
+      }
+      case "getAnnotations": {
+        const annotations = starpdf_get_annotations(req.handle, req.pageIndex);
+        self.postMessage({ type: "getAnnotations", id: req.id, success: true, annotations });
+        break;
+      }
+      case "setTextField": {
+        starpdf_set_text_field(req.handle, BigInt(req.objectNum), req.objectGen, req.value);
+        self.postMessage({ type: "setTextField", id: req.id, success: true });
+        break;
+      }
+      case "setCheckbox": {
+        starpdf_set_checkbox(req.handle, BigInt(req.objectNum), req.objectGen, req.checked);
+        self.postMessage({ type: "setCheckbox", id: req.id, success: true });
+        break;
+      }
+      case "setRadio": {
+        starpdf_set_radio(
+          req.handle,
+          BigInt(req.parentNum),
+          req.parentGen,
+          BigInt(req.widgetNum),
+          req.widgetGen,
+          req.onState
+        );
+        self.postMessage({ type: "setRadio", id: req.id, success: true });
+        break;
+      }
+      case "setChoice": {
+        starpdf_set_choice(req.handle, BigInt(req.objectNum), req.objectGen, req.value);
+        self.postMessage({ type: "setChoice", id: req.id, success: true });
+        break;
+      }
+      case "exportIncremental": {
+        const bytes = starpdf_export_incremental(req.handle);
+        self.postMessage({ type: "exportIncremental", id: req.id, success: true, bytes }, [bytes.buffer]);
         break;
       }
       case "close": {

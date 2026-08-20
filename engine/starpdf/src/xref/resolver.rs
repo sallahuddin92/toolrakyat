@@ -272,11 +272,12 @@ impl XrefResolver {
         // Parse trailer dictionary
         let mut parser = Parser::new(lexer);
         let trailer_obj = parser.parse_object()?;
-        match trailer_obj {
+        let current_dict = match trailer_obj {
             PdfObject::Dictionary(dict) => {
-                for (k, v) in dict {
-                    table.trailer.entry(k).or_insert(v);
+                for (k, v) in &dict {
+                    table.trailer.entry(k.clone()).or_insert_with(|| v.clone());
                 }
+                dict
             }
             other => {
                 return Err(PdfError::InvalidXref(format!(
@@ -284,10 +285,10 @@ impl XrefResolver {
                     other.type_name()
                 )));
             }
-        }
+        };
 
-        // 1. Check for /XRefStm in trailer (Hybrid-Reference PDFs)
-        if let Some(xref_stm_offset) = table.trailer.get("XRefStm").and_then(|v| v.as_i64()) {
+        // 1. Check for /XRefStm in current trailer (Hybrid-Reference PDFs)
+        if let Some(xref_stm_offset) = current_dict.get("XRefStm").and_then(|v| v.as_i64()) {
             if xref_stm_offset > 0 {
                 Self::parse_xref_chain_at_offset(
                     source,
@@ -300,7 +301,7 @@ impl XrefResolver {
         }
 
         // 2. Check for chained /Prev xref tables if incremental update
-        if let Some(prev) = table.trailer.get("Prev").and_then(|v| v.as_i64()) {
+        if let Some(prev) = current_dict.get("Prev").and_then(|v| v.as_i64()) {
             if prev > 0 {
                 Self::parse_xref_chain_at_offset(
                     source,

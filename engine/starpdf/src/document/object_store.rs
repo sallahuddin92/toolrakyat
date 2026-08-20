@@ -70,6 +70,10 @@ impl<'a> ObjectStore<'a> {
         self.cache.contains_key(&obj_ref)
     }
 
+    pub fn insert_cached(&mut self, obj_ref: ObjectRef, obj: PdfObject) {
+        self.cache.insert(obj_ref, obj);
+    }
+
     pub fn get_cached(&self, obj_ref: ObjectRef) -> Option<&PdfObject> {
         self.cache.get(&obj_ref)
     }

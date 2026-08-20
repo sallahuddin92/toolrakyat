@@ -193,6 +193,85 @@ impl<'a> PdfDocument<'a> {
         Ok(index.search(query, options))
     }
 
+    /// Returns all page object references in document order.
+    pub fn page_refs(&mut self) -> PdfResult<Vec<ObjectRef>> {
+        let count = self.page_count()?;
+        let mut refs = Vec::with_capacity(count);
+        for i in 0..count {
+            refs.push(self.page_ref(i)?);
+        }
+        Ok(refs)
+    }
+
+    /// Parses and returns the document's AcroForm structure, if present.
+    pub fn acroform(&mut self) -> PdfResult<Option<crate::forms::AcroForm>> {
+        let catalog_obj = self.store.resolve(self.catalog_ref)?.clone();
+        let catalog_dict = catalog_obj
+            .as_dict()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "dictionary",
+                actual: catalog_obj.type_name(),
+            })?
+            .clone();
+
+        let page_refs = self.page_refs()?;
+        let parser = crate::forms::AcroFormParser::new(&mut self.store, &page_refs);
+        parser.parse_catalog_acroform(&catalog_dict)
+    }
+
+    /// Returns all interactive form fields detected in the AcroForm hierarchy.
+    pub fn form_fields(&mut self) -> PdfResult<Vec<crate::forms::FormField>> {
+        match self.acroform()? {
+            Some(af) => Ok(af.fields),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Parses and returns all annotations present on a specific page.
+    pub fn page_annotations(
+        &mut self,
+        page_index: usize,
+    ) -> PdfResult<Vec<crate::annotation::Annotation>> {
+        let page_dict = self.page_dict(page_index)?;
+        let mut parser = crate::annotation::AnnotationParser::new(&mut self.store);
+        parser.parse_page_annotations(&page_dict, page_index)
+    }
+
+    /// Prepares a validated mutation plan for a set of field/widget changes.
+    pub fn apply_mutation(
+        &mut self,
+        changes: &[crate::mutation::PdfChange],
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        let mut engine = crate::mutation::MutationEngine::new(&mut self.store);
+        engine.prepare_plan(changes)
+    }
+
+    /// Writes an incremental update based on a prepared MutationPlan.
+    pub fn export_incremental(
+        &mut self,
+        plan: &crate::mutation::MutationPlan,
+    ) -> PdfResult<Vec<u8>> {
+        let prev_startxref = self.store.xref().startxref_offset as usize;
+        let trailer_dict = self.store.trailer().clone();
+        let source_bytes = self.source.as_bytes();
+
+        crate::writer::incremental::IncrementalWriter::write_update(
+            source_bytes,
+            &plan.modified_objects,
+            prev_startxref,
+            &trailer_dict,
+        )
+    }
+
+    /// Mutates the document with the specified changes and exports an incrementally updated PDF.
+    pub fn mutate_and_export(
+        &mut self,
+        changes: &[crate::mutation::PdfChange],
+    ) -> PdfResult<Vec<u8>> {
+        let plan = self.apply_mutation(changes)?;
+        self.export_incremental(&plan)
+    }
+
     fn decompress_stream_data(
         &self,
         stream: &crate::syntax::object::StreamObject,

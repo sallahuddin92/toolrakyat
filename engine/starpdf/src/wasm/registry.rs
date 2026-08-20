@@ -9,10 +9,13 @@ use std::sync::{LazyLock, Mutex};
 use crate::document::PdfDocument;
 #[cfg(feature = "wasm")]
 use crate::error::{PdfError, PdfResult};
+#[cfg(feature = "wasm")]
+use crate::mutation::PdfChange;
 
 #[cfg(feature = "wasm")]
 pub struct DocumentHandleEntry {
     pub raw_bytes: Vec<u8>,
+    pub pending_changes: Vec<PdfChange>,
 }
 
 #[cfg(feature = "wasm")]
@@ -49,7 +52,13 @@ impl DocumentRegistry {
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        map.insert(id, DocumentHandleEntry { raw_bytes: bytes });
+        map.insert(
+            id,
+            DocumentHandleEntry {
+                raw_bytes: bytes,
+                pending_changes: Vec::new(),
+            },
+        );
 
         Ok(id)
     }
@@ -69,6 +78,40 @@ impl DocumentRegistry {
 
         let mut doc = PdfDocument::from_bytes(&entry.raw_bytes)?;
         f(&mut doc)
+    }
+
+    pub fn add_change(&self, handle: u32, change: PdfChange) -> PdfResult<()> {
+        let mut map = self
+            .handles
+            .lock()
+            .map_err(|_| PdfError::InvalidOperation("DocumentRegistry lock poisoned".into()))?;
+
+        let entry = map
+            .get_mut(&handle)
+            .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
+
+        entry.pending_changes.push(change);
+        Ok(())
+    }
+
+    pub fn export_and_apply_changes(&self, handle: u32) -> PdfResult<Vec<u8>> {
+        let mut map = self
+            .handles
+            .lock()
+            .map_err(|_| PdfError::InvalidOperation("DocumentRegistry lock poisoned".into()))?;
+
+        let entry = map
+            .get_mut(&handle)
+            .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
+
+        let mut doc = PdfDocument::from_bytes(&entry.raw_bytes)?;
+        let new_bytes = doc.mutate_and_export(&entry.pending_changes)?;
+
+        // Update handle state so subsequent mutations build incrementally
+        entry.raw_bytes.clone_from(&new_bytes);
+        entry.pending_changes.clear();
+
+        Ok(new_bytes)
     }
 
     pub fn close(&self, handle: u32) -> PdfResult<bool> {

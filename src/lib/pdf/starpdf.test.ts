@@ -9,10 +9,10 @@ function loadTestAsset(filename: string): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-describe("StarPDF v0.5 WASM Client Runtime", () => {
-  it("retrieves engine version", async () => {
+describe("StarPDF v0.6 WASM Client Runtime & Native Mutation", () => {
+  it("retrieves engine version 0.6.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.5.0");
+    expect(version).toBe("0.6.0");
   });
 
   it("creates minimal PDF and opens it", async () => {
@@ -39,6 +39,59 @@ describe("StarPDF v0.5 WASM Client Runtime", () => {
     await expect(doc.getPageCount()).rejects.toThrow();
   });
 
+  it("extracts AcroForm fields and annotations from real form fixture", async () => {
+    const bytes = loadTestAsset("smartpdf-form.pdf");
+    const doc = await StarPdfClient.open(bytes);
+
+    const fields = await doc.getFormFields();
+    expect(fields.length).toBe(3);
+
+    const textField = fields.find((f) => f.name === "full_name");
+    expect(textField).toBeDefined();
+    expect(textField?.field_type).toBe("text");
+    expect(textField?.widgets.length).toBe(1);
+
+    const checkField = fields.find((f) => f.name === "agree");
+    expect(checkField).toBeDefined();
+    expect(checkField?.field_type).toBe("checkbox");
+
+    const annotations = await doc.getAnnotations(0);
+    expect(annotations.length).toBeGreaterThanOrEqual(3);
+
+    await doc.close();
+  });
+
+  it("performs native incremental mutation and exports valid roundtrip PDF", async () => {
+    const bytes = loadTestAsset("smartpdf-form.pdf");
+    const doc = await StarPdfClient.open(bytes);
+
+    const fields = await doc.getFormFields();
+    const textField = fields.find((f) => f.name === "full_name")!;
+    const checkField = fields.find((f) => f.name === "agree")!;
+
+    await doc.setTextField(textField.object_num, textField.object_gen, "Ahmad Albab");
+    await doc.setCheckbox(checkField.object_num, checkField.object_gen, true);
+
+    const mutatedBytes = await doc.exportIncremental();
+    expect(mutatedBytes.length).toBeGreaterThan(bytes.length);
+
+    await doc.close();
+
+    // Reopen mutated document with StarPDF WASM client
+    const reopenedDoc = await StarPdfClient.open(mutatedBytes);
+    expect(await reopenedDoc.getPageCount()).toBe(1);
+    expect(await reopenedDoc.validate()).toBe(true);
+
+    const reopenedFields = await reopenedDoc.getFormFields();
+    const updatedTextField = reopenedFields.find((f) => f.name === "full_name");
+    expect(updatedTextField?.value).toBe("Ahmad Albab");
+
+    const updatedCheckField = reopenedFields.find((f) => f.name === "agree");
+    expect(updatedCheckField?.value).toBe("true");
+
+    await reopenedDoc.close();
+  });
+
   it("opens multi-page document and extracts text across all pages", async () => {
     const bytes = loadTestAsset("multi-page.test.pdf");
     const doc = await StarPdfClient.open(bytes);
@@ -48,22 +101,6 @@ describe("StarPDF v0.5 WASM Client Runtime", () => {
 
     const allPages = await doc.extractAllText();
     expect(allPages.length).toBe(2);
-
-    await doc.close();
-  });
-
-  it("opens form fixture and searches form labels", async () => {
-    const bytes = loadTestAsset("smartpdf-form.pdf");
-    const doc = await StarPdfClient.open(bytes);
-
-    const count = await doc.getPageCount();
-    expect(count).toBe(1);
-
-    const info = await doc.getInfo();
-    expect(info.is_valid).toBe(true);
-
-    const pageText = await doc.extractPageText(0);
-    expect(pageText.spans.length).toBeGreaterThan(0);
 
     await doc.close();
   });

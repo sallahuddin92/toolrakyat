@@ -2,12 +2,17 @@
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
+use crate::mutation::PdfChange;
+#[cfg(feature = "wasm")]
 use crate::search::SearchOptions;
+#[cfg(feature = "wasm")]
+use crate::syntax::object::ObjectRef;
 #[cfg(feature = "wasm")]
 use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
-    WasmDocumentInfo, WasmPageText, WasmSearchBoundingBox, WasmSearchResult, WasmTextSpan,
+    WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField, WasmPageText,
+    WasmSearchBoundingBox, WasmSearchResult, WasmTextSpan, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -22,7 +27,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.5.0".to_string()
+    "0.6.0".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -40,7 +45,7 @@ pub fn starpdf_get_info(handle: u32) -> Result<JsValue, JsValue> {
             let is_valid = StructuralValidator::validate(doc).is_ok();
             let info = WasmDocumentInfo {
                 page_count,
-                pdf_version: "1.7".to_string(),
+                pdf_version: doc.version().to_string(),
                 is_valid,
             };
             serde_wasm_bindgen::to_value(&info)
@@ -100,37 +105,35 @@ pub fn starpdf_extract_page_text(handle: u32, page_index: u32) -> Result<JsValue
 pub fn starpdf_extract_all_text(handle: u32) -> Result<JsValue, JsValue> {
     REGISTRY
         .with_doc(handle, |doc| {
-            let pages = doc.extract_all_text()?;
-            let wasm_pages: Vec<WasmPageText> = pages
+            let all_pages = doc.extract_all_text()?;
+            let results: Vec<WasmPageText> = all_pages
                 .into_iter()
-                .map(|p| {
-                    let plain = p.plain_text();
-                    let spans = p
+                .map(|page_text| {
+                    let spans = page_text
                         .spans
-                        .into_iter()
+                        .iter()
                         .map(|s| WasmTextSpan {
                             page_index: s.page_index,
-                            text: s.text,
+                            text: s.text.clone(),
                             x: s.x,
                             y: s.y,
                             width: s.width,
                             height: s.height,
                             rotation: s.rotation,
-                            font_name: s.font_name,
+                            font_name: s.font_name.clone(),
                             font_size: s.font_size,
                             confidence: s.confidence,
                         })
                         .collect();
-
                     WasmPageText {
-                        page_index: p.page_index,
-                        plain_text: plain,
+                        page_index: page_text.page_index,
+                        plain_text: page_text.plain_text(),
                         spans,
                     }
                 })
                 .collect();
 
-            serde_wasm_bindgen::to_value(&wasm_pages)
+            serde_wasm_bindgen::to_value(&results)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
         })
         .map_err(to_js_error)
@@ -143,10 +146,14 @@ pub fn starpdf_search(handle: u32, query: &str, case_sensitive: bool) -> Result<
         .with_doc(handle, |doc| {
             let options = SearchOptions { case_sensitive };
             let hits = doc.search(query, &options)?;
-            let wasm_hits: Vec<WasmSearchResult> = hits
+            let results: Vec<WasmSearchResult> = hits
                 .into_iter()
-                .map(|h| {
-                    let boxes = h
+                .map(|h| WasmSearchResult {
+                    page_index: h.page_index,
+                    matched_text: h.matched_text,
+                    start_span_index: h.start_span_index,
+                    end_span_index: h.end_span_index,
+                    boxes: h
                         .boxes
                         .into_iter()
                         .map(|b| WasmSearchBoundingBox {
@@ -157,20 +164,12 @@ pub fn starpdf_search(handle: u32, query: &str, case_sensitive: bool) -> Result<
                             height: b.height,
                             rotation: b.rotation,
                         })
-                        .collect();
-
-                    WasmSearchResult {
-                        page_index: h.page_index,
-                        matched_text: h.matched_text,
-                        start_span_index: h.start_span_index,
-                        end_span_index: h.end_span_index,
-                        boxes,
-                        confidence: h.confidence,
-                    }
+                        .collect(),
+                    confidence: h.confidence,
                 })
                 .collect();
 
-            serde_wasm_bindgen::to_value(&wasm_hits)
+            serde_wasm_bindgen::to_value(&results)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
         })
         .map_err(to_js_error)
@@ -180,10 +179,195 @@ pub fn starpdf_search(handle: u32, query: &str, case_sensitive: bool) -> Result<
 #[wasm_bindgen]
 pub fn starpdf_validate(handle: u32) -> Result<bool, JsValue> {
     REGISTRY
+        .with_doc(handle, |doc| Ok(StructuralValidator::validate(doc).is_ok()))
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_form_fields(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
         .with_doc(handle, |doc| {
-            StructuralValidator::validate(doc)?;
-            Ok(true)
+            let fields = doc.form_fields()?;
+            let wasm_fields: Vec<WasmFormField> = fields
+                .into_iter()
+                .map(|f| {
+                    let field_type_str = match &f.field_type {
+                        crate::forms::FieldType::Text { .. } => "text",
+                        crate::forms::FieldType::Checkbox => "checkbox",
+                        crate::forms::FieldType::RadioButtonGroup => "radio",
+                        crate::forms::FieldType::PushButton => "button",
+                        crate::forms::FieldType::Choice { combo: true, .. } => "combobox",
+                        crate::forms::FieldType::Choice { combo: false, .. } => "listbox",
+                        crate::forms::FieldType::Signature => "signature",
+                        crate::forms::FieldType::Unknown(s) => s.as_str(),
+                    }
+                    .to_string();
+
+                    let value_str = match &f.value {
+                        crate::forms::FieldValue::Text(t) => t.clone(),
+                        crate::forms::FieldValue::Boolean(b) => {
+                            if *b { "true" } else { "false" }.to_string()
+                        }
+                        crate::forms::FieldValue::Name(n) => n.clone(),
+                        crate::forms::FieldValue::Choice(opts) => opts.join(", "),
+                        crate::forms::FieldValue::None => String::new(),
+                    };
+
+                    let widgets = f
+                        .widgets
+                        .into_iter()
+                        .map(|w| {
+                            let is_checked = w.is_checked();
+                            WasmWidget {
+                                object_num: w.object_ref.number,
+                                object_gen: w.object_ref.generation,
+                                page_index: w.page_index,
+                                rect: w.rect,
+                                appearance_state: w.appearance_state,
+                                normal_appearance_states: w.normal_appearance_states,
+                                is_checked,
+                            }
+                        })
+                        .collect();
+
+                    let options = f
+                        .options
+                        .into_iter()
+                        .map(|opt| WasmChoiceOption {
+                            export_value: opt.export_value,
+                            display_value: opt.display_value,
+                        })
+                        .collect();
+
+                    WasmFormField {
+                        object_num: f.object_ref.number,
+                        object_gen: f.object_ref.generation,
+                        parent_num: f.parent_ref.map(|r| r.number),
+                        parent_gen: f.parent_ref.map(|r| r.generation),
+                        field_type: field_type_str,
+                        name: f.fully_qualified_name,
+                        alternate_name: f.alternate_name,
+                        mapping_name: f.mapping_name,
+                        value: value_str,
+                        is_read_only: f.is_read_only,
+                        is_required: f.is_required,
+                        options,
+                        widgets,
+                    }
+                })
+                .collect();
+
+            serde_wasm_bindgen::to_value(&wasm_fields)
+                .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
         })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_annotations(handle: u32, page_index: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let annots = doc.page_annotations(page_index as usize)?;
+            let wasm_annots: Vec<WasmAnnotation> = annots
+                .into_iter()
+                .map(|a| WasmAnnotation {
+                    object_num: a.object_ref.number,
+                    object_gen: a.object_ref.generation,
+                    page_index: a.page_index,
+                    subtype: a.subtype.as_name().to_string(),
+                    rect: a.rect,
+                    contents: a.contents,
+                    name: a.name,
+                    appearance_state: a.appearance_state,
+                })
+                .collect();
+
+            serde_wasm_bindgen::to_value(&wasm_annots)
+                .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_set_text_field(
+    handle: u32,
+    obj_num: u64,
+    obj_gen: u16,
+    value: &str,
+) -> Result<bool, JsValue> {
+    let field_ref = ObjectRef::new(obj_num, obj_gen);
+    let change = PdfChange::SetTextField {
+        field_ref,
+        value: value.to_string(),
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_set_checkbox(
+    handle: u32,
+    obj_num: u64,
+    obj_gen: u16,
+    checked: bool,
+) -> Result<bool, JsValue> {
+    let field_ref = ObjectRef::new(obj_num, obj_gen);
+    let change = PdfChange::SetCheckbox {
+        field_ref,
+        widget_refs: vec![field_ref],
+        checked,
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_set_radio(
+    handle: u32,
+    parent_num: u64,
+    parent_gen: u16,
+    widget_num: u64,
+    widget_gen: u16,
+    on_state: &str,
+) -> Result<bool, JsValue> {
+    let parent_ref = ObjectRef::new(parent_num, parent_gen);
+    let selected_widget_ref = ObjectRef::new(widget_num, widget_gen);
+    let change = PdfChange::SetRadio {
+        parent_ref,
+        selected_widget_ref,
+        on_state: on_state.to_string(),
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_set_choice(
+    handle: u32,
+    obj_num: u64,
+    obj_gen: u16,
+    value: &str,
+) -> Result<bool, JsValue> {
+    let field_ref = ObjectRef::new(obj_num, obj_gen);
+    let change = PdfChange::SetChoice {
+        field_ref,
+        value: value.to_string(),
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_export_incremental(handle: u32) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .export_and_apply_changes(handle)
         .map_err(to_js_error)
 }
 

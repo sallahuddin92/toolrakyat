@@ -53,3 +53,53 @@ pub struct WasmSearchResult {
     pub boxes: Vec<WasmSearchBoundingBox>,
     pub confidence: f64,
 }
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmChoiceOption {
+    pub export_value: String,
+    pub display_value: String,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmWidget {
+    pub object_num: u64,
+    pub object_gen: u16,
+    pub page_index: Option<usize>,
+    pub rect: [f64; 4],
+    pub appearance_state: Option<String>,
+    pub normal_appearance_states: Vec<String>,
+    pub is_checked: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmFormField {
+    pub object_num: u64,
+    pub object_gen: u16,
+    pub parent_num: Option<u64>,
+    pub parent_gen: Option<u16>,
+    pub field_type: String,
+    pub name: String,
+    pub alternate_name: Option<String>,
+    pub mapping_name: Option<String>,
+    pub value: String,
+    pub is_read_only: bool,
+    pub is_required: bool,
+    pub options: Vec<WasmChoiceOption>,
+    pub widgets: Vec<WasmWidget>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmAnnotation {
+    pub object_num: u64,
+    pub object_gen: u16,
+    pub page_index: usize,
+    pub subtype: String,
+    pub rect: [f64; 4],
+    pub contents: Option<String>,
+    pub name: Option<String>,
+    pub appearance_state: Option<String>,
+}

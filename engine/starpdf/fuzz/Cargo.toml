@@ -78,3 +78,27 @@ name = "fuzz_text_search"
 path = "fuzz_targets/fuzz_text_search.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_acroform"
+path = "fuzz_targets/fuzz_acroform.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_annotations"
+path = "fuzz_targets/fuzz_annotations.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_mutation"
+path = "fuzz_targets/fuzz_mutation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_incremental_writer"
+path = "fuzz_targets/fuzz_incremental_writer.rs"
+test = false
+doc = false
