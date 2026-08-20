@@ -20,13 +20,61 @@ test = false
 doc = false
 
 [[bin]]
-name = "fuzz_parser"
-path = "fuzz_targets/fuzz_parser.rs"
+name = "fuzz_object_parser"
+path = "fuzz_targets/fuzz_object_parser.rs"
 test = false
 doc = false
 
 [[bin]]
-name = "fuzz_xref"
-path = "fuzz_targets/fuzz_xref.rs"
+name = "fuzz_xref_stream"
+path = "fuzz_targets/fuzz_xref_stream.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_object_stream"
+path = "fuzz_targets/fuzz_object_stream.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_flatedecode"
+path = "fuzz_targets/fuzz_flatedecode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_predictor"
+path = "fuzz_targets/fuzz_predictor.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_sfnt_font"
+path = "fuzz_targets/fuzz_sfnt_font.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_tounicode_cmap"
+path = "fuzz_targets/fuzz_tounicode_cmap.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_content_stream"
+path = "fuzz_targets/fuzz_content_stream.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_document_open"
+path = "fuzz_targets/fuzz_document_open.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_text_search"
+path = "fuzz_targets/fuzz_text_search.rs"
 test = false
 doc = false

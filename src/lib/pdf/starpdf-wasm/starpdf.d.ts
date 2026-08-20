@@ -1,0 +1,66 @@
+/* tslint:disable */
+/* eslint-disable */
+
+export function starpdf_close(handle: number): boolean;
+
+export function starpdf_create_minimal_pdf(text: string): Uint8Array;
+
+export function starpdf_extract_all_text(handle: number): any;
+
+export function starpdf_extract_page_text(handle: number, page_index: number): any;
+
+export function starpdf_get_info(handle: number): any;
+
+export function starpdf_get_page_count(handle: number): number;
+
+export function starpdf_open(bytes: Uint8Array): number;
+
+export function starpdf_search(handle: number, query: string, case_sensitive: boolean): any;
+
+export function starpdf_validate(handle: number): boolean;
+
+export function starpdf_version(): string;
+
+export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+    readonly starpdf_close: (a: number) => [number, number, number];
+    readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
+    readonly starpdf_extract_all_text: (a: number) => [number, number, number];
+    readonly starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
+    readonly starpdf_get_info: (a: number) => [number, number, number];
+    readonly starpdf_get_page_count: (a: number) => [number, number, number];
+    readonly starpdf_open: (a: number, b: number) => [number, number, number];
+    readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly starpdf_validate: (a: number) => [number, number, number];
+    readonly starpdf_version: () => [number, number];
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_start: () => void;
+}
+
+export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+/**
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+/**
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

@@ -45,6 +45,8 @@ pub mod search;
 pub mod syntax;
 pub mod text;
 pub mod validate;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 pub mod writer;
 pub mod xref;
 

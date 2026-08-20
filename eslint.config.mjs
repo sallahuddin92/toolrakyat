@@ -28,6 +28,7 @@ const eslintConfig = defineConfig([
     "backend/**",
     "smartpdf/**",
     "scratch/**",
+    "src/lib/pdf/starpdf-wasm/**",
   ]),
 ]);
 
