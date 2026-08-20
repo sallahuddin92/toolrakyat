@@ -17,6 +17,7 @@ pub enum PdfError {
     },
     PageNotFound(usize),
     RecursionLimitExceeded,
+    CircularReference(String),
     MalformedInput(String),
     InvalidOperation(String),
 }
@@ -43,6 +44,7 @@ impl fmt::Display for PdfError {
             }
             Self::PageNotFound(idx) => write!(f, "Page index {idx} out of range"),
             Self::RecursionLimitExceeded => write!(f, "Parser recursion depth limit exceeded"),
+            Self::CircularReference(msg) => write!(f, "Circular reference detected: {msg}"),
             Self::MalformedInput(msg) => write!(f, "Malformed PDF data: {msg}"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }

@@ -1,10 +1,14 @@
+use std::collections::BTreeSet;
+
 use crate::error::{PdfError, PdfResult};
+use crate::filter::limits::DecompressLimits;
 use crate::io::cursor::ByteCursor;
 use crate::io::source::ByteSource;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::object::PdfObject;
 use crate::syntax::parser::Parser;
 use crate::syntax::token::Token;
+use crate::xref::stream::XrefStreamParser;
 use crate::xref::table::XrefTable;
 
 pub struct XrefResolver;
@@ -17,7 +21,7 @@ impl XrefResolver {
             return Err(PdfError::InvalidXref("PDF file too short for xref".into()));
         }
 
-        // Standard allows search within the last 1024-4096 bytes of the file
+        // Search within the last 2048 bytes of the file
         let search_start = len.saturating_sub(2048);
         let slice = source.get_slice_range(search_start, len)?;
 
@@ -40,32 +44,145 @@ impl XrefResolver {
         }
     }
 
-    /// Parses the entire cross-reference table and trailer dictionary starting at `xref_offset`.
+    /// High-level entry point: finds startxref and parses the entire table & trailer (with default limits).
+    pub fn load_xref_and_trailer(source: ByteSource<'_>) -> PdfResult<XrefTable> {
+        let limits = DecompressLimits::default();
+        Self::load_xref_and_trailer_with_limits(source, &limits)
+    }
+
+    /// High-level entry point with configurable security/resource limits.
+    pub fn load_xref_and_trailer_with_limits(
+        source: ByteSource<'_>,
+        limits: &DecompressLimits,
+    ) -> PdfResult<XrefTable> {
+        let startxref = Self::find_startxref(source)?;
+        let mut table = XrefTable::new();
+        table.startxref_offset = startxref;
+
+        let mut visited_offsets = BTreeSet::new();
+        Self::parse_xref_chain_at_offset(
+            source,
+            startxref,
+            &mut table,
+            &mut visited_offsets,
+            limits,
+        )?;
+
+        Ok(table)
+    }
+
+    /// Parses a single classic xref table at `xref_offset` (backward compatibility helper).
     pub fn parse_xref_table(source: ByteSource<'_>, xref_offset: u64) -> PdfResult<XrefTable> {
-        if xref_offset >= source.len() as u64 {
+        let limits = DecompressLimits::default();
+        let mut table = XrefTable::new();
+        table.startxref_offset = xref_offset;
+        let mut visited_offsets = BTreeSet::new();
+        Self::parse_xref_chain_at_offset(
+            source,
+            xref_offset,
+            &mut table,
+            &mut visited_offsets,
+            &limits,
+        )?;
+        Ok(table)
+    }
+
+    fn parse_xref_chain_at_offset(
+        source: ByteSource<'_>,
+        offset: u64,
+        table: &mut XrefTable,
+        visited_offsets: &mut BTreeSet<u64>,
+        limits: &DecompressLimits,
+    ) -> PdfResult<()> {
+        if offset >= source.len() as u64 {
             return Err(PdfError::InvalidXref(format!(
-                "xref offset {xref_offset} exceeds file length {}",
+                "xref offset {offset} exceeds file length {}",
                 source.len()
             )));
         }
 
-        let mut cursor = ByteCursor::new(source);
-        cursor.set_position(xref_offset as usize)?;
-        let mut lexer = Lexer::new(cursor);
-
-        match lexer.next_token()? {
-            Some(Token::KeywordXref) => {}
-            Some(other) => {
-                return Err(PdfError::InvalidXref(format!(
-                    "Expected 'xref' at offset {xref_offset}, found {other:?}"
-                )))
-            }
-            None => return Err(PdfError::UnexpectedEof),
+        if visited_offsets.contains(&offset) {
+            // Prevent cyclic /Prev recursion attacks
+            return Err(PdfError::InvalidXref(format!(
+                "Cyclic xref chain detected at offset {offset}"
+            )));
         }
 
-        let mut table = XrefTable::new();
-        table.startxref_offset = xref_offset;
+        if visited_offsets.len() >= limits.max_xref_chain_depth {
+            return Err(PdfError::InvalidXref(format!(
+                "XRef chain depth limit ({}) exceeded",
+                limits.max_xref_chain_depth
+            )));
+        }
 
+        visited_offsets.insert(offset);
+
+        let mut cursor = ByteCursor::new(source);
+        cursor.set_position(offset as usize)?;
+        let mut lexer = Lexer::new(cursor);
+
+        let first_token = lexer.peek_token()?.ok_or(PdfError::UnexpectedEof)?;
+
+        match first_token {
+            Token::KeywordXref => {
+                // 1. Classic ASCII XRef Table
+                let _ = lexer.next_token()?; // consume 'xref'
+                Self::parse_classic_xref_table(
+                    source,
+                    lexer,
+                    table,
+                    visited_offsets,
+                    limits,
+                    offset,
+                )?;
+            }
+            Token::Integer(_) => {
+                // 2. Modern PDF 1.5+ XRef Stream (N G obj << /Type /XRef ... >>)
+                let mut parser = Parser::new(lexer);
+                let (_obj_ref, obj) = parser.parse_indirect_object()?;
+                match obj {
+                    PdfObject::Stream(stream) => {
+                        XrefStreamParser::parse_into_table(&stream, table, limits)?;
+
+                        // Check for chained /Prev in stream dict
+                        if let Some(prev) = stream.dict.get("Prev").and_then(|v| v.as_i64()) {
+                            if prev > 0 {
+                                Self::parse_xref_chain_at_offset(
+                                    source,
+                                    prev as u64,
+                                    table,
+                                    visited_offsets,
+                                    limits,
+                                )?;
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(PdfError::InvalidXref(format!(
+                            "Expected XRef stream object at offset {offset}, found {}",
+                            other.type_name()
+                        )));
+                    }
+                }
+            }
+            other => {
+                return Err(PdfError::InvalidXref(format!(
+                    "Expected 'xref' keyword or object number at offset {offset}, found {other:?}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_classic_xref_table(
+        source: ByteSource<'_>,
+        mut lexer: Lexer<'_>,
+        table: &mut XrefTable,
+        visited_offsets: &mut BTreeSet<u64>,
+        limits: &DecompressLimits,
+        _current_offset: u64,
+    ) -> PdfResult<()> {
         // Parse subsections
         loop {
             lexer.skip_whitespace_and_comments();
@@ -128,16 +245,26 @@ impl XrefResolver {
                         };
 
                         if flag_tok == "n" {
-                            table.insert_in_use(obj_num, offset_tok, gen_tok);
+                            table.entries.entry(obj_num).or_insert(
+                                crate::xref::table::XrefEntry::InUse {
+                                    byte_offset: offset_tok,
+                                    generation: gen_tok,
+                                },
+                            );
                         } else {
-                            table.insert_free(obj_num, offset_tok, gen_tok);
+                            table.entries.entry(obj_num).or_insert(
+                                crate::xref::table::XrefEntry::Free {
+                                    next_free_obj: offset_tok,
+                                    generation: gen_tok,
+                                },
+                            );
                         }
                     }
                 }
                 other => {
                     return Err(PdfError::InvalidXref(format!(
                         "Unexpected token in xref table: {other:?}"
-                    )))
+                    )));
                 }
             }
         }
@@ -147,40 +274,44 @@ impl XrefResolver {
         let trailer_obj = parser.parse_object()?;
         match trailer_obj {
             PdfObject::Dictionary(dict) => {
-                table.trailer = dict;
+                for (k, v) in dict {
+                    table.trailer.entry(k).or_insert(v);
+                }
             }
             other => {
                 return Err(PdfError::InvalidXref(format!(
                     "Trailer must be a dictionary, found {}",
                     other.type_name()
-                )))
+                )));
             }
         }
 
-        // Check for chained /Prev xref tables if incremental update
-        let prev_offset = table
-            .trailer
-            .get("Prev")
-            .and_then(|v| v.as_i64())
-            .and_then(|p| if p > 0 { Some(p as u64) } else { None });
-
-        if let Some(prev) = prev_offset {
-            if prev < xref_offset {
-                if let Ok(prev_table) = Self::parse_xref_table(source, prev) {
-                    // Merge older entries without overwriting newer ones
-                    for (obj_num, entry) in prev_table.entries {
-                        table.entries.entry(obj_num).or_insert(entry);
-                    }
-                }
+        // 1. Check for /XRefStm in trailer (Hybrid-Reference PDFs)
+        if let Some(xref_stm_offset) = table.trailer.get("XRefStm").and_then(|v| v.as_i64()) {
+            if xref_stm_offset > 0 {
+                Self::parse_xref_chain_at_offset(
+                    source,
+                    xref_stm_offset as u64,
+                    table,
+                    visited_offsets,
+                    limits,
+                )?;
             }
         }
 
-        Ok(table)
-    }
+        // 2. Check for chained /Prev xref tables if incremental update
+        if let Some(prev) = table.trailer.get("Prev").and_then(|v| v.as_i64()) {
+            if prev > 0 {
+                Self::parse_xref_chain_at_offset(
+                    source,
+                    prev as u64,
+                    table,
+                    visited_offsets,
+                    limits,
+                )?;
+            }
+        }
 
-    /// High-level entry point: finds startxref and parses the entire table & trailer.
-    pub fn load_xref_and_trailer(source: ByteSource<'_>) -> PdfResult<XrefTable> {
-        let startxref = Self::find_startxref(source)?;
-        Self::parse_xref_table(source, startxref)
+        Ok(())
     }
 }

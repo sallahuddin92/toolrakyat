@@ -1,7 +1,7 @@
 # StarPDF Dependency Audit
 
-**Status:** v0.1 Foundation  
-**External Runtime Dependencies:** 0  
+**Status:** v0.2 Modern PDF Container Compatibility  
+**External Runtime Dependencies:** 1 (`miniz_oxide`)  
 **External Dev Dependencies:** 0  
 
 ---
@@ -10,7 +10,7 @@
 
 | Crate | Purpose | Why std is Insufficient | Binary Impact | In Hot Path? | Can Be Removed? |
 |---|---|---|---|---|---|
-| *(None)* | — | N/A (std library is completely sufficient) | 0 KB | N/A | N/A |
+| `miniz_oxide` (0.9.1) | RFC 1950 / 1951 Deflate decompression for `/FlateDecode` and PNG predictor pipelines | Rust `std` contains no compression/decompression algorithms | ~45 KB | Yes (compressed streams & xref streams) | No (standards-compliant Deflate is required for modern PDF 1.5+ containers) |
 
 ---
 

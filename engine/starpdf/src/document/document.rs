@@ -16,8 +16,16 @@ pub struct PdfDocument<'a> {
 }
 
 impl<'a> PdfDocument<'a> {
-    /// Opens and validates a PDF document from an in-memory byte slice.
+    /// Opens and validates a PDF document from an in-memory byte slice (default limits).
     pub fn from_bytes(bytes: &'a [u8]) -> PdfResult<Self> {
+        Self::from_bytes_with_limits(bytes, crate::filter::limits::DecompressLimits::default())
+    }
+
+    /// Opens and validates a PDF document from an in-memory byte slice with custom limits.
+    pub fn from_bytes_with_limits(
+        bytes: &'a [u8],
+        limits: crate::filter::limits::DecompressLimits,
+    ) -> PdfResult<Self> {
         let source = ByteSource::new(bytes);
 
         // 1. Verify header signature %PDF-
@@ -34,10 +42,10 @@ impl<'a> PdfDocument<'a> {
         let version = String::from_utf8_lossy(version_slice).to_string();
 
         // 2. Locate and parse XRef table and Trailer
-        let xref_table = XrefResolver::load_xref_and_trailer(source)?;
+        let xref_table = XrefResolver::load_xref_and_trailer_with_limits(source, &limits)?;
 
         // 3. Initialize Lazy Object Store
-        let mut store = ObjectStore::new(source, xref_table);
+        let mut store = ObjectStore::new_with_limits(source, xref_table, limits);
 
         // 4. Resolve /Root Catalog
         let catalog_ref = store

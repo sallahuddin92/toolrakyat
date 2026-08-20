@@ -22,12 +22,14 @@
     clippy::module_inception,
     clippy::missing_panics_doc,
     clippy::approx_constant,
+    clippy::let_unit_value,
     clippy::doc_markdown
 )]
 
 pub mod content;
 pub mod document;
 pub mod error;
+pub mod filter;
 pub mod io;
 pub mod syntax;
 pub mod validate;
@@ -35,10 +37,13 @@ pub mod writer;
 pub mod xref;
 
 pub use content::{ContentInstruction, ContentOperand, ContentOperator, ContentParser};
-pub use document::{ObjectStore, ObjectStoreMetrics, PageTree, PdfDocument};
+pub use document::{
+    DecodedObjectStream, ObjectStore, ObjectStoreMetrics, ObjectStreamReader, PageTree, PdfDocument,
+};
 pub use error::{PdfError, PdfResult};
+pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorParams};
 pub use io::{ByteCursor, ByteSource};
 pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
 pub use validate::StructuralValidator;
 pub use writer::{MinimalWriter, Serializer};
-pub use xref::{XrefEntry, XrefResolver, XrefTable};
+pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};
