@@ -3,22 +3,25 @@ use miniz_oxide::deflate::compress_to_vec_zlib;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+use starpdf::annotation::AnnotationParser;
 use starpdf::content::ContentParser;
 use starpdf::document::{ObjectStreamReader, PdfDocument};
 use starpdf::filter::{DecompressLimits, FlateDecoder};
 use starpdf::font::sfnt::{HeadTable, HheaTable, HmtxTable, MaxpTable, SfntCmapTable, SfntFont};
 use starpdf::font::{Font, PageResources, UnicodeCMap};
+use starpdf::forms::AcroFormParser;
+use starpdf::mutation::{MutationEngine, PdfChange};
 use starpdf::search::{DocumentSearchIndex, SearchOptions};
-use starpdf::syntax::object::{PdfObject, StreamObject};
+use starpdf::syntax::object::{ObjectRef, PdfObject, StreamObject};
 use starpdf::syntax::{Lexer, Parser};
 use starpdf::text::TextExtractor;
-use starpdf::writer::MinimalWriter;
+use starpdf::writer::{IncrementalWriter, MinimalWriter};
 use starpdf::xref::table::XrefTable;
 use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("          StarPDF Engine v0.4 Micro-Benchmark Suite             ");
+    println!("          StarPDF Engine v0.6 Micro-Benchmark Suite             ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -296,5 +299,67 @@ ET
             ns_per_op, elapsed, iterations
         );
     }
+
+    // 11. Incremental Writer Serialization
+    {
+        let modified = BTreeMap::from([(
+            ObjectRef::new(3, 0),
+            PdfObject::Dictionary(BTreeMap::from([(
+                "Type".to_string(),
+                PdfObject::Name("Page".to_string()),
+            )])),
+        )]);
+        let trailer = BTreeMap::from([("Size".to_string(), PdfObject::Integer(5))]);
+
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = IncrementalWriter::write_update(&sample_pdf, &modified, 300, &trailer).unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "11. Incremental Serialization:{:>8} ns/op  ({:.2?} for {} updates)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
+    // 12. Mutation Plan Evaluation
+    {
+        let dummy_bytes = b"%PDF-1.7\n";
+        let source = starpdf::io::source::ByteSource::new(dummy_bytes);
+        let field_ref = ObjectRef::new(20, 0);
+        let field_dict = BTreeMap::from([
+            ("FT".to_string(), PdfObject::Name("Tx".to_string())),
+            ("T".to_string(), PdfObject::String(b"field".to_vec())),
+            ("V".to_string(), PdfObject::String(b"initial".to_vec())),
+        ]);
+        let objects = BTreeMap::from([(field_ref, PdfObject::Dictionary(field_dict))]);
+        let mut xref = starpdf::xref::table::XrefTable::new();
+        xref.insert_in_use(20, 10, 0);
+
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut store = starpdf::document::object_store::ObjectStore::new(source, xref.clone());
+            for (r, obj) in &objects {
+                store.insert_cached(*r, obj.clone());
+            }
+            let mut engine = MutationEngine::new(&mut store);
+            let _ = engine
+                .prepare_plan(&[PdfChange::SetTextField {
+                    field_ref,
+                    value: "mutated_value".to_string(),
+                }])
+                .unwrap();
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / iterations as u128;
+        println!(
+            "12. Mutation Plan Eval:      {:>8} ns/op  ({:.2?} for {} plans)",
+            ns_per_op, elapsed, iterations
+        );
+    }
+
     println!("================================================================");
 }

@@ -27,6 +27,11 @@ impl<'a> ByteSource<'a> {
     }
 
     #[inline]
+    pub const fn as_bytes(&self) -> &'a [u8] {
+        self.data
+    }
+
+    #[inline]
     pub fn get_byte(&self, offset: usize) -> PdfResult<u8> {
         self.data
             .get(offset)

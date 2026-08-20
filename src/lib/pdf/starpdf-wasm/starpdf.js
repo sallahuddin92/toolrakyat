@@ -30,6 +30,20 @@ export function starpdf_create_minimal_pdf(text) {
 
 /**
  * @param {number} handle
+ * @returns {Uint8Array}
+ */
+export function starpdf_export_incremental(handle) {
+    const ret = wasm.starpdf_export_incremental(handle);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
  * @returns {any}
  */
 export function starpdf_extract_all_text(handle) {
@@ -47,6 +61,31 @@ export function starpdf_extract_all_text(handle) {
  */
 export function starpdf_extract_page_text(handle, page_index) {
     const ret = wasm.starpdf_extract_page_text(handle, page_index);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @returns {any}
+ */
+export function starpdf_get_annotations(handle, page_index) {
+    const ret = wasm.starpdf_get_annotations(handle, page_index);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_get_form_fields(handle) {
+    const ret = wasm.starpdf_get_form_fields(handle);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -105,6 +144,74 @@ export function starpdf_search(handle, query, case_sensitive) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {bigint} obj_num
+ * @param {number} obj_gen
+ * @param {boolean} checked
+ * @returns {boolean}
+ */
+export function starpdf_set_checkbox(handle, obj_num, obj_gen, checked) {
+    const ret = wasm.starpdf_set_checkbox(handle, obj_num, obj_gen, checked);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {bigint} obj_num
+ * @param {number} obj_gen
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function starpdf_set_choice(handle, obj_num, obj_gen, value) {
+    const ptr0 = passStringToWasm0(value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_set_choice(handle, obj_num, obj_gen, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {bigint} parent_num
+ * @param {number} parent_gen
+ * @param {bigint} widget_num
+ * @param {number} widget_gen
+ * @param {string} on_state
+ * @returns {boolean}
+ */
+export function starpdf_set_radio(handle, parent_num, parent_gen, widget_num, widget_gen, on_state) {
+    const ptr0 = passStringToWasm0(on_state, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_set_radio(handle, parent_num, parent_gen, widget_num, widget_gen, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {bigint} obj_num
+ * @param {number} obj_gen
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function starpdf_set_text_field(handle, obj_num, obj_gen, value) {
+    const ptr0 = passStringToWasm0(value, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_set_text_field(handle, obj_num, obj_gen, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
 }
 
 /**

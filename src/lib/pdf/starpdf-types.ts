@@ -49,6 +49,48 @@ export interface StarPdfSearchOptions {
   caseSensitive?: boolean;
 }
 
+export interface StarPdfChoiceOption {
+  export_value: string;
+  display_value: string;
+}
+
+export interface StarPdfWidget {
+  object_num: number;
+  object_gen: number;
+  page_index?: number;
+  rect: [number, number, number, number];
+  appearance_state?: string;
+  normal_appearance_states: string[];
+  is_checked: boolean;
+}
+
+export interface StarPdfFormField {
+  object_num: number;
+  object_gen: number;
+  parent_num?: number;
+  parent_gen?: number;
+  field_type: "text" | "checkbox" | "radio" | "button" | "combobox" | "listbox" | "signature" | string;
+  name: string;
+  alternate_name?: string;
+  mapping_name?: string;
+  value: string;
+  is_read_only: boolean;
+  is_required: boolean;
+  options: StarPdfChoiceOption[];
+  widgets: StarPdfWidget[];
+}
+
+export interface StarPdfAnnotation {
+  object_num: number;
+  object_gen: number;
+  page_index: number;
+  subtype: string;
+  rect: [number, number, number, number];
+  contents?: string;
+  name?: string;
+  appearance_state?: string;
+}
+
 /**
  * Worker Protocol Request Messages
  */
@@ -61,6 +103,22 @@ export type StarPdfWorkerRequest =
   | { type: "extractAll"; id: string; handle: number }
   | { type: "search"; id: string; handle: number; query: string; caseSensitive: boolean }
   | { type: "validate"; id: string; handle: number }
+  | { type: "getFormFields"; id: string; handle: number }
+  | { type: "getAnnotations"; id: string; handle: number; pageIndex: number }
+  | { type: "setTextField"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
+  | { type: "setCheckbox"; id: string; handle: number; objectNum: number; objectGen: number; checked: boolean }
+  | {
+      type: "setRadio";
+      id: string;
+      handle: number;
+      parentNum: number;
+      parentGen: number;
+      widgetNum: number;
+      widgetGen: number;
+      onState: string;
+    }
+  | { type: "setChoice"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
+  | { type: "exportIncremental"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
   | { type: "createMinimal"; id: string; text: string };
 
@@ -76,6 +134,13 @@ export type StarPdfWorkerResponse =
   | { type: "extractAll"; id: string; success: true; pages: StarPdfPageText[] }
   | { type: "search"; id: string; success: true; results: StarPdfSearchResult[] }
   | { type: "validate"; id: string; success: true; isValid: boolean }
+  | { type: "getFormFields"; id: string; success: true; fields: StarPdfFormField[] }
+  | { type: "getAnnotations"; id: string; success: true; annotations: StarPdfAnnotation[] }
+  | { type: "setTextField"; id: string; success: true }
+  | { type: "setCheckbox"; id: string; success: true }
+  | { type: "setRadio"; id: string; success: true }
+  | { type: "setChoice"; id: string; success: true }
+  | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "close"; id: string; success: true }
   | { type: "createMinimal"; id: string; success: true; bytes: Uint8Array }
   | { type: "error"; id: string; success: false; error: string; code?: string };

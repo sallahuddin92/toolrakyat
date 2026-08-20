@@ -5,9 +5,15 @@ export function starpdf_close(handle: number): boolean;
 
 export function starpdf_create_minimal_pdf(text: string): Uint8Array;
 
+export function starpdf_export_incremental(handle: number): Uint8Array;
+
 export function starpdf_extract_all_text(handle: number): any;
 
 export function starpdf_extract_page_text(handle: number, page_index: number): any;
+
+export function starpdf_get_annotations(handle: number, page_index: number): any;
+
+export function starpdf_get_form_fields(handle: number): any;
 
 export function starpdf_get_info(handle: number): any;
 
@@ -16,6 +22,14 @@ export function starpdf_get_page_count(handle: number): number;
 export function starpdf_open(bytes: Uint8Array): number;
 
 export function starpdf_search(handle: number, query: string, case_sensitive: boolean): any;
+
+export function starpdf_set_checkbox(handle: number, obj_num: bigint, obj_gen: number, checked: boolean): boolean;
+
+export function starpdf_set_choice(handle: number, obj_num: bigint, obj_gen: number, value: string): boolean;
+
+export function starpdf_set_radio(handle: number, parent_num: bigint, parent_gen: number, widget_num: bigint, widget_gen: number, on_state: string): boolean;
+
+export function starpdf_set_text_field(handle: number, obj_num: bigint, obj_gen: number, value: string): boolean;
 
 export function starpdf_validate(handle: number): boolean;
 
@@ -27,12 +41,19 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly starpdf_close: (a: number) => [number, number, number];
     readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
+    readonly starpdf_export_incremental: (a: number) => [number, number, number, number];
     readonly starpdf_extract_all_text: (a: number) => [number, number, number];
     readonly starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
+    readonly starpdf_get_annotations: (a: number, b: number) => [number, number, number];
+    readonly starpdf_get_form_fields: (a: number) => [number, number, number];
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
+    readonly starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+    readonly starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
+    readonly starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
     readonly starpdf_validate: (a: number) => [number, number, number];
     readonly starpdf_version: () => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
