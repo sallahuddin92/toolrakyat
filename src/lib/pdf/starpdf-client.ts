@@ -18,6 +18,7 @@ import initWasm, {
   starpdf_extract_all_text,
   starpdf_extract_page_text,
   starpdf_get_annotations,
+  starpdf_get_appearance_status,
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
@@ -26,6 +27,7 @@ import initWasm, {
   starpdf_search,
   starpdf_set_checkbox,
   starpdf_set_choice,
+  starpdf_set_choice_values,
   starpdf_set_radio,
   starpdf_set_text_field,
   starpdf_update_annotation,
@@ -206,6 +208,21 @@ export class StarPdfDocumentHandle {
     );
   }
 
+  async setChoiceValues(
+    objectNum: number,
+    objectGen: number,
+    values: string[],
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_set_choice_values(
+      this._handle,
+      BigInt(objectNum),
+      objectGen,
+      values,
+    );
+  }
+
   async addAnnotation(
     pageIndex: number,
     input: StarPdfAddAnnotationInput
@@ -249,6 +266,18 @@ export class StarPdfDocumentHandle {
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_export_incremental(this._handle);
+  }
+
+  async getAppearanceStatus(): Promise<
+    "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED"
+  > {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_appearance_status(this._handle) as
+      | "AP_REGENERATED"
+      | "AP_PRESERVED"
+      | "AP_NOT_REQUIRED"
+      | "AP_UNSUPPORTED";
   }
 
   async close(): Promise<void> {

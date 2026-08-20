@@ -68,3 +68,14 @@
 - **Preservation result:** every incremental result retains the input as an exact byte prefix.
 - **Refusal result:** invalid geometry, non-finite numbers, oversized annotation data, wrong-page removals, excess mutations, and excess output growth return deterministic typed errors without partial output.
 - **Observed mechanism:** combining explicit appearance outcomes across an atomic mutation batch avoids treating a logical-only update as visually complete. This is classified as `CONVENTIONAL_ENGINEERING`; no patentability claim is made.
+
+## 6. Milestone Ledger Entry: v0.8
+
+- **Starting SHA:** `d2e847d57be9007b9a0ab486377a605e7d5e69ec`
+- **Milestone SHA:** commit containing this ledger entry
+- **Classification:** `STANDARD_PDF_IMPLEMENTATION`, `CONVENTIONAL_ENGINEERING`, `SECURITY_HARDENING`, `PERFORMANCE_OPTIMIZATION`
+- **Production evidence:** deterministic regeneration replaces stale annotation `/AP`; compatible embedded font references are reused; rich child widgets visually roundtrip through PDF.js; every incremental generation preserves the prior bytes as an exact prefix.
+- **Differential evidence:** repository and locally generated pdf-lib fixtures agree semantically with StarPDF and render visibly through PDF.js. Unsupported composite encodings and font formats are refused rather than coerced.
+- **Fuzz evidence:** four new/affected bounded targets, including a final resolver rerun, completed a clean recorded 2,214,760 executions with zero crashes or hangs.
+- **Performance evidence:** the second warm run measured 1,952 ns font resolution, 822 ns TrueType subset, 1,993 ns annotation AP regeneration, and 18,950 ns resource export/reopen. No reproducible unchanged-workload regression exceeded 15%.
+- **Novelty boundary:** appearance dictionaries, TrueType subsetting, font resource reuse, and atomic overlays are standard or conventional engineering. No `EXPERIMENTAL_METHOD` or `POTENTIAL_NOVELTY` evidence is asserted, and no patentability claim is made.

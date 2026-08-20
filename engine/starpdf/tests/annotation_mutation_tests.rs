@@ -45,7 +45,10 @@ fn all_supported_annotations() -> Vec<AnnotationSpec> {
         AnnotationSpec::Line {
             line_points: [200.0, 100.0, 380.0, 140.0],
             stroke_color: Some(vec![0.0]),
+            fill_color: None,
             stroke_width: Some(1.5),
+            line_endings: Default::default(),
+            contents: None,
         },
         AnnotationSpec::Ink {
             rect: [200.0, 160.0, 380.0, 220.0],
@@ -134,6 +137,7 @@ fn test_update_and_remove_annotation() {
             rect: None,
             contents: Some("Final Review".to_string()),
             color: Some(vec![0.0, 0.5, 0.0]),
+            ..AnnotationUpdateSpec::default()
         },
     };
     let step2_bytes = doc2.mutate_and_export(&[update_change]).unwrap();

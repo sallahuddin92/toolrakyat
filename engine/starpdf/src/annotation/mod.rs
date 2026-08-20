@@ -4,4 +4,6 @@ pub mod types;
 
 pub use generator::AnnotationGenerator;
 pub use parser::AnnotationParser;
-pub use types::{Annotation, AnnotationSpec, AnnotationSubtype, AnnotationUpdateSpec};
+pub use types::{
+    Annotation, AnnotationSpec, AnnotationSubtype, AnnotationUpdateSpec, LineEndingStyle,
+};

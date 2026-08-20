@@ -87,7 +87,10 @@ pub struct WasmFormField {
     pub value: String,
     pub is_read_only: bool,
     pub is_required: bool,
+    pub max_len: Option<usize>,
+    pub is_comb: bool,
     pub options: Vec<WasmChoiceOption>,
+    pub selected_indices: Vec<usize>,
     pub widgets: Vec<WasmWidget>,
 }
 
@@ -102,6 +105,13 @@ pub struct WasmAnnotation {
     pub contents: Option<String>,
     pub name: Option<String>,
     pub appearance_state: Option<String>,
+    pub color: Option<Vec<f64>>,
+    pub interior_color: Option<Vec<f64>>,
+    pub border_width: Option<f64>,
+    pub line_points: Option<[f64; 4]>,
+    pub line_endings: Option<[String; 2]>,
+    pub quad_points: Vec<f64>,
+    pub ink_list: Vec<Vec<[f64; 2]>>,
 }
 
 #[cfg(feature = "wasm")]
@@ -116,6 +126,7 @@ pub struct WasmAddAnnotationInput {
     pub border_width: Option<f64>,
     pub quad_points: Option<Vec<f64>>,
     pub line_points: Option<[f64; 4]>,
+    pub line_endings: Option<[String; 2]>,
     pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
     pub uri: Option<String>,
 }
@@ -126,4 +137,10 @@ pub struct WasmUpdateAnnotationInput {
     pub rect: Option<[f64; 4]>,
     pub contents: Option<String>,
     pub color: Option<Vec<f64>>,
+    pub fill_color: Option<Vec<f64>>,
+    pub border_width: Option<f64>,
+    pub line_points: Option<[f64; 4]>,
+    pub line_endings: Option<[String; 2]>,
+    pub quad_points: Option<Vec<f64>>,
+    pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
 }

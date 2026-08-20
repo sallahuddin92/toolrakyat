@@ -120,7 +120,7 @@ fn test_choice_appearance_uses_visible_value_and_supported_status_model() {
         false,
     )
     .unwrap();
-    assert_eq!(choice_status.as_str(), "APPEARANCE_REGENERATED");
+    assert_eq!(choice_status.as_str(), "AP_REGENERATED");
     let stream = choice_ap
         .as_dict()
         .and_then(|dict| dict.get("N"))
@@ -140,11 +140,11 @@ fn test_choice_appearance_uses_visible_value_and_supported_status_model() {
         false,
     )
     .unwrap();
-    assert_eq!(unsupported.as_str(), "APPEARANCE_UNSUPPORTED");
-    assert_eq!(AppearanceStatus::ValueUpdated.as_str(), "VALUE_UPDATED");
-    assert_eq!(AppearanceStatus::StateUpdated.as_str(), "STATE_UPDATED");
+    assert_eq!(unsupported.as_str(), "AP_UNSUPPORTED");
+    assert_eq!(AppearanceStatus::ValueUpdated.as_str(), "AP_NOT_REQUIRED");
+    assert_eq!(AppearanceStatus::StateUpdated.as_str(), "AP_NOT_REQUIRED");
     assert_eq!(
         AppearanceStatus::AppearancePreserved.as_str(),
-        "APPEARANCE_PRESERVED"
+        "AP_PRESERVED"
     );
 }

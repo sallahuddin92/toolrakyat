@@ -8,6 +8,7 @@ use crate::font::sfnt::table::TableDirectory;
 
 #[derive(Debug, Clone)]
 pub struct SfntFont {
+    pub data: Vec<u8>,
     pub head: Option<HeadTable>,
     pub maxp: Option<MaxpTable>,
     pub hhea: Option<HheaTable>,
@@ -17,6 +18,12 @@ pub struct SfntFont {
 
 impl SfntFont {
     pub fn parse(data: &[u8]) -> PdfResult<Self> {
+        if data.len() > crate::font::appearance::MAX_EMBEDDED_FONT_BYTES {
+            return Err(crate::error::PdfError::InvalidOperation(format!(
+                "Embedded font exceeds maximum of {} bytes",
+                crate::font::appearance::MAX_EMBEDDED_FONT_BYTES
+            )));
+        }
         let dir = TableDirectory::parse(data)?;
 
         let head = dir
@@ -42,6 +49,7 @@ impl SfntFont {
             .and_then(|t_data| SfntCmapTable::parse(t_data).ok());
 
         Ok(Self {
+            data: data.to_vec(),
             head,
             maxp,
             hhea,

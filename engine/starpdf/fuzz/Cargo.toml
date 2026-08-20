@@ -126,3 +126,27 @@ name = "fuzz_annotation_mutation"
 path = "fuzz_targets/fuzz_annotation_mutation.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_font_subsetter"
+path = "fuzz_targets/fuzz_font_subsetter.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_rich_appearance"
+path = "fuzz_targets/fuzz_rich_appearance.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_annotation_regeneration"
+path = "fuzz_targets/fuzz_annotation_regeneration.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_embedded_font_resolver"
+path = "fuzz_targets/fuzz_embedded_font_resolver.rs"
+test = false
+doc = false

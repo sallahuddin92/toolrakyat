@@ -2,7 +2,7 @@
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
-use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec};
+use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec, LineEndingStyle};
 #[cfg(feature = "wasm")]
 use crate::mutation::PdfChange;
 #[cfg(feature = "wasm")]
@@ -30,7 +30,21 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.7.0".to_string()
+    "0.8.0".to_string()
+}
+
+#[cfg(feature = "wasm")]
+fn parse_line_endings(values: Option<&[String; 2]>) -> Result<[LineEndingStyle; 2], JsValue> {
+    let Some(values) = values else {
+        return Ok([LineEndingStyle::None, LineEndingStyle::None]);
+    };
+    let first = LineEndingStyle::from_name(&values[0]).ok_or_else(|| {
+        JsValue::from_str(&format!("Unsupported line ending style: {}", values[0]))
+    })?;
+    let second = LineEndingStyle::from_name(&values[1]).ok_or_else(|| {
+        JsValue::from_str(&format!("Unsupported line ending style: {}", values[1]))
+    })?;
+    Ok([first, second])
 }
 
 #[cfg(feature = "wasm")]
@@ -255,7 +269,10 @@ pub fn starpdf_get_form_fields(handle: u32) -> Result<JsValue, JsValue> {
                         value: value_str,
                         is_read_only: f.is_read_only,
                         is_required: f.is_required,
+                        max_len: f.max_len,
+                        is_comb: f.is_comb,
                         options,
+                        selected_indices: f.selected_indices,
                         widgets,
                     }
                 })
@@ -284,6 +301,18 @@ pub fn starpdf_get_annotations(handle: u32, page_index: u32) -> Result<JsValue, 
                     contents: a.contents,
                     name: a.name,
                     appearance_state: a.appearance_state,
+                    color: a.color,
+                    interior_color: a.interior_color,
+                    border_width: a.border_width,
+                    line_points: a.line_points,
+                    line_endings: a.line_endings.map(|endings| {
+                        [
+                            endings[0].as_name().to_string(),
+                            endings[1].as_name().to_string(),
+                        ]
+                    }),
+                    quad_points: a.quad_points,
+                    ink_list: a.ink_list,
                 })
                 .collect();
 
@@ -368,6 +397,24 @@ pub fn starpdf_set_choice(
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
+pub fn starpdf_set_choice_values(
+    handle: u32,
+    obj_num: u64,
+    obj_gen: u16,
+    values_val: JsValue,
+) -> Result<bool, JsValue> {
+    let values: Vec<String> = serde_wasm_bindgen::from_value(values_val)
+        .map_err(|error| JsValue::from_str(&format!("Invalid choice values: {error}")))?;
+    let change = PdfChange::SetChoiceValues {
+        field_ref: ObjectRef::new(obj_num, obj_gen),
+        values,
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
 pub fn starpdf_add_annotation(
     handle: u32,
     page_index: u32,
@@ -376,6 +423,7 @@ pub fn starpdf_add_annotation(
     let input: WasmAddAnnotationInput = serde_wasm_bindgen::from_value(annotation_val)
         .map_err(|e| JsValue::from_str(&format!("Invalid annotation input: {e}")))?;
 
+    let line_endings = parse_line_endings(input.line_endings.as_ref())?;
     let spec = match input.subtype.as_str() {
         "FreeText" => AnnotationSpec::FreeText {
             rect: input.rect,
@@ -403,7 +451,10 @@ pub fn starpdf_add_annotation(
                 input.rect[3],
             ]),
             stroke_color: input.color,
+            fill_color: input.fill_color,
             stroke_width: input.border_width,
+            line_endings,
+            contents: input.contents,
         },
         "Highlight" => AnnotationSpec::Highlight {
             rect: input.rect,
@@ -456,10 +507,21 @@ pub fn starpdf_update_annotation(
     let input: WasmUpdateAnnotationInput = serde_wasm_bindgen::from_value(update_val)
         .map_err(|e| JsValue::from_str(&format!("Invalid update input: {e}")))?;
 
+    let line_endings = input
+        .line_endings
+        .as_ref()
+        .map(|values| parse_line_endings(Some(values)))
+        .transpose()?;
     let update = AnnotationUpdateSpec {
         rect: input.rect,
         contents: input.contents,
         color: input.color,
+        fill_color: input.fill_color,
+        border_width: input.border_width,
+        line_points: input.line_points,
+        line_endings,
+        quad_points: input.quad_points,
+        ink_list: input.ink_list,
     };
 
     let change = PdfChange::UpdateAnnotation {
@@ -491,6 +553,15 @@ pub fn starpdf_remove_annotation(
 pub fn starpdf_export_incremental(handle: u32) -> Result<Vec<u8>, JsValue> {
     REGISTRY
         .export_and_apply_changes(handle)
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_appearance_status(handle: u32) -> Result<String, JsValue> {
+    REGISTRY
+        .last_appearance_status(handle)
+        .map(|status| status.as_str().to_string())
         .map_err(to_js_error)
 }
 

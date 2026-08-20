@@ -13,6 +13,7 @@ pub struct Font {
     pub base_font: String,
     pub subtype: String,
     pub is_composite: bool,
+    pub composite_identity_mapping: bool,
     pub widths: BTreeMap<u32, f64>,
     pub default_width: f64,
     pub first_char: u32,
@@ -30,6 +31,7 @@ impl Font {
             base_font: "Helvetica".to_string(),
             subtype: "Type1".to_string(),
             is_composite: false,
+            composite_identity_mapping: false,
             widths: BTreeMap::new(),
             default_width: 500.0,
             first_char: 0,
@@ -59,6 +61,7 @@ impl Font {
             .to_string();
 
         let is_composite = subtype == "Type0";
+        let mut composite_identity_mapping = false;
 
         // 1. Resolve /Widths array
         let mut widths = BTreeMap::new();
@@ -117,50 +120,37 @@ impl Font {
             }
         }
 
-        // 4. Handle FontDescriptor with embedded SFNT font (/FontFile2 or /FontFile3)
-        let mut embedded_sfnt = None;
-        if let Some(fd_obj) = font_dict.get("FontDescriptor") {
-            if let Ok(resolved_fd) = store.resolve_object(fd_obj) {
-                if let Some(fd_dict) = resolved_fd.as_dict() {
-                    let font_file_ref = fd_dict
-                        .get("FontFile2")
-                        .or_else(|| fd_dict.get("FontFile3"));
-                    if let Some(ff_obj) = font_file_ref {
-                        if let Ok(resolved_ff) = store.resolve_object(ff_obj) {
-                            if let Some(stream) = resolved_ff.as_stream() {
-                                let mut data = stream.data.clone();
-                                if let Some(filter) =
-                                    stream.dict.get("Filter").and_then(|v| v.as_name())
-                                {
-                                    if filter == "FlateDecode" {
-                                        if let Ok(decompressed) =
-                                            crate::filter::flate::FlateDecoder::decode(
-                                                &stream.data,
-                                                &crate::filter::limits::DecompressLimits::default(),
-                                            )
-                                        {
-                                            data = decompressed;
-                                        }
-                                    }
-                                }
-                                if let Ok(parsed_sfnt) = SfntFont::parse(&data) {
-                                    embedded_sfnt = Some(parsed_sfnt);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // 4. Resolve embedded TrueType/SFNT data from simple or Type0 descendant fonts.
+        let mut embedded_sfnt = Self::embedded_sfnt_from_font_dict(font_dict, store)?;
 
         // 5. Handle Type0 DescendantFonts /DW and /W if composite
         if is_composite {
+            let identity_encoding = match font_dict.get("Encoding") {
+                Some(encoding) => store
+                    .resolve_object(encoding)?
+                    .as_name()
+                    .is_some_and(|name| matches!(name, "Identity-H" | "Identity-V")),
+                None => false,
+            };
             if let Some(desc_obj) = font_dict.get("DescendantFonts") {
                 let resolved_desc = store.resolve_object(desc_obj)?;
                 if let Some(desc_arr) = resolved_desc.as_array() {
                     if let Some(first_cid_ref) = desc_arr.first() {
                         if let Ok(cid_obj) = store.resolve_object(first_cid_ref) {
                             if let Some(cid_dict) = cid_obj.as_dict() {
+                                let identity_cid_to_gid = match cid_dict.get("CIDToGIDMap") {
+                                    None => true,
+                                    Some(mapping) => store
+                                        .resolve_object(mapping)?
+                                        .as_name()
+                                        .is_some_and(|name| name == "Identity"),
+                                };
+                                composite_identity_mapping =
+                                    identity_encoding && identity_cid_to_gid;
+                                if embedded_sfnt.is_none() {
+                                    embedded_sfnt =
+                                        Self::embedded_sfnt_from_font_dict(cid_dict, store)?;
+                                }
                                 if let Some(dw) = cid_dict.get("DW").and_then(|v| v.as_f64()) {
                                     default_width = dw;
                                 }
@@ -176,6 +166,7 @@ impl Font {
             base_font,
             subtype,
             is_composite,
+            composite_identity_mapping,
             widths,
             default_width,
             first_char,
@@ -184,6 +175,54 @@ impl Font {
             to_unicode,
             embedded_sfnt,
         })
+    }
+
+    fn embedded_sfnt_from_font_dict(
+        font_dict: &BTreeMap<String, PdfObject>,
+        store: &mut ObjectStore<'_>,
+    ) -> PdfResult<Option<SfntFont>> {
+        let Some(descriptor) = font_dict.get("FontDescriptor") else {
+            return Ok(None);
+        };
+        let descriptor = store.resolve_object(descriptor)?;
+        let Some(descriptor_dict) = descriptor.as_dict() else {
+            return Err(crate::error::PdfError::TypeMismatch {
+                expected: "font descriptor dictionary",
+                actual: descriptor.type_name(),
+            });
+        };
+        let Some(font_file) = descriptor_dict
+            .get("FontFile2")
+            .or_else(|| descriptor_dict.get("FontFile3"))
+        else {
+            return Ok(None);
+        };
+        let font_file = store.resolve_object(font_file)?;
+        let stream = font_file
+            .as_stream()
+            .ok_or_else(|| crate::error::PdfError::TypeMismatch {
+                expected: "embedded font stream",
+                actual: font_file.type_name(),
+            })?;
+        if stream.data.len() > crate::font::appearance::MAX_EMBEDDED_FONT_BYTES {
+            return Err(crate::error::PdfError::InvalidOperation(format!(
+                "Embedded font stream exceeds maximum of {} bytes",
+                crate::font::appearance::MAX_EMBEDDED_FONT_BYTES
+            )));
+        }
+        let data = match stream.dict.get("Filter").and_then(PdfObject::as_name) {
+            Some("FlateDecode") => crate::filter::flate::FlateDecoder::decode(
+                &stream.data,
+                &crate::filter::limits::DecompressLimits::default(),
+            )?,
+            Some(filter) => {
+                return Err(crate::error::PdfError::InvalidOperation(format!(
+                    "Unsupported embedded font stream filter /{filter}"
+                )))
+            }
+            None => stream.data.clone(),
+        };
+        SfntFont::parse(&data).map(Some)
     }
 
     /// Decodes a byte sequence into individual character glyph representations and advances.

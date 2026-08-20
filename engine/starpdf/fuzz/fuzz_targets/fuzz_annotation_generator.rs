@@ -38,7 +38,10 @@ fuzz_target!(|data: &[u8]| {
         AnnotationSpec::Line {
             line_points: rect,
             stroke_color: Some(vec![0.0, 0.0, 1.0]),
+            fill_color: None,
             stroke_width: Some(1.0),
+            line_endings: Default::default(),
+            contents: None,
         },
         AnnotationSpec::Highlight {
             rect,

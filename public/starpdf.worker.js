@@ -12,6 +12,7 @@ import initWasm, {
   starpdf_extract_all_text,
   starpdf_extract_page_text,
   starpdf_get_annotations,
+  starpdf_get_appearance_status,
   starpdf_get_form_fields,
   starpdf_get_info,
   starpdf_get_page_count,
@@ -20,6 +21,7 @@ import initWasm, {
   starpdf_search,
   starpdf_set_checkbox,
   starpdf_set_choice,
+  starpdf_set_choice_values,
   starpdf_set_radio,
   starpdf_set_text_field,
   starpdf_update_annotation,
@@ -131,6 +133,11 @@ self.onmessage = async (event) => {
         self.postMessage({ type: "setChoice", id: req.id, success: true });
         break;
       }
+      case "setChoiceValues": {
+        starpdf_set_choice_values(req.handle, BigInt(req.objectNum), req.objectGen, req.values);
+        self.postMessage({ type: "setChoiceValues", id: req.id, success: true });
+        break;
+      }
       case "addAnnotation": {
         starpdf_add_annotation(req.handle, req.pageIndex, req.input);
         self.postMessage({ type: "addAnnotation", id: req.id, success: true });
@@ -149,6 +156,11 @@ self.onmessage = async (event) => {
       case "exportIncremental": {
         const bytes = starpdf_export_incremental(req.handle);
         self.postMessage({ type: "exportIncremental", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "getAppearanceStatus": {
+        const status = starpdf_get_appearance_status(req.handle);
+        self.postMessage({ type: "getAppearanceStatus", id: req.id, success: true, status });
         break;
       }
       case "close": {

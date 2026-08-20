@@ -63,33 +63,52 @@ impl TableDirectory {
         }
 
         let mut tables = BTreeMap::new();
-        let mut curr_offset = 12;
+        let directory_len = num_tables
+            .checked_mul(16)
+            .and_then(|value| value.checked_add(12))
+            .ok_or_else(|| PdfError::InvalidSyntax("SFNT table directory overflow".into()))?;
+        if directory_len > data.len() {
+            return Err(PdfError::InvalidSyntax(
+                "Truncated SFNT table directory".into(),
+            ));
+        }
+        let mut curr_offset = 12usize;
 
         for _ in 0..num_tables {
-            if curr_offset + 16 > data.len() {
-                break;
-            }
-
             let mut tag = [0u8; 4];
             tag.copy_from_slice(&data[curr_offset..curr_offset + 4]);
-            let checksum = read_u32_be(data, curr_offset + 4).unwrap_or(0);
-            let offset = read_u32_be(data, curr_offset + 8).unwrap_or(0) as usize;
-            let length = read_u32_be(data, curr_offset + 12).unwrap_or(0) as usize;
+            let checksum = read_u32_be(data, curr_offset + 4)
+                .ok_or_else(|| PdfError::InvalidSyntax("Truncated SFNT checksum".into()))?;
+            let offset = read_u32_be(data, curr_offset + 8)
+                .ok_or_else(|| PdfError::InvalidSyntax("Truncated SFNT table offset".into()))?
+                as usize;
+            let length = read_u32_be(data, curr_offset + 12)
+                .ok_or_else(|| PdfError::InvalidSyntax("Truncated SFNT table length".into()))?
+                as usize;
 
             // Bounds check table record against total font data length
-            if offset.saturating_add(length) <= data.len() {
-                tables.insert(
-                    tag,
-                    TableRecord {
-                        tag,
-                        checksum,
-                        offset,
-                        length,
-                    },
-                );
+            let end = offset
+                .checked_add(length)
+                .ok_or_else(|| PdfError::InvalidSyntax("SFNT table range overflow".into()))?;
+            if end > data.len() {
+                return Err(PdfError::InvalidSyntax(format!(
+                    "SFNT table {:?} extends beyond font data",
+                    String::from_utf8_lossy(&tag)
+                )));
             }
+            tables.insert(
+                tag,
+                TableRecord {
+                    tag,
+                    checksum,
+                    offset,
+                    length,
+                },
+            );
 
-            curr_offset += 16;
+            curr_offset = curr_offset
+                .checked_add(16)
+                .ok_or_else(|| PdfError::InvalidSyntax("SFNT directory offset overflow".into()))?;
         }
 
         Ok(Self { tables })

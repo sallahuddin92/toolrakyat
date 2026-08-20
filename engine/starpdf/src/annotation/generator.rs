@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::annotation::types::AnnotationSpec;
+use crate::annotation::types::{AnnotationSpec, LineEndingStyle};
 use crate::appearance::color::PdfColor;
 use crate::appearance::fonts::FontMetricsHelper;
 use crate::appearance::text_field::escape_pdf_string;
@@ -16,6 +16,19 @@ pub const MAX_INK_POINTS_TOTAL: usize = 100_000;
 pub const MAX_ANNOTATION_APPEARANCE_BYTES: usize = 256 * 1024;
 
 pub struct AnnotationGenerator;
+
+pub enum AnnotationAppearance {
+    Regenerated(StreamObject),
+    NotRequired,
+    Unsupported,
+}
+
+#[derive(Clone, Copy)]
+enum MarkupAppearance {
+    Highlight,
+    Underline,
+    StrikeOut,
+}
 
 impl AnnotationGenerator {
     /// Generates the annotation dictionary and its associated `/AP /N` appearance stream (if applicable).
@@ -237,7 +250,10 @@ impl AnnotationGenerator {
             AnnotationSpec::Line {
                 line_points,
                 stroke_color,
+                fill_color,
                 stroke_width,
+                line_endings,
+                contents,
             } => {
                 if !line_points.iter().all(|value| value.is_finite()) {
                     return Err(PdfError::InvalidOperation(
@@ -246,6 +262,14 @@ impl AnnotationGenerator {
                 }
                 Self::validate_optional_width(*stroke_width, "Line stroke width")?;
                 Self::validate_optional_color(stroke_color.as_deref(), "Line stroke color")?;
+                Self::validate_optional_color(fill_color.as_deref(), "Line fill color")?;
+                if let Some(value) = contents {
+                    Self::validate_contents(value)?;
+                    dict.insert(
+                        "Contents".to_string(),
+                        PdfObject::String(value.as_bytes().to_vec()),
+                    );
+                }
                 dict.insert("Subtype".to_string(), PdfObject::Name("Line".to_string()));
                 dict.insert(
                     "L".to_string(),
@@ -266,26 +290,59 @@ impl AnnotationGenerator {
                 if let Some(col_arr) = stroke_color {
                     dict.insert("C".to_string(), Self::vec_to_pdf_array(col_arr));
                 }
-
-                let min_x = line_points[0].min(line_points[2]);
-                let min_y = line_points[1].min(line_points[3]);
+                if let Some(col_arr) = fill_color {
+                    dict.insert("IC".to_string(), Self::vec_to_pdf_array(col_arr));
+                }
+                dict.insert(
+                    "LE".to_string(),
+                    PdfObject::Array(
+                        line_endings
+                            .iter()
+                            .map(|ending| PdfObject::Name(ending.as_name().to_string()))
+                            .collect(),
+                    ),
+                );
+                dict.insert(
+                    "BS".to_string(),
+                    PdfObject::Dictionary(BTreeMap::from([
+                        ("Type".to_string(), PdfObject::Name("Border".to_string())),
+                        ("W".to_string(), PdfObject::Real(sw)),
+                        ("S".to_string(), PdfObject::Name("S".to_string())),
+                    ])),
+                );
+                dict.insert(
+                    "Border".to_string(),
+                    PdfObject::Array(vec![
+                        PdfObject::Integer(0),
+                        PdfObject::Integer(0),
+                        PdfObject::Real(sw),
+                    ]),
+                );
 
                 let mut content = Vec::new();
                 content.extend_from_slice(b"q\n");
                 content.extend_from_slice(
                     format!("{}\n{:.2} w\n", s_col.to_stroke_ops(), sw).as_bytes(),
                 );
-                Self::validate_appearance_size(content.len())?;
+                let fill = fill_color
+                    .as_deref()
+                    .and_then(PdfColor::parse_from_slice)
+                    .unwrap_or(s_col);
+                content.extend_from_slice(format!("{}\n", fill.to_fill_ops()).as_bytes());
+
+                let start = [line_points[0] - rect[0], line_points[1] - rect[1]];
+                let end = [line_points[2] - rect[0], line_points[3] - rect[1]];
                 content.extend_from_slice(
                     format!(
-                        "{:.2} {:.2} m\n{:.2} {:.2} l\nS\nQ\n",
-                        line_points[0] - min_x,
-                        line_points[1] - min_y,
-                        line_points[2] - min_x,
-                        line_points[3] - min_y
+                        "{:.2} {:.2} m\n{:.2} {:.2} l\nS\n",
+                        start[0], start[1], end[0], end[1]
                     )
                     .as_bytes(),
                 );
+                Self::append_line_ending(&mut content, start, end, line_endings[0], sw, true);
+                Self::append_line_ending(&mut content, end, start, line_endings[1], sw, false);
+                content.extend_from_slice(b"Q\n");
+                Self::validate_appearance_size(content.len())?;
 
                 let stream = StreamObject {
                     dict: Self::create_form_dict(width, height, content.len()),
@@ -312,8 +369,13 @@ impl AnnotationGenerator {
                 let col_arr = color.clone().unwrap_or_else(|| vec![1.0, 1.0, 0.0]); // Default yellow
                 dict.insert("C".to_string(), Self::vec_to_pdf_array(&col_arr));
 
-                // Viewer-derived appearance is standard for markup annotations
-                Ok((dict, None))
+                let stream = Self::generate_markup_stream(
+                    rect,
+                    quad_points,
+                    &col_arr,
+                    MarkupAppearance::Highlight,
+                )?;
+                Ok((dict, Some(stream)))
             }
             AnnotationSpec::Underline {
                 quad_points, color, ..
@@ -331,7 +393,13 @@ impl AnnotationGenerator {
                 let col_arr = color.clone().unwrap_or_else(|| vec![0.0, 0.0, 0.0]);
                 dict.insert("C".to_string(), Self::vec_to_pdf_array(&col_arr));
 
-                Ok((dict, None))
+                let stream = Self::generate_markup_stream(
+                    rect,
+                    quad_points,
+                    &col_arr,
+                    MarkupAppearance::Underline,
+                )?;
+                Ok((dict, Some(stream)))
             }
             AnnotationSpec::StrikeOut {
                 quad_points, color, ..
@@ -349,7 +417,13 @@ impl AnnotationGenerator {
                 let col_arr = color.clone().unwrap_or_else(|| vec![1.0, 0.0, 0.0]);
                 dict.insert("C".to_string(), Self::vec_to_pdf_array(&col_arr));
 
-                Ok((dict, None))
+                let stream = Self::generate_markup_stream(
+                    rect,
+                    quad_points,
+                    &col_arr,
+                    MarkupAppearance::StrikeOut,
+                )?;
+                Ok((dict, Some(stream)))
             }
             AnnotationSpec::Ink {
                 ink_list,
@@ -448,6 +522,112 @@ impl AnnotationGenerator {
         }
     }
 
+    /// Reconstructs a supported annotation from its current dictionary and regenerates `/AP /N`.
+    /// The caller owns indirect-object allocation so regeneration remains part of the atomic plan.
+    pub fn regenerate_from_dictionary(
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<AnnotationAppearance> {
+        let subtype = dict
+            .get("Subtype")
+            .and_then(PdfObject::as_name)
+            .ok_or_else(|| PdfError::InvalidOperation("Annotation is missing /Subtype".into()))?;
+        if subtype == "Link" || subtype == "Text" {
+            return Ok(AnnotationAppearance::NotRequired);
+        }
+        let rect = Self::dict_rect(dict)?;
+        let color = Self::dict_number_array(dict.get("C"));
+        let fill_color = Self::dict_number_array(dict.get("IC"));
+        let border_width = Self::dict_border_width(dict);
+        let contents = dict.get("Contents").and_then(PdfObject::as_string_lossy);
+
+        let spec = match subtype {
+            "FreeText" => {
+                let font_size = dict
+                    .get("DA")
+                    .and_then(PdfObject::as_string_lossy)
+                    .and_then(|value| crate::appearance::DefaultAppearance::parse(&value).ok())
+                    .map(|da| da.font_size);
+                AnnotationSpec::FreeText {
+                    rect,
+                    text: contents.unwrap_or_default(),
+                    font_size,
+                    color,
+                }
+            }
+            "Square" => AnnotationSpec::Square {
+                rect,
+                stroke_color: color,
+                fill_color,
+                border_width,
+            },
+            "Circle" => AnnotationSpec::Circle {
+                rect,
+                stroke_color: color,
+                fill_color,
+                border_width,
+            },
+            "Line" => {
+                let values = Self::dict_number_array(dict.get("L")).ok_or_else(|| {
+                    PdfError::InvalidOperation(
+                        "Line annotation is missing valid /L endpoints".into(),
+                    )
+                })?;
+                if values.len() != 4 {
+                    return Err(PdfError::InvalidOperation(
+                        "Line annotation /L must contain exactly four numbers".into(),
+                    ));
+                }
+                let line_endings = Self::dict_line_endings(dict)?;
+                AnnotationSpec::Line {
+                    line_points: [values[0], values[1], values[2], values[3]],
+                    stroke_color: color,
+                    fill_color,
+                    stroke_width: border_width,
+                    line_endings,
+                    contents,
+                }
+            }
+            "Highlight" | "Underline" | "StrikeOut" => {
+                let quad_points =
+                    Self::dict_number_array(dict.get("QuadPoints")).ok_or_else(|| {
+                        PdfError::InvalidOperation(format!(
+                            "{subtype} annotation is missing valid /QuadPoints"
+                        ))
+                    })?;
+                match subtype {
+                    "Highlight" => AnnotationSpec::Highlight {
+                        rect,
+                        quad_points,
+                        color,
+                    },
+                    "Underline" => AnnotationSpec::Underline {
+                        rect,
+                        quad_points,
+                        color,
+                    },
+                    _ => AnnotationSpec::StrikeOut {
+                        rect,
+                        quad_points,
+                        color,
+                    },
+                }
+            }
+            "Ink" => AnnotationSpec::Ink {
+                rect,
+                ink_list: Self::dict_ink_list(dict)?,
+                stroke_color: color,
+                stroke_width: border_width,
+            },
+            _ => return Ok(AnnotationAppearance::Unsupported),
+        };
+
+        let (_, stream) = Self::generate_annotation_objects(&spec)?;
+        match stream {
+            Some(stream) => Ok(AnnotationAppearance::Regenerated(stream)),
+            None => Ok(AnnotationAppearance::Unsupported),
+        }
+    }
+
     fn create_form_dict(width: f64, height: f64, length: usize) -> BTreeMap<String, PdfObject> {
         let mut dict = BTreeMap::new();
         dict.insert("Type".to_string(), PdfObject::Name("XObject".to_string()));
@@ -464,6 +644,97 @@ impl AnnotationGenerator {
         );
         dict.insert("Length".to_string(), PdfObject::Integer(length as i64));
         dict
+    }
+
+    fn dict_number_array(obj: Option<&PdfObject>) -> Option<Vec<f64>> {
+        let values = obj?.as_array()?;
+        let mut result = Vec::with_capacity(values.len());
+        for value in values {
+            result.push(value.as_real()?);
+        }
+        Some(result)
+    }
+
+    fn dict_rect(dict: &BTreeMap<String, PdfObject>) -> PdfResult<[f64; 4]> {
+        let values = Self::dict_number_array(dict.get("Rect")).ok_or_else(|| {
+            PdfError::InvalidOperation("Annotation is missing a direct numeric /Rect".into())
+        })?;
+        if values.len() != 4 {
+            return Err(PdfError::InvalidOperation(
+                "Annotation /Rect must contain exactly four numbers".into(),
+            ));
+        }
+        let rect = [values[0], values[1], values[2], values[3]];
+        if !rect.iter().all(|value| value.is_finite()) || rect[2] <= rect[0] || rect[3] <= rect[1] {
+            return Err(PdfError::InvalidOperation(
+                "Annotation /Rect must have finite positive dimensions".into(),
+            ));
+        }
+        Ok(rect)
+    }
+
+    fn dict_border_width(dict: &BTreeMap<String, PdfObject>) -> Option<f64> {
+        dict.get("BS")
+            .and_then(PdfObject::as_dict)
+            .and_then(|bs| bs.get("W"))
+            .and_then(PdfObject::as_real)
+            .or_else(|| {
+                dict.get("Border")
+                    .and_then(PdfObject::as_array)
+                    .and_then(|values| values.get(2))
+                    .and_then(PdfObject::as_real)
+            })
+    }
+
+    fn dict_line_endings(dict: &BTreeMap<String, PdfObject>) -> PdfResult<[LineEndingStyle; 2]> {
+        let Some(values) = dict.get("LE").and_then(PdfObject::as_array) else {
+            return Ok([LineEndingStyle::None, LineEndingStyle::None]);
+        };
+        if values.len() != 2 {
+            return Err(PdfError::InvalidOperation(
+                "Line annotation /LE must contain two names".into(),
+            ));
+        }
+        let parse = |value: &PdfObject| {
+            value
+                .as_name()
+                .and_then(LineEndingStyle::from_name)
+                .ok_or_else(|| PdfError::InvalidOperation("Unsupported line ending style".into()))
+        };
+        Ok([parse(&values[0])?, parse(&values[1])?])
+    }
+
+    fn dict_ink_list(dict: &BTreeMap<String, PdfObject>) -> PdfResult<Vec<Vec<[f64; 2]>>> {
+        let paths = dict
+            .get("InkList")
+            .and_then(PdfObject::as_array)
+            .ok_or_else(|| {
+                PdfError::InvalidOperation("Ink annotation is missing /InkList".into())
+            })?;
+        let mut result = Vec::with_capacity(paths.len().min(MAX_INK_PATHS));
+        for path in paths {
+            let values = path.as_array().ok_or_else(|| {
+                PdfError::InvalidOperation("InkList path must be an array".into())
+            })?;
+            if values.len() % 2 != 0 {
+                return Err(PdfError::InvalidOperation(
+                    "InkList path must contain coordinate pairs".into(),
+                ));
+            }
+            let mut points = Vec::with_capacity(values.len() / 2);
+            for pair in values.chunks_exact(2) {
+                let x = pair[0].as_real().ok_or_else(|| {
+                    PdfError::InvalidOperation("InkList coordinate must be numeric".into())
+                })?;
+                let y = pair[1].as_real().ok_or_else(|| {
+                    PdfError::InvalidOperation("InkList coordinate must be numeric".into())
+                })?;
+                points.push([x, y]);
+            }
+            result.push(points);
+        }
+        Self::validate_ink_list(&result)?;
+        Ok(result)
     }
 
     fn validate_contents(contents: &str) -> PdfResult<()> {
@@ -595,6 +866,168 @@ impl AnnotationGenerator {
             cy + ry
         );
         content.extend_from_slice(op.as_bytes());
+    }
+
+    fn generate_markup_stream(
+        rect: [f64; 4],
+        quad_points: &[f64],
+        color: &[f64],
+        kind: MarkupAppearance,
+    ) -> PdfResult<StreamObject> {
+        let width = rect[2] - rect[0];
+        let height = rect[3] - rect[1];
+        let pdf_color = PdfColor::parse_from_slice(color).ok_or_else(|| {
+            PdfError::InvalidOperation("Markup appearance color is invalid".into())
+        })?;
+        let mut content = Vec::with_capacity(quad_points.len().saturating_mul(12));
+        content.extend_from_slice(b"q\n");
+
+        for quad in quad_points.chunks_exact(8) {
+            let points = [
+                [quad[0] - rect[0], quad[1] - rect[1]],
+                [quad[2] - rect[0], quad[3] - rect[1]],
+                [quad[4] - rect[0], quad[5] - rect[1]],
+                [quad[6] - rect[0], quad[7] - rect[1]],
+            ];
+            match kind {
+                MarkupAppearance::Highlight => {
+                    content.extend_from_slice(format!("{}\n", pdf_color.to_fill_ops()).as_bytes());
+                    content.extend_from_slice(
+                        format!(
+                            "{:.2} {:.2} m\n{:.2} {:.2} l\n{:.2} {:.2} l\n{:.2} {:.2} l\nh\nf\n",
+                            points[0][0],
+                            points[0][1],
+                            points[1][0],
+                            points[1][1],
+                            points[3][0],
+                            points[3][1],
+                            points[2][0],
+                            points[2][1]
+                        )
+                        .as_bytes(),
+                    );
+                }
+                MarkupAppearance::Underline | MarkupAppearance::StrikeOut => {
+                    let min_x = points
+                        .iter()
+                        .map(|point| point[0])
+                        .fold(f64::INFINITY, f64::min);
+                    let max_x = points
+                        .iter()
+                        .map(|point| point[0])
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let min_y = points
+                        .iter()
+                        .map(|point| point[1])
+                        .fold(f64::INFINITY, f64::min);
+                    let max_y = points
+                        .iter()
+                        .map(|point| point[1])
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let y = match kind {
+                        MarkupAppearance::Underline => min_y + 0.5,
+                        MarkupAppearance::StrikeOut => f64::midpoint(min_y, max_y),
+                        MarkupAppearance::Highlight => min_y,
+                    };
+                    let line_width = ((max_y - min_y) * 0.08).clamp(0.5, 3.0);
+                    content.extend_from_slice(
+                        format!(
+                            "{}\n{:.2} w\n{:.2} {:.2} m\n{:.2} {:.2} l\nS\n",
+                            pdf_color.to_stroke_ops(),
+                            line_width,
+                            min_x,
+                            y,
+                            max_x,
+                            y
+                        )
+                        .as_bytes(),
+                    );
+                }
+            }
+        }
+        content.extend_from_slice(b"Q\n");
+        Self::validate_appearance_size(content.len())?;
+        let dict = Self::create_form_dict(width, height, content.len());
+        Ok(StreamObject {
+            dict,
+            stream_offset: 0,
+            stream_length: content.len(),
+            data: content,
+        })
+    }
+
+    fn append_line_ending(
+        content: &mut Vec<u8>,
+        point: [f64; 2],
+        toward: [f64; 2],
+        ending: LineEndingStyle,
+        stroke_width: f64,
+        _is_start: bool,
+    ) {
+        if ending == LineEndingStyle::None {
+            return;
+        }
+        let dx = toward[0] - point[0];
+        let dy = toward[1] - point[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if !length.is_finite() || length <= f64::EPSILON {
+            return;
+        }
+        let ux = dx / length;
+        let uy = dy / length;
+        let px = -uy;
+        let py = ux;
+        let size = (stroke_width * 4.0).clamp(4.0, 16.0);
+        let back = [point[0] + ux * size, point[1] + uy * size];
+        let left = [back[0] + px * size * 0.55, back[1] + py * size * 0.55];
+        let right = [back[0] - px * size * 0.55, back[1] - py * size * 0.55];
+        content.extend_from_slice(b"q\n");
+        match ending {
+            LineEndingStyle::Square => content.extend_from_slice(
+                format!(
+                    "{:.2} {:.2} {:.2} {:.2} re\nB\n",
+                    point[0] - size / 2.0,
+                    point[1] - size / 2.0,
+                    size,
+                    size
+                )
+                .as_bytes(),
+            ),
+            LineEndingStyle::Circle => {
+                Self::append_ellipse(content, point[0], point[1], size / 2.0, size / 2.0);
+                content.extend_from_slice(b"B\n");
+            }
+            LineEndingStyle::Diamond => content.extend_from_slice(
+                format!(
+                    "{:.2} {:.2} m\n{:.2} {:.2} l\n{:.2} {:.2} l\n{:.2} {:.2} l\nh\nB\n",
+                    point[0],
+                    point[1] + size / 2.0,
+                    point[0] + size / 2.0,
+                    point[1],
+                    point[0],
+                    point[1] - size / 2.0,
+                    point[0] - size / 2.0,
+                    point[1]
+                )
+                .as_bytes(),
+            ),
+            LineEndingStyle::OpenArrow => content.extend_from_slice(
+                format!(
+                    "{:.2} {:.2} m\n{:.2} {:.2} l\n{:.2} {:.2} l\nS\n",
+                    left[0], left[1], point[0], point[1], right[0], right[1]
+                )
+                .as_bytes(),
+            ),
+            LineEndingStyle::ClosedArrow => content.extend_from_slice(
+                format!(
+                    "{:.2} {:.2} m\n{:.2} {:.2} l\n{:.2} {:.2} l\nh\nB\n",
+                    left[0], left[1], point[0], point[1], right[0], right[1]
+                )
+                .as_bytes(),
+            ),
+            LineEndingStyle::None => {}
+        }
+        content.extend_from_slice(b"Q\n");
     }
 
     fn vec_to_pdf_array(vals: &[f64]) -> PdfObject {
