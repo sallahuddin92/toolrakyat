@@ -23,6 +23,13 @@
     clippy::missing_panics_doc,
     clippy::approx_constant,
     clippy::let_unit_value,
+    clippy::many_single_char_names,
+    clippy::unused_self,
+    clippy::items_after_statements,
+    clippy::manual_is_multiple_of,
+    clippy::return_self_not_must_use,
+    clippy::too_many_arguments,
+    clippy::derivable_impls,
     clippy::doc_markdown
 )]
 
@@ -30,8 +37,10 @@ pub mod content;
 pub mod document;
 pub mod error;
 pub mod filter;
+pub mod font;
 pub mod io;
 pub mod syntax;
+pub mod text;
 pub mod validate;
 pub mod writer;
 pub mod xref;
@@ -42,8 +51,10 @@ pub use document::{
 };
 pub use error::{PdfError, PdfResult};
 pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorParams};
+pub use font::{Font, PageResources, SimpleEncoding, UnicodeCMap};
 pub use io::{ByteCursor, ByteSource};
 pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
+pub use text::{GraphicsState, Matrix2D, PageText, TextExtractor, TextSpan, TextState};
 pub use validate::StructuralValidator;
 pub use writer::{MinimalWriter, Serializer};
 pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};
