@@ -30,6 +30,8 @@
     clippy::return_self_not_must_use,
     clippy::too_many_arguments,
     clippy::derivable_impls,
+    clippy::unnecessary_wraps,
+    clippy::needless_range_loop,
     clippy::doc_markdown
 )]
 
@@ -39,6 +41,7 @@ pub mod error;
 pub mod filter;
 pub mod font;
 pub mod io;
+pub mod search;
 pub mod syntax;
 pub mod text;
 pub mod validate;
@@ -53,6 +56,10 @@ pub use error::{PdfError, PdfResult};
 pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorParams};
 pub use font::{Font, PageResources, SimpleEncoding, UnicodeCMap};
 pub use io::{ByteCursor, ByteSource};
+pub use search::{
+    DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
+    TextMatcher,
+};
 pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
 pub use text::{GraphicsState, Matrix2D, PageText, TextExtractor, TextSpan, TextState};
 pub use validate::StructuralValidator;

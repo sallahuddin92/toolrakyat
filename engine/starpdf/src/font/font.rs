@@ -4,6 +4,7 @@ use crate::document::object_store::ObjectStore;
 use crate::error::PdfResult;
 use crate::font::cmap::UnicodeCMap;
 use crate::font::encoding::SimpleEncoding;
+use crate::font::sfnt::SfntFont;
 use crate::syntax::object::PdfObject;
 
 #[derive(Debug, Clone)]
@@ -18,6 +19,7 @@ pub struct Font {
     pub last_char: u32,
     pub encoding: SimpleEncoding,
     pub to_unicode: Option<UnicodeCMap>,
+    pub embedded_sfnt: Option<SfntFont>,
 }
 
 impl Font {
@@ -34,6 +36,7 @@ impl Font {
             last_char: 255,
             encoding: SimpleEncoding::standard_win_ansi(),
             to_unicode: None,
+            embedded_sfnt: None,
         }
     }
 
@@ -114,7 +117,43 @@ impl Font {
             }
         }
 
-        // 4. Handle Type0 DescendantFonts /DW and /W if composite
+        // 4. Handle FontDescriptor with embedded SFNT font (/FontFile2 or /FontFile3)
+        let mut embedded_sfnt = None;
+        if let Some(fd_obj) = font_dict.get("FontDescriptor") {
+            if let Ok(resolved_fd) = store.resolve_object(fd_obj) {
+                if let Some(fd_dict) = resolved_fd.as_dict() {
+                    let font_file_ref = fd_dict
+                        .get("FontFile2")
+                        .or_else(|| fd_dict.get("FontFile3"));
+                    if let Some(ff_obj) = font_file_ref {
+                        if let Ok(resolved_ff) = store.resolve_object(ff_obj) {
+                            if let Some(stream) = resolved_ff.as_stream() {
+                                let mut data = stream.data.clone();
+                                if let Some(filter) =
+                                    stream.dict.get("Filter").and_then(|v| v.as_name())
+                                {
+                                    if filter == "FlateDecode" {
+                                        if let Ok(decompressed) =
+                                            crate::filter::flate::FlateDecoder::decode(
+                                                &stream.data,
+                                                &crate::filter::limits::DecompressLimits::default(),
+                                            )
+                                        {
+                                            data = decompressed;
+                                        }
+                                    }
+                                }
+                                if let Ok(parsed_sfnt) = SfntFont::parse(&data) {
+                                    embedded_sfnt = Some(parsed_sfnt);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Handle Type0 DescendantFonts /DW and /W if composite
         if is_composite {
             if let Some(desc_obj) = font_dict.get("DescendantFonts") {
                 let resolved_desc = store.resolve_object(desc_obj)?;
@@ -143,6 +182,7 @@ impl Font {
             last_char,
             encoding,
             to_unicode,
+            embedded_sfnt,
         })
     }
 
@@ -186,6 +226,11 @@ impl Font {
             .widths
             .get(&code)
             .copied()
+            .or_else(|| {
+                self.embedded_sfnt
+                    .as_ref()
+                    .and_then(|f| f.get_advance_width(code))
+            })
             .unwrap_or(self.default_width);
 
         // 2. Unicode decoding
@@ -196,13 +241,20 @@ impl Font {
             }
         }
 
-        // Priority 2: /Encoding table (for simple 8-bit fonts)
+        // Priority 2: Embedded font cmap table (when /ToUnicode is absent)
+        if let Some(ref sfnt) = self.embedded_sfnt {
+            if let Some(ch) = sfnt.decode_char_code(code) {
+                return (ch.to_string(), width);
+            }
+        }
+
+        // Priority 3: /Encoding table (for simple 8-bit fonts)
         if !self.is_composite && code <= 255 {
             let ch = self.encoding.decode_byte(code as u8);
             return (ch.to_string(), width);
         }
 
-        // Priority 3: Fallback char from code
+        // Priority 4: Fallback char from code
         let fallback = char::from_u32(code).unwrap_or('\u{FFFD}');
         (fallback.to_string(), width)
     }

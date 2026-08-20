@@ -177,6 +177,22 @@ impl<'a> PdfDocument<'a> {
         Ok(results)
     }
 
+    /// Builds a full document search index.
+    pub fn build_search_index(&mut self) -> PdfResult<crate::search::DocumentSearchIndex> {
+        let pages_text = self.extract_all_text()?;
+        Ok(crate::search::DocumentSearchIndex::new(pages_text))
+    }
+
+    /// Performs text search across all pages with given search options.
+    pub fn search(
+        &mut self,
+        query: &str,
+        options: &crate::search::SearchOptions,
+    ) -> PdfResult<Vec<crate::search::SearchResult>> {
+        let index = self.build_search_index()?;
+        Ok(index.search(query, options))
+    }
+
     fn decompress_stream_data(
         &self,
         stream: &crate::syntax::object::StreamObject,
