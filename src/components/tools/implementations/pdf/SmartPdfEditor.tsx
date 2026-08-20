@@ -16,6 +16,7 @@ import { PdfError } from "@/lib/pdf/pdf-errors";
 import { StarPdfClient, type StarPdfDocumentHandle } from "@/lib/pdf/starpdf-client";
 import {
   runStarPdfPageOperation,
+  mergeStarPdfDocuments,
   type StarPdfPageOperation,
 } from "@/lib/pdf/starpdf-page-worker-client";
 import type { StarPdfSearchResult, StarPdfSecurityInfo } from "@/lib/pdf/starpdf-types";
@@ -55,6 +56,7 @@ export function SmartPdfEditor() {
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
 
   const viewportContainerRef = useRef<HTMLDivElement | null>(null);
+  const mergeInputRef = useRef<HTMLInputElement | null>(null);
 
   // Clean up PDF.js proxy and StarPDF handle when unmounting or resetting
   const cleanupProxy = useCallback(() => {
@@ -356,6 +358,37 @@ export function SmartPdfEditor() {
     }
   }, [downloadPdf, filename, isModified, isPageProcessing, selectedPages, sourceBytes]);
 
+  const handleMergeFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!sourceBytes || !files?.length || isPageProcessing) return;
+      if (isModified) {
+        toast.error("Export or reset pending form edits before adding another PDF.");
+        return;
+      }
+      setIsPageProcessing(true);
+      try {
+        const additions = await Promise.all(
+          Array.from(files).map(async (file) => new Uint8Array(await file.arrayBuffer())),
+        );
+        const output = await mergeStarPdfDocuments([sourceBytes, ...additions]);
+        cleanupProxy();
+        await loadDocument(output, filename, output.byteLength);
+        toast.success(`Added ${additions.length} PDF document(s).`);
+      } catch (operationError) {
+        const message =
+          operationError instanceof Error
+            ? operationError.message
+            : "StarPDF could not merge the selected documents.";
+        setError(message);
+        toast.error(message);
+      } finally {
+        if (mergeInputRef.current) mergeInputRef.current.value = "";
+        setIsPageProcessing(false);
+      }
+    },
+    [cleanupProxy, filename, isModified, isPageProcessing, loadDocument, sourceBytes],
+  );
+
   const handleTogglePageSelection = useCallback((pageNumber: number) => {
     setSelectedPages((previous) => {
       const next = new Set(previous);
@@ -485,6 +518,16 @@ export function SmartPdfEditor() {
           )
         }
         onExtract={() => void handleExtractPages()}
+        onMerge={() => mergeInputRef.current?.click()}
+      />
+      <input
+        ref={mergeInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        multiple
+        className="hidden"
+        aria-label="Add PDF documents"
+        onChange={(event) => void handleMergeFiles(event.target.files)}
       />
 
       {/* Main Workspace: Thumbnails + Viewport Canvas + Form Inspector */}

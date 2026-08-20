@@ -254,6 +254,54 @@ export function starpdf_insert_blank_page(handle, page_index, width, height, rot
 
 /**
  * @param {number} handle
+ * @param {Uint8Array} imported_bytes
+ * @param {number} imported_page_index
+ * @param {number} insert_at
+ * @returns {Uint8Array}
+ */
+export function starpdf_insert_imported_page(handle, imported_bytes, imported_page_index, insert_at) {
+    const ptr0 = passArray8ToWasm0(imported_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_insert_imported_page(handle, ptr0, len0, imported_page_index, insert_at);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * @param {any} documents
+ * @returns {Uint8Array}
+ */
+export function starpdf_merge_documents(documents) {
+    const ret = wasm.starpdf_merge_documents(documents);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {any} documents
+ * @param {any} page_sources
+ * @returns {Uint8Array}
+ */
+export function starpdf_merge_selected(documents, page_sources) {
+    const ret = wasm.starpdf_merge_selected(documents, page_sources);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
  * @param {number} from_index
  * @param {number} to_index
  * @returns {Uint8Array}
@@ -394,6 +442,19 @@ export function starpdf_set_text_field(handle, obj_num, obj_gen, value) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {any} ranges
+ * @returns {any}
+ */
+export function starpdf_split_document(handle, ranges) {
+    const ret = wasm.starpdf_split_document(handle, ranges);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**

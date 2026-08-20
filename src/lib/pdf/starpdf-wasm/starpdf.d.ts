@@ -35,6 +35,12 @@ export function starpdf_get_security_info(handle: number): any;
 
 export function starpdf_insert_blank_page(handle: number, page_index: number, width: number, height: number, rotation: number): Uint8Array;
 
+export function starpdf_insert_imported_page(handle: number, imported_bytes: Uint8Array, imported_page_index: number, insert_at: number): Uint8Array;
+
+export function starpdf_merge_documents(documents: any): Uint8Array;
+
+export function starpdf_merge_selected(documents: any, page_sources: any): Uint8Array;
+
 export function starpdf_move_page(handle: number, from_index: number, to_index: number): Uint8Array;
 
 export function starpdf_open(bytes: Uint8Array): number;
@@ -52,6 +58,8 @@ export function starpdf_set_choice_values(handle: number, obj_num: bigint, obj_g
 export function starpdf_set_radio(handle: number, parent_num: bigint, parent_gen: number, widget_num: bigint, widget_gen: number, on_state: string): boolean;
 
 export function starpdf_set_text_field(handle: number, obj_num: bigint, obj_gen: number, value: string): boolean;
+
+export function starpdf_split_document(handle: number, ranges: any): any;
 
 export function starpdf_update_annotation(handle: number, obj_num: bigint, obj_gen: number, update_val: any): boolean;
 
@@ -80,6 +88,9 @@ export interface InitOutput {
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_get_security_info: (a: number) => [number, number, number];
     readonly starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly starpdf_insert_imported_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly starpdf_merge_documents: (a: any) => [number, number, number, number];
+    readonly starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
     readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
@@ -89,6 +100,7 @@ export interface InitOutput {
     readonly starpdf_set_choice_values: (a: number, b: bigint, c: number, d: any) => [number, number, number];
     readonly starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: number, f: number, g: number) => [number, number, number];
     readonly starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
+    readonly starpdf_split_document: (a: number, b: any) => [number, number, number];
     readonly starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
     readonly starpdf_validate: (a: number) => [number, number, number];
     readonly starpdf_version: () => [number, number];

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::document::{PageTree, PdfDocument};
 use crate::error::{PdfError, PdfResult};
 use crate::page_ops::inherited::materialize_page_inheritance;
-use crate::page_ops::PageOperationLimits;
+use crate::page_ops::{PageOperationLimits, PageRange, PageSource};
 use crate::security::{EncryptionState, SignatureState};
 use crate::syntax::{ObjectRef, PdfObject, StreamObject};
 use crate::validate::StructuralValidator;
@@ -77,15 +77,126 @@ impl DocumentBuilder {
         Self::build(&[input], &selection, limits)
     }
 
+    pub fn insert_page(
+        primary: &[u8],
+        imported: &[u8],
+        imported_page_index: usize,
+        insert_at: usize,
+        limits: &PageOperationLimits,
+    ) -> PdfResult<Vec<u8>> {
+        let mut primary_document = PdfDocument::from_bytes(primary)?;
+        let root_pages_ref = primary_document.root_pages_ref();
+        let pages = PageTree::validate_and_collect(primary_document.store_mut(), root_pages_ref)?;
+        if insert_at > pages.len() {
+            return Err(PdfError::PageNotFound(insert_at));
+        }
+        let mut selection = (0..pages.len())
+            .map(|page_index| BuildPage {
+                document_index: 0,
+                page_index,
+            })
+            .collect::<Vec<_>>();
+        selection.insert(
+            insert_at,
+            BuildPage {
+                document_index: 1,
+                page_index: imported_page_index,
+            },
+        );
+        Self::build(&[primary, imported], &selection, limits)
+    }
+
+    pub fn merge_documents(inputs: &[&[u8]], limits: &PageOperationLimits) -> PdfResult<Vec<u8>> {
+        if inputs.len() < 2 {
+            return Err(PdfError::PageOperation(
+                "document merge requires at least two source documents".into(),
+            ));
+        }
+        let mut selection = Vec::new();
+        for (document_index, input) in inputs.iter().enumerate() {
+            let mut document = PdfDocument::from_bytes(input)?;
+            let root_pages_ref = document.root_pages_ref();
+            let pages = PageTree::validate_and_collect(document.store_mut(), root_pages_ref)?;
+            for page_index in 0..pages.len() {
+                selection.push(BuildPage {
+                    document_index,
+                    page_index,
+                });
+            }
+        }
+        Self::build(inputs, &selection, limits)
+    }
+
+    pub fn merge_selected(
+        inputs: &[&[u8]],
+        page_sources: &[PageSource],
+        limits: &PageOperationLimits,
+    ) -> PdfResult<Vec<u8>> {
+        if inputs.len() < 2 {
+            return Err(PdfError::PageOperation(
+                "selected-page merge requires at least two source documents".into(),
+            ));
+        }
+        let selection = page_sources
+            .iter()
+            .map(|source| BuildPage {
+                document_index: source.document_index,
+                page_index: source.page_index,
+            })
+            .collect::<Vec<_>>();
+        Self::build(inputs, &selection, limits)
+    }
+
+    pub fn split_document(
+        input: &[u8],
+        ranges: &[PageRange],
+        limits: &PageOperationLimits,
+    ) -> PdfResult<Vec<Vec<u8>>> {
+        if ranges.is_empty() {
+            return Err(PdfError::PageOperation(
+                "split requires at least one page range".into(),
+            ));
+        }
+        let mut document = PdfDocument::from_bytes(input)?;
+        let root_pages_ref = document.root_pages_ref();
+        let pages = PageTree::validate_and_collect(document.store_mut(), root_pages_ref)?;
+        let mut covered = BTreeSet::new();
+        let mut outputs = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if range.start >= range.end_exclusive || range.end_exclusive > pages.len() {
+                return Err(PdfError::PageOperation(format!(
+                    "invalid split range {}..{} for {} pages",
+                    range.start,
+                    range.end_exclusive,
+                    pages.len()
+                )));
+            }
+            for page_index in range.start..range.end_exclusive {
+                if !covered.insert(page_index) {
+                    return Err(PdfError::PageOperation(format!(
+                        "overlapping split range includes page {page_index} more than once"
+                    )));
+                }
+            }
+            outputs.push(Self::extract_pages(
+                input,
+                &(range.start..range.end_exclusive).collect::<Vec<_>>(),
+                limits,
+            )?);
+        }
+        Ok(outputs)
+    }
+
     fn build(
         inputs: &[&[u8]],
         selection: &[BuildPage],
         limits: &PageOperationLimits,
     ) -> PdfResult<Vec<u8>> {
-        if inputs.len() != 1 {
-            return Err(PdfError::PageOperation(
-                "v0.12A standalone builds accept exactly one source document".into(),
-            ));
+        if inputs.is_empty() || inputs.len() > limits.max_input_documents {
+            return Err(PdfError::PageResourceLimit(format!(
+                "input document count must be between 1 and {}",
+                limits.max_input_documents
+            )));
         }
         if selection.is_empty() || selection.len() > limits.max_selected_pages {
             return Err(PdfError::PageResourceLimit(format!(
@@ -166,7 +277,7 @@ impl DocumentBuilder {
                     .all(|count| *count == 1)
             {
                 return Err(PdfError::PartialFieldImport(format!(
-                    "document {document_index} contains form fields; v0.12A copies its field graph only when every source page is selected exactly once"
+                    "document {document_index} contains form fields; the field graph can be imported only when every source page is selected exactly once"
                 )));
             }
         }
@@ -579,6 +690,7 @@ impl Assembler<'_> {
     ) -> PdfResult<Option<ObjectRef>> {
         let mut combined_fields = Vec::new();
         let mut combined = BTreeMap::new();
+        let mut allocated_field_names = BTreeSet::new();
         let mut found = false;
         for document_index in 0..documents.len() {
             if !source_has_forms[document_index]
@@ -613,7 +725,7 @@ impl Assembler<'_> {
                     })?;
             if acroform_dict.contains_key("XFA") {
                 return Err(PdfError::UnsupportedPageDependency(
-                    "XFA form extraction is not supported by v0.12A page operations".into(),
+                    "XFA form import is not supported by page operations".into(),
                 ));
             }
             let fields_source = acroform_dict
@@ -640,20 +752,48 @@ impl Assembler<'_> {
             } else {
                 None
             };
-            let inherited_da = acroform_dict.get("DA").cloned();
-            for field in fields {
-                let imported =
-                    self.remap_object(documents, document_index, field.clone(), 0, None, 0)?;
-                if let Some(field_ref) = imported.as_reference() {
-                    if let Some(field_object) = self.objects.get_mut(&field_ref) {
-                        if let Some(field_dict) = field_object.as_dict_mut() {
-                            if let Some(dr) = imported_dr.clone() {
-                                field_dict.entry("DR".into()).or_insert(dr);
+            let imported_da = if let Some(value) = acroform_dict.get("DA").cloned() {
+                Some(self.remap_object(documents, document_index, value, 0, None, 0)?)
+            } else {
+                None
+            };
+            for (field_index, field) in fields.iter().enumerate() {
+                let source_name = Self::field_partial_name(&mut documents[document_index], field)?;
+                let renamed = source_name.as_ref().and_then(|name| {
+                    if allocated_field_names.insert(name.clone()) {
+                        None
+                    } else {
+                        let mut ordinal = 1usize;
+                        loop {
+                            let candidate = format!(
+                                "{name}__starpdf_d{}_f{field_index}_{ordinal}",
+                                document_index + 1
+                            );
+                            if allocated_field_names.insert(candidate.clone()) {
+                                break Some(candidate);
                             }
-                            if let Some(da) = inherited_da.clone() {
-                                field_dict.entry("DA".into()).or_insert(da);
-                            }
+                            ordinal = ordinal.saturating_add(1);
                         }
+                    }
+                });
+                let mut imported =
+                    self.remap_object(documents, document_index, field.clone(), 0, None, 0)?;
+                let field_dict = if let Some(field_ref) = imported.as_reference() {
+                    self.objects
+                        .get_mut(&field_ref)
+                        .and_then(PdfObject::as_dict_mut)
+                } else {
+                    imported.as_dict_mut()
+                };
+                if let Some(field_dict) = field_dict {
+                    if let Some(dr) = imported_dr.clone() {
+                        field_dict.entry("DR".into()).or_insert(dr);
+                    }
+                    if let Some(da) = imported_da.clone() {
+                        field_dict.entry("DA".into()).or_insert(da);
+                    }
+                    if let Some(renamed) = renamed {
+                        field_dict.insert("T".into(), PdfObject::String(renamed.into_bytes()));
                     }
                 }
                 combined_fields.push(imported);
@@ -672,7 +812,7 @@ impl Assembler<'_> {
                 if let Some(dr) = imported_dr {
                     combined.insert("DR".into(), dr);
                 }
-                if let Some(da) = inherited_da {
+                if let Some(da) = imported_da {
                     combined.insert("DA".into(), da);
                 }
             }
@@ -686,6 +826,17 @@ impl Assembler<'_> {
         self.objects
             .insert(reference, PdfObject::Dictionary(combined));
         Ok(Some(reference))
+    }
+
+    fn field_partial_name(
+        document: &mut PdfDocument<'_>,
+        field: &PdfObject,
+    ) -> PdfResult<Option<String>> {
+        let resolved = document.store_mut().resolve_object(field)?;
+        Ok(resolved
+            .as_dict()
+            .and_then(|dictionary| dictionary.get("T"))
+            .and_then(PdfObject::as_string_lossy))
     }
 
     fn import_primary_catalog_entries(

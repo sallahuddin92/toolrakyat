@@ -212,6 +212,9 @@ export type StarPdfWorkerRequest =
   | { type: "duplicatePage"; id: string; handle: number; pageIndex: number; destinationIndex: number }
   | { type: "insertBlankPage"; id: string; handle: number; pageIndex: number; width: number; height: number; rotation: 0 | 90 | 180 | 270 }
   | { type: "extractPages"; id: string; handle: number; pageIndices: number[] }
+  | { type: "insertImportedPage"; id: string; handle: number; buffer: ArrayBuffer; importedPageIndex: number; destinationIndex: number }
+  | { type: "mergeDocuments"; id: string; buffers: ArrayBuffer[]; pageSources?: { documentIndex: number; pageIndex: number }[] }
+  | { type: "splitDocument"; id: string; handle: number; ranges: { start: number; endExclusive: number }[] }
   | { type: "getAppearanceStatus"; id: string; handle: number }
   | { type: "getGlyphMappingQuality"; id: string; handle: number }
   | { type: "close"; id: string; handle: number }
@@ -246,6 +249,9 @@ export type StarPdfWorkerResponse =
   | { type: "duplicatePage"; id: string; success: true; bytes: Uint8Array }
   | { type: "insertBlankPage"; id: string; success: true; bytes: Uint8Array }
   | { type: "extractPages"; id: string; success: true; bytes: Uint8Array }
+  | { type: "insertImportedPage"; id: string; success: true; bytes: Uint8Array }
+  | { type: "mergeDocuments"; id: string; success: true; bytes: Uint8Array }
+  | { type: "splitDocument"; id: string; success: true; outputs: Uint8Array[] }
   | { type: "getAppearanceStatus"; id: string; success: true; status: "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED" }
   | { type: "getGlyphMappingQuality"; id: string; success: true; quality: "EXACT" | "FALLBACK" | "UNREPRESENTABLE" | "NOT_APPLICABLE" }
   | { type: "close"; id: string; success: true }

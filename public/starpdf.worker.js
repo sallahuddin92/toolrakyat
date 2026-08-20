@@ -23,9 +23,13 @@ import initWasm, {
   starpdf_get_security_info,
   starpdf_open,
   starpdf_insert_blank_page,
+  starpdf_insert_imported_page,
+  starpdf_merge_documents,
+  starpdf_merge_selected,
   starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_search,
+  starpdf_split_document,
   starpdf_set_checkbox,
   starpdf_set_choice,
   starpdf_set_choice_values,
@@ -204,6 +208,38 @@ self.onmessage = async (event) => {
       case "extractPages": {
         const bytes = starpdf_extract_pages(req.handle, req.pageIndices);
         self.postMessage({ type: "extractPages", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "insertImportedPage": {
+        const bytes = starpdf_insert_imported_page(
+          req.handle,
+          new Uint8Array(req.buffer),
+          req.importedPageIndex,
+          req.destinationIndex
+        );
+        self.postMessage({ type: "insertImportedPage", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "mergeDocuments": {
+        const documents = req.buffers.map((buffer) => new Uint8Array(buffer));
+        const bytes = req.pageSources
+          ? starpdf_merge_selected(
+              documents,
+              req.pageSources.map((source) => [source.documentIndex, source.pageIndex])
+            )
+          : starpdf_merge_documents(documents);
+        self.postMessage({ type: "mergeDocuments", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "splitDocument": {
+        const outputs = starpdf_split_document(
+          req.handle,
+          req.ranges.map((range) => [range.start, range.endExclusive])
+        ).map((output) => new Uint8Array(output));
+        self.postMessage(
+          { type: "splitDocument", id: req.id, success: true, outputs },
+          outputs.map((output) => output.buffer)
+        );
         break;
       }
       case "getAppearanceStatus": {

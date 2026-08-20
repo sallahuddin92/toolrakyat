@@ -18,6 +18,7 @@ use starpdf::font::subset::TrueTypeSubsetter;
 use starpdf::font::{Font, PageResources, UnicodeCMap};
 use starpdf::forms::AcroFormParser;
 use starpdf::mutation::{MutationEngine, PdfChange};
+use starpdf::page_ops::PageSource;
 use starpdf::search::{DocumentSearchIndex, SearchOptions};
 use starpdf::syntax::object::{ObjectRef, PdfObject, StreamObject};
 use starpdf::syntax::{Lexer, Parser};
@@ -28,7 +29,7 @@ use starpdf::xref::XrefStreamParser;
 
 fn main() {
     println!("================================================================");
-    println!("         StarPDF Engine v0.12A Micro-Benchmark Suite            ");
+    println!("         StarPDF Engine v0.12B Micro-Benchmark Suite            ");
     println!("================================================================");
 
     let sample_pdf = MinimalWriter::create_minimal_pdf("StarPDF Performance Benchmark Document")
@@ -1212,6 +1213,161 @@ ET
         let elapsed = start.elapsed();
         println!(
             "51. Page Output Reopen:      {:>8} ns/op  ({:.2?} for {} reopens)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 52. One-page cross-document import and remap
+    {
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(
+                PdfDocument::merge_selected(
+                    &[page_fixture, page_fixture],
+                    &[PageSource::new(1, 0)],
+                )
+                .unwrap(),
+            );
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "52. Cross-doc Import 1:      {:>8} ns/op  ({:.2?} for {} imports)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 53. Ten-page cross-document selection and shared dependency reuse
+    {
+        let selection = (0..10)
+            .map(|index| PageSource::new(index % 2, index % 2))
+            .collect::<Vec<_>>();
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(
+                PdfDocument::merge_selected(&[page_fixture, page_fixture], &selection).unwrap(),
+            );
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "53. Cross-doc Import 10:     {:>8} ns/op  ({:.2?} for {} imports)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    let merged_two = {
+        // 54. Merge two multi-page documents
+        let iterations = 100;
+        let start = Instant::now();
+        let mut last = Vec::new();
+        for _ in 0..iterations {
+            last = PdfDocument::merge_documents(&[page_fixture, page_fixture]).unwrap();
+            std::hint::black_box(&last);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "54. Merge 2 Documents:       {:>8} ns/op  ({:.2?} for {} merges)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+        last
+    };
+
+    // 55. Merge three documents
+    {
+        let iterations = 75;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(
+                PdfDocument::merge_documents(&[page_fixture, page_fixture, page_fixture]).unwrap(),
+            );
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "55. Merge 3 Documents:       {:>8} ns/op  ({:.2?} for {} merges)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 56. Resource-heavy graph traversal and remap
+    {
+        let image = include_bytes!("../../../test-assets/scanned-test.pdf");
+        let annotations =
+            include_bytes!("../tests/fixtures/v0_10_compat/pdfkit-shapes-ink-link.pdf");
+        let iterations = 50;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(PdfDocument::merge_documents(&[image, annotations]).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "56. Resource Graph Remap:    {:>8} ns/op  ({:.2?} for {} remaps)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 57. AcroForm collision isolation and deterministic renaming
+    {
+        let form = include_bytes!("../tests/fixtures/v0_10_compat/pdflib-complete-form.pdf");
+        let iterations = 50;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(PdfDocument::merge_documents(&[form, form]).unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "57. Form Collision Remap:    {:>8} ns/op  ({:.2?} for {} remaps)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 58. Complete merge writer path
+    {
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(
+                PdfDocument::merge_selected(
+                    &[page_fixture, page_fixture],
+                    &[PageSource::new(0, 0), PageSource::new(1, 0)],
+                )
+                .unwrap(),
+            );
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "58. Merge Standalone Write:  {:>8} ns/op  ({:.2?} for {} writes)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 59. Merge output reopen and page enumeration
+    {
+        let iterations = 1_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut document = PdfDocument::from_bytes(&merged_two).unwrap();
+            std::hint::black_box(document.page_count().unwrap());
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "59. Merge Output Reopen:     {:>8} ns/op  ({:.2?} for {} reopens)",
             elapsed.as_nanos() / iterations as u128,
             elapsed,
             iterations

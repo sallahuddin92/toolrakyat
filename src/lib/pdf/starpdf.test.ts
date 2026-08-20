@@ -20,9 +20,9 @@ function loadComplexFixture(filename: string): Uint8Array {
 }
 
 describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
-  it("retrieves engine version 0.12.0", async () => {
+  it("retrieves engine version 0.12.1", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.12.0");
+    expect(version).toBe("0.12.1");
   });
 
   it("reports signed document metadata without claiming verification", async () => {
@@ -290,6 +290,38 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     await doc.setTextField(field.object_num, field.object_gen, "Pending page operation");
     await expect(doc.insertBlankPage(1, 612, 792)).rejects.toThrow("pending");
     await doc.close();
+  });
+
+  it("merges, imports, and splits documents through synchronized WASM bindings", async () => {
+    const first = loadTestAsset("multi-page.test.pdf");
+    const second = await StarPdfClient.createMinimalPdf("SECOND-DOCUMENT");
+    const merged = await StarPdfClient.mergeDocuments([first, second], [
+      { documentIndex: 1, pageIndex: 0 },
+      { documentIndex: 0, pageIndex: 1 },
+      { documentIndex: 1, pageIndex: 0 },
+    ]);
+    const mergedDoc = await StarPdfClient.open(merged);
+    expect(await mergedDoc.getPageCount()).toBe(3);
+    expect((await mergedDoc.extractPageText(0)).plain_text).toContain("SECOND-DOCUMENT");
+
+    const parts = await mergedDoc.splitDocument([
+      { start: 0, endExclusive: 1 },
+      { start: 1, endExclusive: 3 },
+    ]);
+    expect(parts).toHaveLength(2);
+    const firstPart = await StarPdfClient.open(parts[0]);
+    const secondPart = await StarPdfClient.open(parts[1]);
+    expect(await firstPart.getPageCount()).toBe(1);
+    expect(await secondPart.getPageCount()).toBe(2);
+
+    const imported = await firstPart.insertImportedPage(second, 0, 1);
+    const importedDoc = await StarPdfClient.open(imported);
+    expect(await importedDoc.getPageCount()).toBe(2);
+
+    await importedDoc.close();
+    await secondPart.close();
+    await firstPart.close();
+    await mergedDoc.close();
   });
 
   it("handles malformed PDF safely without crash", async () => {

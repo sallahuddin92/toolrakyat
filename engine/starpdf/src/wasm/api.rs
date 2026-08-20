@@ -6,6 +6,8 @@ use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec, LineEndingS
 #[cfg(feature = "wasm")]
 use crate::mutation::PdfChange;
 #[cfg(feature = "wasm")]
+use crate::page_ops::{PageRange, PageSource};
+#[cfg(feature = "wasm")]
 use crate::search::SearchOptions;
 #[cfg(feature = "wasm")]
 use crate::syntax::object::ObjectRef;
@@ -30,7 +32,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.12.0".to_string()
+    "0.12.1".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -654,6 +656,65 @@ pub fn starpdf_extract_pages(handle: u32, page_indices: JsValue) -> Result<Vec<u
     REGISTRY
         .with_doc(handle, |document| document.extract_pages(&indices))
         .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_insert_imported_page(
+    handle: u32,
+    imported_bytes: &[u8],
+    imported_page_index: u32,
+    insert_at: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let imported = crate::document::PdfDocument::from_bytes(imported_bytes).map_err(to_js_error)?;
+    REGISTRY
+        .transform_and_replace(handle, |document| {
+            document.insert_page_from(&imported, imported_page_index as usize, insert_at as usize)
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_merge_documents(documents: JsValue) -> Result<Vec<u8>, JsValue> {
+    let documents: Vec<Vec<u8>> = serde_wasm_bindgen::from_value(documents)
+        .map_err(|error| JsValue::from_str(&format!("Invalid merge documents: {error}")))?;
+    let inputs = documents.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    crate::document::PdfDocument::merge_documents(&inputs).map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_merge_selected(
+    documents: JsValue,
+    page_sources: JsValue,
+) -> Result<Vec<u8>, JsValue> {
+    let documents: Vec<Vec<u8>> = serde_wasm_bindgen::from_value(documents)
+        .map_err(|error| JsValue::from_str(&format!("Invalid merge documents: {error}")))?;
+    let page_sources: Vec<[u32; 2]> = serde_wasm_bindgen::from_value(page_sources)
+        .map_err(|error| JsValue::from_str(&format!("Invalid merge page selection: {error}")))?;
+    let page_sources = page_sources
+        .into_iter()
+        .map(|source| PageSource::new(source[0] as usize, source[1] as usize))
+        .collect::<Vec<_>>();
+    let inputs = documents.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    crate::document::PdfDocument::merge_selected(&inputs, &page_sources).map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_split_document(handle: u32, ranges: JsValue) -> Result<JsValue, JsValue> {
+    let ranges: Vec<[u32; 2]> = serde_wasm_bindgen::from_value(ranges)
+        .map_err(|error| JsValue::from_str(&format!("Invalid split ranges: {error}")))?;
+    let ranges = ranges
+        .into_iter()
+        .map(|range| PageRange::new(range[0] as usize, range[1] as usize))
+        .collect::<Vec<_>>();
+    let outputs = REGISTRY
+        .with_doc(handle, |document| document.split_document(&ranges))
+        .map_err(to_js_error)?;
+    serde_wasm_bindgen::to_value(&outputs)
+        .map_err(|error| JsValue::from_str(&format!("Failed to encode split outputs: {error}")))
 }
 
 #[cfg(feature = "wasm")]

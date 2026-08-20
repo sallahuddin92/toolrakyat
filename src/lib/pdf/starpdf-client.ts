@@ -30,9 +30,13 @@ import initWasm, {
   starpdf_get_security_info,
   starpdf_open,
   starpdf_insert_blank_page,
+  starpdf_insert_imported_page,
+  starpdf_merge_documents,
+  starpdf_merge_selected,
   starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_search,
+  starpdf_split_document,
   starpdf_set_checkbox,
   starpdf_set_choice,
   starpdf_set_choice_values,
@@ -323,6 +327,33 @@ export class StarPdfDocumentHandle {
     return starpdf_extract_pages(this._handle, pageIndices);
   }
 
+  async insertImportedPage(
+    importedBytes: Uint8Array,
+    importedPageIndex: number,
+    destinationIndex: number
+  ): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_insert_imported_page(
+      this._handle,
+      importedBytes,
+      importedPageIndex,
+      destinationIndex
+    );
+  }
+
+  async splitDocument(
+    ranges: { start: number; endExclusive: number }[]
+  ): Promise<Uint8Array[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    const outputs = starpdf_split_document(
+      this._handle,
+      ranges.map((range) => [range.start, range.endExclusive])
+    ) as number[][];
+    return outputs.map((output) => new Uint8Array(output));
+  }
+
   async getAppearanceStatus(): Promise<
     "AP_REGENERATED" | "AP_PRESERVED" | "AP_NOT_REQUIRED" | "AP_UNSUPPORTED"
   > {
@@ -373,5 +404,19 @@ export class StarPdfClient {
   static async createMinimalPdf(text: string): Promise<Uint8Array> {
     await ensureWasmInitialized();
     return starpdf_create_minimal_pdf(text);
+  }
+
+  static async mergeDocuments(
+    documents: Uint8Array[],
+    pageSources?: { documentIndex: number; pageIndex: number }[]
+  ): Promise<Uint8Array> {
+    await ensureWasmInitialized();
+    if (pageSources) {
+      return starpdf_merge_selected(
+        documents,
+        pageSources.map((source) => [source.documentIndex, source.pageIndex])
+      );
+    }
+    return starpdf_merge_documents(documents);
   }
 }

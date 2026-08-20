@@ -75,7 +75,7 @@ pub use io::{ByteCursor, ByteSource};
 pub use mutation::{MutationEngine, MutationPlan, PdfChange};
 pub use page_ops::{
     DependencyDisposition, DocumentBuilder, DocumentWriteMode, IncrementalPageEditor, PageEdit,
-    PageOperationLimits, PageOperationPlan, PageOperationType,
+    PageOperationLimits, PageOperationPlan, PageOperationType, PageRange, PageSource,
 };
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
