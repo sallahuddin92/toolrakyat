@@ -128,4 +128,67 @@ impl<'a> PdfDocument<'a> {
     pub fn page_dict(&mut self, page_index: usize) -> PdfResult<BTreeMap<String, PdfObject>> {
         PageTree::get_page_dict(&mut self.store, self.root_pages_ref, page_index)
     }
+
+    /// Extracts coordinate-aware text spans from a single 0-indexed page.
+    pub fn extract_page_text(
+        &mut self,
+        page_index: usize,
+    ) -> PdfResult<crate::text::span::PageText> {
+        let page_dict = self.page_dict(page_index)?;
+        let resources =
+            crate::font::resource::PageResources::resolve_for_page(&page_dict, &mut self.store)?;
+
+        let mut content_bytes = Vec::new();
+        if let Some(contents_obj) = page_dict.get("Contents") {
+            let resolved_contents = self.store.resolve_object(contents_obj)?;
+            match resolved_contents {
+                PdfObject::Stream(stream) => {
+                    let decompressed = self.decompress_stream_data(&stream)?;
+                    content_bytes.extend_from_slice(&decompressed);
+                }
+                PdfObject::Array(streams_arr) => {
+                    for stream_ref in streams_arr {
+                        let stream_obj = self.store.resolve_object(&stream_ref)?;
+                        if let Some(stream) = stream_obj.as_stream() {
+                            let decompressed = self.decompress_stream_data(stream)?;
+                            content_bytes.extend_from_slice(&decompressed);
+                            content_bytes.push(b' ');
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        crate::text::extractor::TextExtractor::extract_from_content(
+            page_index,
+            &content_bytes,
+            &resources,
+        )
+    }
+
+    /// Extracts text across all pages of the document.
+    pub fn extract_all_text(&mut self) -> PdfResult<Vec<crate::text::span::PageText>> {
+        let count = self.page_count()?;
+        let mut results = Vec::with_capacity(count);
+        for i in 0..count {
+            results.push(self.extract_page_text(i)?);
+        }
+        Ok(results)
+    }
+
+    fn decompress_stream_data(
+        &self,
+        stream: &crate::syntax::object::StreamObject,
+    ) -> PdfResult<Vec<u8>> {
+        if let Some(filter) = stream.dict.get("Filter").and_then(|v| v.as_name()) {
+            if filter == "FlateDecode" {
+                return crate::filter::flate::FlateDecoder::decode(
+                    &stream.data,
+                    &crate::filter::limits::DecompressLimits::default(),
+                );
+            }
+        }
+        Ok(stream.data.clone())
+    }
 }
