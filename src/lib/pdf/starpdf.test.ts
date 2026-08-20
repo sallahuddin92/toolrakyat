@@ -19,10 +19,10 @@ function loadComplexFixture(filename: string): Uint8Array {
   return new Uint8Array(fs.readFileSync(fixturePath));
 }
 
-describe("StarPDF v0.11 WASM Client Runtime & Preservation Engine", () => {
-  it("retrieves engine version 0.11.0", async () => {
+describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
+  it("retrieves engine version 0.12.0", async () => {
     const version = await StarPdfClient.getVersion();
-    expect(version).toBe("0.11.0");
+    expect(version).toBe("0.12.0");
   });
 
   it("reports signed document metadata without claiming verification", async () => {
@@ -251,6 +251,44 @@ describe("StarPDF v0.11 WASM Client Runtime & Preservation Engine", () => {
     const allPages = await doc.extractAllText();
     expect(allPages.length).toBe(2);
 
+    await doc.close();
+  });
+
+  it("performs typed page operations and keeps generated outputs reopenable", async () => {
+    const original = loadTestAsset("multi-page.test.pdf");
+    const doc = await StarPdfClient.open(original);
+
+    const moved = await doc.movePage(0, 1);
+    expect(moved.slice(0, original.length)).toEqual(original);
+    expect(await doc.getPageCount()).toBe(2);
+
+    const duplicated = await doc.duplicatePage(0, 1);
+    expect(duplicated.length).toBeGreaterThan(0);
+    expect(await doc.getPageCount()).toBe(3);
+
+    const blankInserted = await doc.insertBlankPage(1, 612, 792, 90);
+    expect(blankInserted.slice(0, duplicated.length)).toEqual(duplicated);
+    expect(await doc.getPageCount()).toBe(4);
+
+    const deleted = await doc.deletePage(1);
+    expect(deleted.slice(0, blankInserted.length)).toEqual(blankInserted);
+    expect(await doc.getPageCount()).toBe(3);
+
+    const extracted = await doc.extractPages([2, 0, 2]);
+    const extractedDoc = await StarPdfClient.open(extracted);
+    expect(await extractedDoc.getPageCount()).toBe(3);
+    expect(await extractedDoc.validate()).toBe(true);
+    expect(await doc.getPageCount()).toBe(3);
+
+    await extractedDoc.close();
+    await doc.close();
+  });
+
+  it("refuses a page operation while field mutations are pending", async () => {
+    const doc = await StarPdfClient.open(loadTestAsset("smartpdf-form.pdf"));
+    const field = (await doc.getFormFields()).find((candidate) => candidate.name === "full_name")!;
+    await doc.setTextField(field.object_num, field.object_gen, "Pending page operation");
+    await expect(doc.insertBlankPage(1, 612, 792)).rejects.toThrow("pending");
     await doc.close();
   });
 

@@ -361,6 +361,40 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.goto("/tools/pdf/editor");
   });
 
+  test("v0.12A page controls reorder, duplicate, insert, delete, and extract through the worker", async ({
+    page,
+  }) => {
+    const fixture = fs.readFileSync(path.join(process.cwd(), "test-assets/multi-page.test.pdf"));
+    await uploadPdfBytes(page, "page-operations.pdf", fixture);
+    await expect(page.getByTestId("pdf-page-operations")).toBeVisible();
+    await expect(page.getByText("1 / 2", { exact: true })).toBeVisible();
+
+    await page.getByTestId("page-move-right").click();
+    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId("page-duplicate").click();
+    await expect(page.getByText("3 / 3", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId("page-insert-blank").click();
+    await expect(page.getByText("4 / 4", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("3 / 3", { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("page-extract").click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("page-operations-extracted.pdf");
+    const extractedPath = await download.path();
+    expect(extractedPath).not.toBeNull();
+    const extracted = fs.readFileSync(extractedPath!);
+
+    await page.getByRole("button", { name: "Open" }).click();
+    const canvas = await uploadPdfBytes(page, "page-operations-extracted.pdf", extracted);
+    await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
+    expect((await canvas.screenshot()).byteLength).toBeGreaterThan(1_000);
+  });
+
   test("loads dropzone screen with accurate Phase 1 title and privacy notice", async ({
     page,
   }) => {
@@ -725,7 +759,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       };
     }, Array.from(fixture));
 
-    expect(workerResult.version).toBe("0.11.0");
+    expect(workerResult.version).toBe("0.12.0");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
@@ -1049,7 +1083,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       },
       { kind: "checkbox", name: "pdfkit.agree", checked: false },
     ]);
-    expect(result.version).toBe("0.11.0");
+    expect(result.version).toBe("0.12.0");
     expect(result.status).toBe("AP_REGENERATED");
     expect(result.prefixPreserved).toBe(true);
     const shared = result.fields.filter((field) => field.name === "pdfkit.person.name");

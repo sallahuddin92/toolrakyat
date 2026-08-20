@@ -30,7 +30,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.11.0".to_string()
+    "0.12.0".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -591,6 +591,68 @@ pub fn starpdf_remove_annotation(
 pub fn starpdf_export_incremental(handle: u32) -> Result<Vec<u8>, JsValue> {
     REGISTRY
         .export_and_apply_changes(handle)
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_delete_page(handle: u32, page_index: u32) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .transform_and_replace(handle, |document| document.delete_page(page_index as usize))
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_move_page(handle: u32, from_index: u32, to_index: u32) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .transform_and_replace(handle, |document| {
+            document.move_page(from_index as usize, to_index as usize)
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_duplicate_page(
+    handle: u32,
+    page_index: u32,
+    destination_index: u32,
+) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .transform_and_replace(handle, |document| {
+            document.duplicate_page(page_index as usize, destination_index as usize)
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_insert_blank_page(
+    handle: u32,
+    page_index: u32,
+    width: f64,
+    height: f64,
+    rotation: i32,
+) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .transform_and_replace(handle, |document| {
+            document.insert_blank_page(page_index as usize, width, height, rotation)
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_extract_pages(handle: u32, page_indices: JsValue) -> Result<Vec<u8>, JsValue> {
+    let indices: Vec<u32> = serde_wasm_bindgen::from_value(page_indices)
+        .map_err(|error| JsValue::from_str(&format!("Invalid page selection: {error}")))?;
+    let indices = indices
+        .into_iter()
+        .map(|index| index as usize)
+        .collect::<Vec<_>>();
+    REGISTRY
+        .with_doc(handle, |document| document.extract_pages(&indices))
         .map_err(to_js_error)
 }
 

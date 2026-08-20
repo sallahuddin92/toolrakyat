@@ -7,11 +7,17 @@ export function starpdf_close(handle: number): boolean;
 
 export function starpdf_create_minimal_pdf(text: string): Uint8Array;
 
+export function starpdf_delete_page(handle: number, page_index: number): Uint8Array;
+
+export function starpdf_duplicate_page(handle: number, page_index: number, destination_index: number): Uint8Array;
+
 export function starpdf_export_incremental(handle: number): Uint8Array;
 
 export function starpdf_extract_all_text(handle: number): any;
 
 export function starpdf_extract_page_text(handle: number, page_index: number): any;
+
+export function starpdf_extract_pages(handle: number, page_indices: any): Uint8Array;
 
 export function starpdf_get_annotations(handle: number, page_index: number): any;
 
@@ -26,6 +32,10 @@ export function starpdf_get_info(handle: number): any;
 export function starpdf_get_page_count(handle: number): number;
 
 export function starpdf_get_security_info(handle: number): any;
+
+export function starpdf_insert_blank_page(handle: number, page_index: number, width: number, height: number, rotation: number): Uint8Array;
+
+export function starpdf_move_page(handle: number, from_index: number, to_index: number): Uint8Array;
 
 export function starpdf_open(bytes: Uint8Array): number;
 
@@ -56,9 +66,12 @@ export interface InitOutput {
     readonly starpdf_add_annotation: (a: number, b: number, c: any) => [number, number, number];
     readonly starpdf_close: (a: number) => [number, number, number];
     readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
+    readonly starpdf_delete_page: (a: number, b: number) => [number, number, number, number];
+    readonly starpdf_duplicate_page: (a: number, b: number, c: number) => [number, number, number, number];
     readonly starpdf_export_incremental: (a: number) => [number, number, number, number];
     readonly starpdf_extract_all_text: (a: number) => [number, number, number];
     readonly starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
+    readonly starpdf_extract_pages: (a: number, b: any) => [number, number, number, number];
     readonly starpdf_get_annotations: (a: number, b: number) => [number, number, number];
     readonly starpdf_get_appearance_status: (a: number) => [number, number, number, number];
     readonly starpdf_get_form_fields: (a: number) => [number, number, number];
@@ -66,6 +79,8 @@ export interface InitOutput {
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_get_security_info: (a: number) => [number, number, number];
+    readonly starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];

@@ -8,9 +8,12 @@ import initWasm, {
   starpdf_add_annotation,
   starpdf_close,
   starpdf_create_minimal_pdf,
+  starpdf_delete_page,
+  starpdf_duplicate_page,
   starpdf_export_incremental,
   starpdf_extract_all_text,
   starpdf_extract_page_text,
+  starpdf_extract_pages,
   starpdf_get_annotations,
   starpdf_get_appearance_status,
   starpdf_get_glyph_mapping_quality,
@@ -19,6 +22,8 @@ import initWasm, {
   starpdf_get_page_count,
   starpdf_get_security_info,
   starpdf_open,
+  starpdf_insert_blank_page,
+  starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_search,
   starpdf_set_checkbox,
@@ -39,6 +44,9 @@ function classifyError(err) {
   if (/limit|maximum|exceed/i.test(message)) return { code: "RESOURCE_LIMIT", message };
   if (/ENCRYPTED_DOCUMENT/i.test(message)) return { code: "ENCRYPTED_DOCUMENT", message };
   if (/SIGNATURE|SIGNED_/i.test(message)) return { code: "SIGNED_DOCUMENT", message };
+  if (/PARTIAL_FIELD|UNSUPPORTED_PAGE|EXCLUDED_PAGE/i.test(message)) {
+    return { code: "UNSUPPORTED", message };
+  }
   if (/unsupported/i.test(message)) return { code: "UNSUPPORTED", message };
   if (/parse|syntax|header|xref|PDF/i.test(message)) return { code: "INVALID_PDF", message };
   return { code: "ENGINE_ERROR", message };
@@ -165,6 +173,37 @@ self.onmessage = async (event) => {
       case "exportIncremental": {
         const bytes = starpdf_export_incremental(req.handle);
         self.postMessage({ type: "exportIncremental", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "deletePage": {
+        const bytes = starpdf_delete_page(req.handle, req.pageIndex);
+        self.postMessage({ type: "deletePage", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "movePage": {
+        const bytes = starpdf_move_page(req.handle, req.fromIndex, req.toIndex);
+        self.postMessage({ type: "movePage", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "duplicatePage": {
+        const bytes = starpdf_duplicate_page(req.handle, req.pageIndex, req.destinationIndex);
+        self.postMessage({ type: "duplicatePage", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "insertBlankPage": {
+        const bytes = starpdf_insert_blank_page(
+          req.handle,
+          req.pageIndex,
+          req.width,
+          req.height,
+          req.rotation
+        );
+        self.postMessage({ type: "insertBlankPage", id: req.id, success: true, bytes }, [bytes.buffer]);
+        break;
+      }
+      case "extractPages": {
+        const bytes = starpdf_extract_pages(req.handle, req.pageIndices);
+        self.postMessage({ type: "extractPages", id: req.id, success: true, bytes }, [bytes.buffer]);
         break;
       }
       case "getAppearanceStatus": {

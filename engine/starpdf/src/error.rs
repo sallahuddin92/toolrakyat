@@ -27,6 +27,11 @@ pub enum PdfError {
     EncryptedDocumentUnsupported(String),
     SignatureMutationUnsupported(String),
     AmbiguousFieldGraph(String),
+    PageOperation(String),
+    PageResourceLimit(String),
+    UnsupportedPageDependency(String),
+    PartialFieldImport(String),
+    ExcludedPageTarget(String),
     InvalidOperation(String),
 }
 
@@ -68,6 +73,13 @@ impl fmt::Display for PdfError {
                 write!(f, "SIGNATURE_MUTATION_UNSUPPORTED: {msg}")
             }
             Self::AmbiguousFieldGraph(msg) => write!(f, "AMBIGUOUS_FIELD_GRAPH: {msg}"),
+            Self::PageOperation(msg) => write!(f, "PAGE_OPERATION_INVALID: {msg}"),
+            Self::PageResourceLimit(msg) => write!(f, "PAGE_OPERATION_LIMIT: {msg}"),
+            Self::UnsupportedPageDependency(msg) => {
+                write!(f, "UNSUPPORTED_PAGE_DEPENDENCY: {msg}")
+            }
+            Self::PartialFieldImport(msg) => write!(f, "PARTIAL_FIELD_IMPORT_REFUSED: {msg}"),
+            Self::ExcludedPageTarget(msg) => write!(f, "EXCLUDED_PAGE_TARGET: {msg}"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

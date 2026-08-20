@@ -45,6 +45,7 @@ pub mod font;
 pub mod forms;
 pub mod io;
 pub mod mutation;
+pub mod page_ops;
 pub mod search;
 pub mod security;
 pub mod syntax;
@@ -72,6 +73,10 @@ pub use forms::{
 };
 pub use io::{ByteCursor, ByteSource};
 pub use mutation::{MutationEngine, MutationPlan, PdfChange};
+pub use page_ops::{
+    DependencyDisposition, DocumentBuilder, DocumentWriteMode, IncrementalPageEditor, PageEdit,
+    PageOperationLimits, PageOperationPlan, PageOperationType,
+};
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
     TextMatcher,
@@ -79,5 +84,5 @@ pub use search::{
 pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
 pub use text::{GraphicsState, Matrix2D, PageText, TextExtractor, TextSpan, TextState};
 pub use validate::StructuralValidator;
-pub use writer::{IncrementalWriter, MinimalWriter, Serializer};
+pub use writer::{CompleteWriter, IncrementalWriter, MinimalWriter, Serializer};
 pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};
