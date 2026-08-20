@@ -8,6 +8,8 @@ use crate::writer::serializer::Serializer;
 pub struct IncrementalWriter;
 
 impl IncrementalWriter {
+    pub const MAX_INCREMENTAL_OUTPUT_GROWTH: usize = 64 * 1024 * 1024;
+
     /// Appends modified and new indirect objects to the original PDF byte slice,
     /// generating a standard incremental update xref section and updated trailer.
     pub fn write_update(
@@ -34,6 +36,11 @@ impl IncrementalWriter {
         let mut max_obj_num = 0u64;
 
         for (&obj_ref, obj) in modified_objects {
+            if obj_ref.number > 9_999_999_999 {
+                return Err(PdfError::InvalidOperation(
+                    "PDF object number exceeds the incremental writer limit".into(),
+                ));
+            }
             max_obj_num = max_obj_num.max(obj_ref.number);
             let offset = output.len();
             object_offsets.insert(obj_ref, offset);
@@ -56,6 +63,7 @@ impl IncrementalWriter {
                     "Failed to format endobj: {e}"
                 )));
             }
+            Self::validate_growth(original_bytes.len(), output.len())?;
         }
 
         // 2. Format xref section with contiguous subsection grouping
@@ -138,6 +146,21 @@ impl IncrementalWriter {
             )));
         }
 
+        Self::validate_growth(original_bytes.len(), output.len())?;
+
         Ok(output)
+    }
+
+    fn validate_growth(original_len: usize, output_len: usize) -> PdfResult<()> {
+        let growth = output_len.checked_sub(original_len).ok_or_else(|| {
+            PdfError::InvalidOperation("Incremental output length arithmetic underflow".into())
+        })?;
+        if growth > Self::MAX_INCREMENTAL_OUTPUT_GROWTH {
+            return Err(PdfError::InvalidOperation(format!(
+                "Incremental output growth exceeds maximum of {} bytes",
+                Self::MAX_INCREMENTAL_OUTPUT_GROWTH
+            )));
+        }
+        Ok(())
     }
 }

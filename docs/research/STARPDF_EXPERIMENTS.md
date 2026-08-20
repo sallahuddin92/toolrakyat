@@ -36,3 +36,11 @@ In the browser:
 - All form extraction (`starpdf_get_form_fields`), annotation queries (`starpdf_get_annotations`), and mutation exports (`starpdf_export_incremental`) execute inside the dedicated Web Worker (`public/starpdf.worker.js`).
 - The Next.js / React UI main thread remains completely unblocked at 60+ FPS during document loading and large text searches.
 - No network requests are made; 100% of data remains within browser memory.
+
+---
+
+## 4. v0.7 Appearance and Annotation Experiments
+
+The warm native run measured 134.18 MB/s lexer throughput, 61.84 MB/s object parsing, and 2,026.76 MB/s FlateDecode throughput. New operations measured 1,204 ns/text appearance, 906 ns/checkbox appearance, 1,860 ns/annotation generation, 2,891 ns/annotation mutation plan, and 6,093 ns/export-plus-reopen. Classification: `PERFORMANCE_OPTIMIZATION`.
+
+A Chromium visual roundtrip changed text, checkbox, and radio fields, added FreeText and Square annotations, exported incrementally, and reopened the result through StarPDF and PDF.js. The original input remained an exact byte prefix and the targeted rendered region changed by more than 2%. Classification: `EXPERIMENTAL_METHOD`.

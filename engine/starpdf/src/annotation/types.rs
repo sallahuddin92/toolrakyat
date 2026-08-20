@@ -78,3 +78,86 @@ pub struct Annotation {
     pub is_invisible: bool,
     pub is_print: bool,
 }
+
+/// Specification for adding a new supported annotation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotationSpec {
+    FreeText {
+        rect: [f64; 4],
+        text: String,
+        font_size: Option<f64>,
+        color: Option<Vec<f64>>,
+    },
+    Highlight {
+        rect: [f64; 4],
+        quad_points: Vec<f64>,
+        color: Option<Vec<f64>>,
+    },
+    Underline {
+        rect: [f64; 4],
+        quad_points: Vec<f64>,
+        color: Option<Vec<f64>>,
+    },
+    StrikeOut {
+        rect: [f64; 4],
+        quad_points: Vec<f64>,
+        color: Option<Vec<f64>>,
+    },
+    Square {
+        rect: [f64; 4],
+        stroke_color: Option<Vec<f64>>,
+        fill_color: Option<Vec<f64>>,
+        border_width: Option<f64>,
+    },
+    Circle {
+        rect: [f64; 4],
+        stroke_color: Option<Vec<f64>>,
+        fill_color: Option<Vec<f64>>,
+        border_width: Option<f64>,
+    },
+    Line {
+        line_points: [f64; 4],
+        stroke_color: Option<Vec<f64>>,
+        stroke_width: Option<f64>,
+    },
+    Ink {
+        rect: [f64; 4],
+        ink_list: Vec<Vec<[f64; 2]>>,
+        stroke_color: Option<Vec<f64>>,
+        stroke_width: Option<f64>,
+    },
+    Link {
+        rect: [f64; 4],
+        uri: String,
+    },
+}
+
+impl AnnotationSpec {
+    pub fn rect(&self) -> [f64; 4] {
+        match self {
+            Self::FreeText { rect, .. }
+            | Self::Highlight { rect, .. }
+            | Self::Underline { rect, .. }
+            | Self::StrikeOut { rect, .. }
+            | Self::Square { rect, .. }
+            | Self::Circle { rect, .. }
+            | Self::Ink { rect, .. }
+            | Self::Link { rect, .. } => *rect,
+            Self::Line { line_points, .. } => {
+                let x1 = line_points[0].min(line_points[2]);
+                let y1 = line_points[1].min(line_points[3]);
+                let x2 = line_points[0].max(line_points[2]);
+                let y2 = line_points[1].max(line_points[3]);
+                [x1, y1, x2, y2]
+            }
+        }
+    }
+}
+
+/// Specification for updating an existing annotation.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AnnotationUpdateSpec {
+    pub rect: Option<[f64; 4]>,
+    pub contents: Option<String>,
+    pub color: Option<Vec<f64>>,
+}

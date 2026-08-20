@@ -1,14 +1,17 @@
 import type {
+  StarPdfAddAnnotationInput,
   StarPdfAnnotation,
   StarPdfDocumentInfo,
   StarPdfFormField,
   StarPdfPageText,
   StarPdfSearchOptions,
   StarPdfSearchResult,
+  StarPdfUpdateAnnotationInput,
 } from "./starpdf-types";
 
 // Import wasm module functions directly for universal execution (Node / SSR / Vitest / Main fallback)
 import initWasm, {
+  starpdf_add_annotation,
   starpdf_close,
   starpdf_create_minimal_pdf,
   starpdf_export_incremental,
@@ -19,11 +22,13 @@ import initWasm, {
   starpdf_get_info,
   starpdf_get_page_count,
   starpdf_open,
+  starpdf_remove_annotation,
   starpdf_search,
   starpdf_set_checkbox,
   starpdf_set_choice,
   starpdf_set_radio,
   starpdf_set_text_field,
+  starpdf_update_annotation,
   starpdf_validate,
   starpdf_version,
 } from "./starpdf-wasm/starpdf";
@@ -198,6 +203,45 @@ export class StarPdfDocumentHandle {
       BigInt(objectNum),
       objectGen,
       value
+    );
+  }
+
+  async addAnnotation(
+    pageIndex: number,
+    input: StarPdfAddAnnotationInput
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_add_annotation(this._handle, pageIndex, input);
+  }
+
+  async updateAnnotation(
+    objectNum: number,
+    objectGen: number,
+    input: StarPdfUpdateAnnotationInput
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_update_annotation(
+      this._handle,
+      BigInt(objectNum),
+      objectGen,
+      input
+    );
+  }
+
+  async removeAnnotation(
+    pageIndex: number,
+    objectNum: number,
+    objectGen: number
+  ): Promise<boolean> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_remove_annotation(
+      this._handle,
+      pageIndex,
+      BigInt(objectNum),
+      objectGen
     );
   }
 

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use starpdf::appearance::AppearanceStatus;
 use starpdf::document::PdfDocument;
 use starpdf::forms::FieldValue;
 use starpdf::mutation::PdfChange;
@@ -32,7 +33,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
             page_ref,
             starpdf::syntax::object::PdfObject::Dictionary(page_dict),
         )]),
-        appearance_status: starpdf::mutation::AppearanceStatus::LogicalOnlyUpdated,
+        appearance_status: AppearanceStatus::ValueUpdated,
     };
 
     let updated_bytes = doc.export_incremental(&plan).unwrap();
@@ -64,7 +65,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
             page_ref,
             starpdf::syntax::object::PdfObject::Dictionary(page_dict_2),
         )]),
-        appearance_status: starpdf::mutation::AppearanceStatus::LogicalOnlyUpdated,
+        appearance_status: AppearanceStatus::ValueUpdated,
     };
 
     let second_updated_bytes = reopened.export_incremental(&plan_2).unwrap();
@@ -89,17 +90,17 @@ fn test_incremental_mutation_real_form_fixture() {
     let fields = doc.form_fields().unwrap();
     assert!(!fields.is_empty());
 
-    // Find the text field "full_name"
+    // Find the text field "full_name" or "fullName"
     let text_field = fields
         .iter()
-        .find(|f| f.partial_name == "full_name")
+        .find(|f| f.partial_name == "full_name" || f.partial_name == "fullName")
         .expect("Expected full_name field");
 
-    // Find the checkbox field "agree"
+    // Find the checkbox field "agree" or "subscribe"
     let check_field = fields
         .iter()
-        .find(|f| f.partial_name == "agree")
-        .expect("Expected agree field");
+        .find(|f| f.partial_name == "agree" || f.partial_name == "subscribe")
+        .expect("Expected agree/subscribe field");
 
     let changes = vec![
         PdfChange::SetTextField {
@@ -124,7 +125,7 @@ fn test_incremental_mutation_real_form_fixture() {
     let reopened_fields = reopened.form_fields().unwrap();
     let updated_text = reopened_fields
         .iter()
-        .find(|f| f.partial_name == "full_name")
+        .find(|f| f.partial_name == "full_name" || f.partial_name == "fullName")
         .unwrap();
     assert_eq!(
         updated_text.value,
@@ -133,7 +134,7 @@ fn test_incremental_mutation_real_form_fixture() {
 
     let updated_check = reopened_fields
         .iter()
-        .find(|f| f.partial_name == "agree")
+        .find(|f| f.partial_name == "agree" || f.partial_name == "subscribe")
         .unwrap();
     assert_eq!(updated_check.value, FieldValue::Boolean(true));
 }

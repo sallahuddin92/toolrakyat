@@ -13,6 +13,9 @@ use crate::error::{PdfError, PdfResult};
 use crate::mutation::PdfChange;
 
 #[cfg(feature = "wasm")]
+const MAX_PENDING_CHANGES: usize = 500;
+
+#[cfg(feature = "wasm")]
 pub struct DocumentHandleEntry {
     pub raw_bytes: Vec<u8>,
     pub pending_changes: Vec<PdfChange>,
@@ -90,6 +93,11 @@ impl DocumentRegistry {
             .get_mut(&handle)
             .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
 
+        if entry.pending_changes.len() >= MAX_PENDING_CHANGES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Maximum pending mutation count ({MAX_PENDING_CHANGES}) exceeded"
+            )));
+        }
         entry.pending_changes.push(change);
         Ok(())
     }

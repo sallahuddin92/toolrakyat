@@ -38,3 +38,12 @@ StarPDF is designed to process untrusted PDF files entirely within the client br
 - **Root Cause:** Reading `/Prev` from merged trailer map rather than the specific current trailer dictionary being evaluated during chain traversal.
 - **Resolution:** Updated `XrefResolver` to query `current_dict.get("Prev")` directly.
 - **Regression Test:** Added in `tests/incremental_writer_tests.rs::test_incremental_writer_roundtrip_minimal_doc`.
+
+## 4. v0.7 Hostile-Input Findings
+
+- Four new and four affected legacy libFuzzer campaigns completed 18,292,731 executions with no crash, hang, OOM, or unique reproducer.
+- Annotation strings, geometry arrays, InkLists, generated appearances, widget collections, mutation queues, object numbers, and incremental growth now have explicit bounds.
+- Invalid/non-finite geometry and oversized contents are refused atomically with typed errors.
+- The production source contains zero `.unwrap()`/`.expect()` calls and retains `#![forbid(unsafe_code)]`.
+
+Classification: `SECURITY_HARDENING`.

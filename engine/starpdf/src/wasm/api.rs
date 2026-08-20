@@ -2,6 +2,8 @@
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "wasm")]
+use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec};
+#[cfg(feature = "wasm")]
 use crate::mutation::PdfChange;
 #[cfg(feature = "wasm")]
 use crate::search::SearchOptions;
@@ -11,8 +13,9 @@ use crate::syntax::object::ObjectRef;
 use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
-    WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField, WasmPageText,
-    WasmSearchBoundingBox, WasmSearchResult, WasmTextSpan, WasmWidget,
+    WasmAddAnnotationInput, WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField,
+    WasmPageText, WasmSearchBoundingBox, WasmSearchResult, WasmTextSpan, WasmUpdateAnnotationInput,
+    WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -27,7 +30,7 @@ fn to_js_error<E: std::fmt::Display>(err: E) -> JsValue {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn starpdf_version() -> String {
-    "0.6.0".to_string()
+    "0.7.0".to_string()
 }
 
 #[cfg(feature = "wasm")]
@@ -358,6 +361,126 @@ pub fn starpdf_set_choice(
     let change = PdfChange::SetChoice {
         field_ref,
         value: value.to_string(),
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_add_annotation(
+    handle: u32,
+    page_index: u32,
+    annotation_val: JsValue,
+) -> Result<bool, JsValue> {
+    let input: WasmAddAnnotationInput = serde_wasm_bindgen::from_value(annotation_val)
+        .map_err(|e| JsValue::from_str(&format!("Invalid annotation input: {e}")))?;
+
+    let spec = match input.subtype.as_str() {
+        "FreeText" => AnnotationSpec::FreeText {
+            rect: input.rect,
+            text: input.contents.unwrap_or_default(),
+            font_size: input.font_size,
+            color: input.color,
+        },
+        "Square" => AnnotationSpec::Square {
+            rect: input.rect,
+            stroke_color: input.color,
+            fill_color: input.fill_color,
+            border_width: input.border_width,
+        },
+        "Circle" => AnnotationSpec::Circle {
+            rect: input.rect,
+            stroke_color: input.color,
+            fill_color: input.fill_color,
+            border_width: input.border_width,
+        },
+        "Line" => AnnotationSpec::Line {
+            line_points: input.line_points.unwrap_or([
+                input.rect[0],
+                input.rect[1],
+                input.rect[2],
+                input.rect[3],
+            ]),
+            stroke_color: input.color,
+            stroke_width: input.border_width,
+        },
+        "Highlight" => AnnotationSpec::Highlight {
+            rect: input.rect,
+            quad_points: input.quad_points.unwrap_or_default(),
+            color: input.color,
+        },
+        "Underline" => AnnotationSpec::Underline {
+            rect: input.rect,
+            quad_points: input.quad_points.unwrap_or_default(),
+            color: input.color,
+        },
+        "StrikeOut" => AnnotationSpec::StrikeOut {
+            rect: input.rect,
+            quad_points: input.quad_points.unwrap_or_default(),
+            color: input.color,
+        },
+        "Ink" => AnnotationSpec::Ink {
+            rect: input.rect,
+            ink_list: input.ink_list.unwrap_or_default(),
+            stroke_color: input.color,
+            stroke_width: input.border_width,
+        },
+        "Link" => AnnotationSpec::Link {
+            rect: input.rect,
+            uri: input.uri.unwrap_or_default(),
+        },
+        other => {
+            return Err(JsValue::from_str(&format!(
+                "Unsupported annotation subtype: {other}"
+            )));
+        }
+    };
+
+    let change = PdfChange::AddAnnotation {
+        page_index: page_index as usize,
+        spec,
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_update_annotation(
+    handle: u32,
+    obj_num: u64,
+    obj_gen: u16,
+    update_val: JsValue,
+) -> Result<bool, JsValue> {
+    let input: WasmUpdateAnnotationInput = serde_wasm_bindgen::from_value(update_val)
+        .map_err(|e| JsValue::from_str(&format!("Invalid update input: {e}")))?;
+
+    let update = AnnotationUpdateSpec {
+        rect: input.rect,
+        contents: input.contents,
+        color: input.color,
+    };
+
+    let change = PdfChange::UpdateAnnotation {
+        annot_ref: ObjectRef::new(obj_num, obj_gen),
+        update,
+    };
+    REGISTRY.add_change(handle, change).map_err(to_js_error)?;
+    Ok(true)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_remove_annotation(
+    handle: u32,
+    page_index: u32,
+    obj_num: u64,
+    obj_gen: u16,
+) -> Result<bool, JsValue> {
+    let change = PdfChange::RemoveAnnotation {
+        page_index: page_index as usize,
+        annot_ref: ObjectRef::new(obj_num, obj_gen),
     };
     REGISTRY.add_change(handle, change).map_err(to_js_error)?;
     Ok(true)
