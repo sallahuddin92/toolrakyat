@@ -78,7 +78,10 @@ impl<'a> ObjectStore<'a> {
     pub fn resolve(&mut self, obj_ref: ObjectRef) -> PdfResult<&PdfObject> {
         if self.cache.contains_key(&obj_ref) {
             self.metrics.cache_hits += 1;
-            return Ok(self.cache.get(&obj_ref).unwrap());
+            return self.cache.get(&obj_ref).ok_or(PdfError::ObjectNotFound {
+                number: obj_ref.number,
+                generation: obj_ref.generation,
+            });
         }
 
         if self.resolving_stack.contains(&obj_ref) {
@@ -118,7 +121,10 @@ impl<'a> ObjectStore<'a> {
         self.cache.insert(obj_ref, obj);
         self.metrics.objects_resolved += 1;
 
-        Ok(self.cache.get(&obj_ref).unwrap())
+        self.cache.get(&obj_ref).ok_or(PdfError::ObjectNotFound {
+            number: obj_ref.number,
+            generation: obj_ref.generation,
+        })
     }
 
     fn resolve_uncompressed_object(
@@ -175,7 +181,14 @@ impl<'a> ObjectStore<'a> {
                 .insert(stream_obj_num, decoded_stream);
         }
 
-        let decoded = self.decoded_obj_streams.get(&stream_obj_num).unwrap();
+        let decoded = self
+            .decoded_obj_streams
+            .get(&stream_obj_num)
+            .ok_or_else(|| {
+                PdfError::InvalidSyntax(format!(
+                    "Failed to retrieve decoded ObjectStream {stream_obj_num}"
+                ))
+            })?;
         ObjectStreamReader::extract_object(decoded, index_in_stream)
     }
 

@@ -26,6 +26,12 @@ fn main() {
 
     // 1. Lexer Throughput
     {
+        // Warmup pass
+        for _ in 0..500 {
+            let mut lexer = Lexer::from_bytes(&sample_pdf);
+            while let Ok(Some(_)) = lexer.next_token() {}
+        }
+
         let iterations = 10_000;
         let start = Instant::now();
         let mut token_count = 0;
