@@ -1907,6 +1907,87 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(reopenedInput).toHaveValue("Persisted Annotation Test");
     await expect(page.getByRole("button", { name: /Text \(/ })).toBeVisible();
   });
+
+  test("v0.19 Workflow L: Open -> Select/Edit Markup Annotation -> Export -> Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(
+      process.cwd(),
+      "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-markup-freetext.pdf",
+    );
+    const originalBytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-l.pdf", originalBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Verify markup annotation detected
+    const annotsTabBtn = page.getByRole("button", { name: /Annots \(4\)/ });
+    await expect(annotsTabBtn).toBeVisible({ timeout: 5000 });
+
+    // 2. Select FreeText annotation on canvas
+    const canvasAnnot = page.locator('[data-testid="canvas-annotation-annot-0-0"]');
+    await expect(canvasAnnot).toBeVisible({ timeout: 10000 });
+    await canvasAnnot.dispatchEvent("click");
+
+    // 3. Contextual UI recognizes markup annotation subtype (FreeText)
+    const contextType = page.locator('[data-testid="context-annotation-type"]');
+    await expect(contextType).toBeVisible({ timeout: 5000 });
+    await expect(contextType).toHaveText("FreeText");
+
+    const contextInput = page.locator('[data-testid="context-annotation-input"]');
+    await expect(contextInput).toBeVisible();
+
+    // 4. Verify raw object IDs are NOT displayed in user-facing UI
+    await expect(workspace).not.toContainText("0 0 obj");
+    await expect(workspace).not.toContainText("Annot 0");
+
+    // 5. Test Escape clears selection
+    await page.keyboard.press("Escape");
+    await expect(contextInput).not.toBeVisible();
+
+    // 6. Re-select and mutate annotation property
+    await canvasAnnot.dispatchEvent("click");
+    await expect(contextInput).toBeVisible();
+    await contextInput.fill("Updated FreeText Annotation Text");
+
+    // 7. Verify document becomes dirty
+    await expect(page.locator('[data-testid="document-modified-dot"]')).toBeVisible({ timeout: 5000 });
+
+    // 8. Export modified document
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-l-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(100);
+    expect(exportedBytes).not.toEqual(originalBytes);
+
+    // 9. Reopen exported document
+    await page.getByRole("button", { name: "Open" }).click();
+    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
+    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await confirmBtn.click();
+    }
+    await uploadPdfBytes(page, "workflow-l-edited.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 10. Verify reopened document contains expected annotation state and other annotations remain usable
+    await expect(annotsTabBtn).toBeVisible({ timeout: 5000 });
+    await annotsTabBtn.click();
+
+    const reopenedAnnotInput = page.locator('[data-testid="inspector-annotation-annot-0-0"]');
+    await expect(reopenedAnnotInput).toBeVisible();
+    await expect(reopenedAnnotInput).toHaveValue("Updated FreeText Annotation Text");
+
+    // Verify other markup annotations (Highlight, Underline, StrikeOut) are present and usable
+    await expect(page.locator('[data-testid="inspector-annotation-annot-0-1"]')).toBeVisible();
+    await expect(page.locator('[data-testid="inspector-annotation-annot-0-2"]')).toBeVisible();
+    await expect(page.locator('[data-testid="inspector-annotation-annot-0-3"]')).toBeVisible();
+  });
 });
 
 

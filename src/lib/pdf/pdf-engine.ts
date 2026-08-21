@@ -5,6 +5,10 @@ import {
   PDFRadioGroup,
   PDFDropdown,
   PDFOptionList,
+  PDFName,
+  PDFString,
+  PDFNumber,
+  PDFDict,
 } from "pdf-lib";
 import {
   type AcroFormField,
@@ -13,6 +17,7 @@ import {
   type ExportMode,
   type ExportResult,
   type PdfDocumentMetadata,
+  type PdfMarkupAnnotation,
   type PdfPageInfo,
 } from "./pdf-types";
 import {
@@ -125,6 +130,67 @@ export async function inspectPdfDocument(
     // In that case, fields remain empty.
   }
 
+  const annotations: PdfMarkupAnnotation[] = [];
+  for (let i = 0; i < pageCount; i++) {
+    const page = doc.getPage(i);
+    const annots = page.node.Annots();
+    if (annots) {
+      for (let j = 0; j < annots.size(); j++) {
+        try {
+          const annotRef = annots.get(j);
+          const annotDict = doc.context.lookup(annotRef);
+          if (!annotDict || !(annotDict instanceof PDFDict)) continue;
+          const subtypeRaw = annotDict.get(PDFName.of("Subtype"))?.toString()?.replace(/^\//, "") || "Unknown";
+          // Exclude AcroForm widget annotations (which are handled in fields)
+          if (subtypeRaw === "Widget") continue;
+
+          let contents = "";
+          const contentsEntry = annotDict.get(PDFName.of("Contents"));
+          if (contentsEntry && typeof (contentsEntry as unknown as { decodeText?: () => string }).decodeText === "function") {
+            contents = (contentsEntry as unknown as { decodeText: () => string }).decodeText();
+          } else if (contentsEntry && typeof (contentsEntry as unknown as { value?: string }).value === "string") {
+            contents = (contentsEntry as unknown as { value: string }).value;
+          }
+
+          let rect = { x: 0, y: 0, width: 50, height: 50 };
+          const rectEntry = annotDict.get(PDFName.of("Rect"));
+          if (rectEntry && (rectEntry as unknown as { asArray?: () => unknown[] }).asArray) {
+            const arr = (rectEntry as unknown as { asArray: () => unknown[] }).asArray();
+            if (arr.length >= 4) {
+              const x1 = (arr[0] as PDFNumber).asNumber();
+              const y1 = (arr[1] as PDFNumber).asNumber();
+              const x2 = (arr[2] as PDFNumber).asNumber();
+              const y2 = (arr[3] as PDFNumber).asNumber();
+              rect = {
+                x: Math.min(x1, x2),
+                y: Math.min(y1, y2),
+                width: Math.abs(x2 - x1),
+                height: Math.abs(y2 - y1),
+              };
+            }
+          }
+
+          let author: string | undefined;
+          const tEntry = annotDict.get(PDFName.of("T"));
+          if (tEntry && typeof (tEntry as unknown as { decodeText?: () => string }).decodeText === "function") {
+            author = (tEntry as unknown as { decodeText: () => string }).decodeText();
+          }
+
+          annotations.push({
+            id: `annot-${i}-${j}`,
+            subtype: subtypeRaw,
+            contents,
+            rect,
+            pageIndex: i,
+            author,
+          });
+        } catch {
+          // Ignore malformed individual annotation
+        }
+      }
+    }
+  }
+
   const metadata: PdfDocumentMetadata = {
     filename,
     fileSize,
@@ -142,17 +208,19 @@ export async function inspectPdfDocument(
     metadata,
     pages,
     fields,
+    annotations,
   };
 }
 
 /**
- * Updates AcroForm field values in the source PDF and produces an exported Uint8Array.
+ * Updates AcroForm field values and markup annotations in the source PDF and produces an exported Uint8Array.
  * If mode is 'flattened', interactive widgets are converted to visual page content.
  */
 export async function updateAcroFormFields(
   sourceBytes: Uint8Array,
   fieldValues: Record<string, string | boolean | string[]>,
   mode: ExportMode,
+  annotationValues: Record<string, string> = {},
 ): Promise<Uint8Array> {
   let doc: PDFDocument;
   try {
@@ -167,6 +235,30 @@ export async function updateAcroFormFields(
   }
 
   try {
+    // 1. Update Markup Annotations if any modified
+    if (Object.keys(annotationValues).length > 0) {
+      for (let i = 0; i < doc.getPageCount(); i++) {
+        const page = doc.getPage(i);
+        const annots = page.node.Annots();
+        if (annots) {
+          for (let j = 0; j < annots.size(); j++) {
+            const annotId = `annot-${i}-${j}`;
+            if (annotationValues[annotId] !== undefined) {
+              try {
+                const annotDict = doc.context.lookup(annots.get(j));
+                if (annotDict && annotDict instanceof PDFDict) {
+                  annotDict.set(PDFName.of("Contents"), PDFString.of(annotationValues[annotId]));
+                }
+              } catch {
+                // Ignore failure on specific annotation
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Update AcroForm Fields
     let form = null;
     try {
       form = doc.getForm();
@@ -273,8 +365,9 @@ export async function exportPdfDocument(
   fieldValues: Record<string, string | boolean | string[]>,
   mode: ExportMode,
   expectedPageCount: number,
+  annotationValues: Record<string, string> = {},
 ): Promise<ExportResult> {
-  const pdfBytes = await updateAcroFormFields(sourceBytes, fieldValues, mode);
+  const pdfBytes = await updateAcroFormFields(sourceBytes, fieldValues, mode, annotationValues);
   const validated = await validateExportedPdf(pdfBytes, expectedPageCount);
   const filename = generateExportFilename(originalFilename, mode);
 

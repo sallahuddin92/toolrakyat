@@ -21,14 +21,14 @@ import type {
   StarPdfVectorGraphicInfo,
   StarPdfUpdateVectorGraphicInput,
 } from "@/lib/pdf/starpdf-types";
-import type { AcroFormField } from "@/lib/pdf/pdf-types";
+import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 
-export type SelectionType = "text" | "image" | "vector" | "form";
+export type SelectionType = "text" | "image" | "vector" | "form" | "annotation";
 
 export interface SelectedItem {
   type: SelectionType;
   id: string;
-  data: StarPdfTextSpan | StarPdfImageInfo | StarPdfVectorGraphicInfo | AcroFormField;
+  data: StarPdfTextSpan | StarPdfImageInfo | StarPdfVectorGraphicInfo | AcroFormField | PdfMarkupAnnotation;
   bounds?: { left: number; top: number; width: number; height: number };
 }
 
@@ -42,6 +42,8 @@ interface PdfContextualToolbarProps {
   onDeleteGraphic: (graphicId: string) => Promise<void>;
   onFormFieldChange: (fieldName: string, value: string | boolean | string[]) => void;
   formFieldValue?: string | boolean | string[];
+  onAnnotationChange?: (annotId: string, value: string) => void;
+  annotationValue?: string;
 }
 
 function TextControls({
@@ -320,6 +322,8 @@ export function PdfContextualToolbar({
   onDeleteGraphic,
   onFormFieldChange,
   formFieldValue,
+  onAnnotationChange,
+  annotationValue,
 }: PdfContextualToolbarProps) {
   if (!selection) return null;
 
@@ -337,8 +341,15 @@ export function PdfContextualToolbar({
         {selection.type === "image" && <ImageIcon className="size-4 text-emerald-600" />}
         {selection.type === "vector" && <Shapes className="size-4 text-indigo-600" />}
         {selection.type === "form" && <FileEdit className="size-4 text-amber-600" />}
+        {selection.type === "annotation" && <FileEdit className="size-4 text-purple-600" />}
         <span className="text-xs font-semibold text-slate-700 capitalize">
-          {selection.type === "text" ? "Text" : selection.type === "vector" ? "Shape" : selection.type}
+          {selection.type === "text"
+            ? "Text"
+            : selection.type === "vector"
+            ? "Shape"
+            : selection.type === "annotation"
+            ? "Annotation"
+            : selection.type}
         </span>
       </div>
 
@@ -446,6 +457,29 @@ export function PdfContextualToolbar({
             data-testid="context-form-input"
             autoFocus
           />
+        );
+      })()}
+
+      {/* MARKUP ANNOTATION SELECTION CONTROLS */}
+      {selection.type === "annotation" && (() => {
+        const annot = selection.data as PdfMarkupAnnotation;
+        const currentVal = annotationValue ?? annot.contents;
+
+        return (
+          <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+            <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+              {annot.subtype}
+            </Badge>
+            <Input
+              type="text"
+              value={currentVal}
+              onChange={(e) => onAnnotationChange?.(annot.id, e.target.value)}
+              className="h-8 text-xs w-48 sm:w-64 bg-white"
+              placeholder="Annotation text / contents..."
+              data-testid="context-annotation-input"
+              autoFocus
+            />
+          </div>
         );
       })()}
 
