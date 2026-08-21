@@ -752,4 +752,88 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
 
     await doc.close();
   });
+
+  it("v0.18: opens multi-producer documents and exposes recovery information", async () => {
+    // Generate valid producer PDF
+    let pdf = "%PDF-1.7\n%StarPDF\n";
+    const offsets: number[] = [0];
+
+    offsets.push(pdf.length);
+    pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+    offsets.push(pdf.length);
+    pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+
+    offsets.push(pdf.length);
+    pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
+
+    const content = "BT\n/F1 12 Tf\n50 700 Td (Produced by Skia/PDF m120 Google Chrome) Tj\nET\n";
+    offsets.push(pdf.length);
+    pdf += `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`;
+
+    offsets.push(pdf.length);
+    pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < offsets.length; i++) {
+      pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    const doc = await StarPdfClient.open(new TextEncoder().encode(pdf));
+    const info = await doc.getInfo();
+    expect(info.page_count).toBe(1);
+    expect(info.is_valid).toBe(true);
+
+    const text = await doc.extractPageText(0);
+    expect(text.plain_text).toContain("Skia/PDF");
+
+    await doc.close();
+  });
+
+  it("v0.18: recovers PDF with preceding UTF-8 BOM and logs compatibility event", async () => {
+    let pdf = "%PDF-1.7\n%StarPDF\n";
+    const offsets: number[] = [0];
+
+    offsets.push(pdf.length);
+    pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+    offsets.push(pdf.length);
+    pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+
+    offsets.push(pdf.length);
+    pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
+
+    const content = "BT\n/F1 12 Tf\n50 700 Td (BOM Recovered PDF) Tj\nET\n";
+    offsets.push(pdf.length);
+    pdf += `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`;
+
+    offsets.push(pdf.length);
+    pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < offsets.length; i++) {
+      pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    // Prepend UTF-8 BOM (\xEF\xBB\xBF)
+    const bomBytes = new Uint8Array([0xef, 0xbb, 0xbf]);
+    const pdfBytes = new TextEncoder().encode(pdf);
+    const fullBytes = new Uint8Array(bomBytes.length + pdfBytes.length);
+    fullBytes.set(bomBytes, 0);
+    fullBytes.set(pdfBytes, bomBytes.length);
+
+    const doc = await StarPdfClient.open(fullBytes);
+    const info = await doc.getInfo();
+    expect(info.page_count).toBe(1);
+    expect(info.is_valid).toBe(true);
+
+    const text = await doc.extractPageText(0);
+    expect(text.plain_text).toContain("BOM Recovered PDF");
+
+    await doc.close();
+  });
 });

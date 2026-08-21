@@ -21,16 +21,26 @@ impl XrefResolver {
             return Err(PdfError::InvalidXref("PDF file too short for xref".into()));
         }
 
-        // Search within the last 2048 bytes of the file
+        // 1. Search within the last 2048 bytes of the file (standard fast path)
         let search_start = len.saturating_sub(2048);
         let slice = source.get_slice_range(search_start, len)?;
 
-        let pos_in_slice = slice
-            .windows(9)
-            .rposition(|w| w == b"startxref")
-            .ok_or_else(|| PdfError::InvalidXref("startxref keyword not found near EOF".into()))?;
+        let pos_in_slice = if let Some(pos) = slice.windows(9).rposition(|w| w == b"startxref") {
+            search_start + pos
+        } else {
+            // 2. Extended recovery search up to 65,536 bytes from EOF
+            let extended_start = len.saturating_sub(65536);
+            let ext_slice = source.get_slice_range(extended_start, len)?;
+            let pos = ext_slice
+                .windows(9)
+                .rposition(|w| w == b"startxref")
+                .ok_or_else(|| {
+                    PdfError::InvalidXref("startxref keyword not found near EOF".into())
+                })?;
+            extended_start + pos
+        };
 
-        let startxref_pos = search_start + pos_in_slice;
+        let startxref_pos = pos_in_slice;
         let mut cursor = ByteCursor::new(source);
         cursor.set_position(startxref_pos + 9)?;
 
@@ -117,11 +127,61 @@ impl XrefResolver {
 
         visited_offsets.insert(offset);
 
+        // Attempt exact offset first, then bounded drift recovery within +/- 64 bytes
+        let mut effective_offset = offset;
         let mut cursor = ByteCursor::new(source);
-        cursor.set_position(offset as usize)?;
+        cursor.set_position(effective_offset as usize)?;
         let mut lexer = Lexer::new(cursor);
+        let mut first_token = lexer.peek_token().ok().flatten();
+        let is_valid_xref_start = match first_token {
+            Some(Token::KeywordXref) => true,
+            Some(Token::Integer(_)) => {
+                let saved_pos = lexer.position();
+                let is_obj = matches!(
+                    (lexer.next_token(), lexer.next_token(), lexer.next_token()),
+                    (
+                        Ok(Some(Token::Integer(_))),
+                        Ok(Some(Token::Integer(_))),
+                        Ok(Some(Token::KeywordObj))
+                    )
+                );
+                let _ = lexer.set_position(saved_pos);
+                is_obj
+            }
+            _ => false,
+        };
 
-        let first_token = lexer.peek_token()?.ok_or(PdfError::UnexpectedEof)?;
+        if !is_valid_xref_start {
+            // Check bounded search window [offset - 64, offset + 64]
+            let start = (offset as usize).saturating_sub(64);
+            let end = ((offset as usize) + 64).min(source.len());
+            if let Ok(window) = source.get_slice_range(start, end) {
+                if let Some(pos) = window.windows(4).position(|w| w == b"xref") {
+                    effective_offset = (start + pos) as u64;
+                    let mut cur = ByteCursor::new(source);
+                    cur.set_position(effective_offset as usize)?;
+                    lexer = Lexer::new(cur);
+                    first_token = lexer.peek_token().ok().flatten();
+                } else if let Some(pos) = window.windows(3).position(|w| w == b"obj") {
+                    // Search backward for object start
+                    let mut obj_start = start + pos;
+                    while obj_start > start
+                        && source
+                            .get_byte(obj_start - 1)
+                            .is_ok_and(|b| b.is_ascii_digit() || b.is_ascii_whitespace())
+                    {
+                        obj_start -= 1;
+                    }
+                    effective_offset = obj_start as u64;
+                    let mut cur = ByteCursor::new(source);
+                    cur.set_position(effective_offset as usize)?;
+                    lexer = Lexer::new(cur);
+                    first_token = lexer.peek_token().ok().flatten();
+                }
+            }
+        }
+
+        let first_token = first_token.ok_or(PdfError::UnexpectedEof)?;
 
         match first_token {
             Token::KeywordXref => {
@@ -133,7 +193,7 @@ impl XrefResolver {
                     table,
                     visited_offsets,
                     limits,
-                    offset,
+                    effective_offset,
                 )?;
             }
             Token::Integer(_) => {

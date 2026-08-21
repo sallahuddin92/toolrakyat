@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::document::object_store::ObjectStore;
 use crate::document::pages::PageTree;
+use crate::document::recovery::{RecoveryKind, RecoveryTracker};
 use crate::error::{PdfError, PdfResult};
 use crate::io::source::ByteSource;
 use crate::syntax::object::{ObjectRef, PdfObject};
@@ -13,6 +14,7 @@ pub struct PdfDocument<'a> {
     store: ObjectStore<'a>,
     catalog_ref: ObjectRef,
     root_pages_ref: ObjectRef,
+    pub recovery_tracker: RecoveryTracker,
 }
 
 impl<'a> PdfDocument<'a> {
@@ -27,25 +29,43 @@ impl<'a> PdfDocument<'a> {
         limits: crate::filter::limits::DecompressLimits,
     ) -> PdfResult<Self> {
         let source = ByteSource::new(bytes);
+        let mut recovery_tracker = RecoveryTracker::new();
 
         // 1. Verify header signature %PDF-
         let header_pos = source
             .find_from(0, b"%PDF-")
             .ok_or(PdfError::InvalidHeader)?;
 
-        if header_pos > 1024 {
+        if header_pos > 4096 {
             return Err(PdfError::InvalidHeader);
+        }
+
+        if header_pos > 0 {
+            recovery_tracker.record(
+                RecoveryKind::ProducerCompatibilityPath,
+                format!("Header preceded by {header_pos} leading bytes/BOM"),
+            );
         }
 
         // Extract version string (e.g. "1.7")
         let version_slice = source.get_slice(header_pos + 5, 3).unwrap_or(b"1.7");
         let version = String::from_utf8_lossy(version_slice).to_string();
 
+        let effective_source = if header_pos > 0 {
+            ByteSource::new(&bytes[header_pos..])
+        } else {
+            source
+        };
+
         // 2. Locate and parse XRef table and Trailer
-        let xref_table = XrefResolver::load_xref_and_trailer_with_limits(source, &limits)?;
+        let xref_table =
+            match XrefResolver::load_xref_and_trailer_with_limits(effective_source, &limits) {
+                Ok(table) => table,
+                Err(_) => XrefResolver::load_xref_and_trailer_with_limits(source, &limits)?,
+            };
 
         // 3. Initialize Lazy Object Store
-        let mut store = ObjectStore::new_with_limits(source, xref_table, limits);
+        let mut store = ObjectStore::new_with_limits(effective_source, xref_table, limits);
 
         // 4. Resolve /Root Catalog
         let catalog_ref = store
@@ -71,12 +91,23 @@ impl<'a> PdfDocument<'a> {
             .ok_or_else(|| PdfError::InvalidSyntax("Catalog missing /Pages reference".into()))?;
 
         Ok(Self {
-            source,
+            source: effective_source,
             version,
             store,
             catalog_ref,
             root_pages_ref,
+            recovery_tracker,
         })
+    }
+
+    #[inline]
+    pub fn recovery_status(&self) -> RecoveryKind {
+        self.recovery_tracker.primary_status()
+    }
+
+    #[inline]
+    pub fn recovery_tracker(&self) -> &RecoveryTracker {
+        &self.recovery_tracker
     }
 
     #[inline]

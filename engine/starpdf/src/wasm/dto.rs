@@ -7,6 +7,8 @@ pub struct WasmDocumentInfo {
     pub page_count: usize,
     pub pdf_version: String,
     pub is_valid: bool,
+    pub recovery_status: String,
+    pub recovery_events: Vec<String>,
 }
 
 #[cfg(feature = "wasm")]
