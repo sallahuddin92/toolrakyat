@@ -29,5 +29,9 @@ export default defineConfig({
       // browser downloads in low-disk environments.
       use: { ...devices["Desktop Chrome"], channel: "chrome" },
     },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+    },
   ],
 });

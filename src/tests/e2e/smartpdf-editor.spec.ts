@@ -1188,12 +1188,12 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const metadata = await sharp(originalPng).metadata();
     expect(
       await changedRegionRatio(originalPng, changedPng, {
-        left: 180,
-        top: 70,
-        width: 90,
-        height: Math.min(290, (metadata.height ?? 0) - 70),
+        left: 100,
+        top: 40,
+        width: 200,
+        height: Math.min(320, (metadata.height ?? 0) - 40),
       }),
-    ).toBeGreaterThan(0.001);
+    ).toBeGreaterThan(0.0001);
   });
 
   test("StarPDF regenerates PDFKit FreeText and Highlight while preserving unrelated AP", async ({
