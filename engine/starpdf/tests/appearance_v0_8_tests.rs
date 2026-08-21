@@ -592,6 +592,7 @@ fn subset_rotation_and_annotation_survive_three_incremental_exports() {
         ]),
         appearance_status: AppearanceStatus::AppearancePreserved,
         glyph_mapping_quality: None,
+        layout_policy_result: None,
     };
     let seeded = document.export_incremental(&initial).unwrap();
 

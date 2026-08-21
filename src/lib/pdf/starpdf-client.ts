@@ -4,9 +4,11 @@ import type {
   StarPdfDocumentInfo,
   StarPdfFormField,
   StarPdfPageText,
+  StarPdfReplaceTextResult,
   StarPdfSearchOptions,
   StarPdfSearchResult,
   StarPdfSecurityInfo,
+  StarPdfTextSpan,
   StarPdfUpdateAnnotationInput,
 } from "./starpdf-types";
 
@@ -35,6 +37,8 @@ import initWasm, {
   starpdf_merge_selected,
   starpdf_move_page,
   starpdf_remove_annotation,
+  starpdf_replace_text,
+  starpdf_get_text_editability,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -278,6 +282,34 @@ export class StarPdfDocumentHandle {
       BigInt(objectNum),
       objectGen
     );
+  }
+
+  async replaceText(
+    pageIndex: number,
+    spanId: string,
+    newText: string
+  ): Promise<StarPdfReplaceTextResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_replace_text(
+      this._handle,
+      pageIndex,
+      spanId,
+      newText
+    ) as StarPdfReplaceTextResult;
+  }
+
+  async getTextEditability(
+    pageIndex: number,
+    spanId: string
+  ): Promise<StarPdfTextSpan> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_text_editability(
+      this._handle,
+      pageIndex,
+      spanId
+    ) as StarPdfTextSpan;
   }
 
   async exportIncremental(): Promise<Uint8Array> {

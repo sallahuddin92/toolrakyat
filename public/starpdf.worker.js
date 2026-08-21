@@ -28,6 +28,8 @@ import initWasm, {
   starpdf_merge_selected,
   starpdf_move_page,
   starpdf_remove_annotation,
+  starpdf_replace_text,
+  starpdf_get_text_editability,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -172,6 +174,16 @@ self.onmessage = async (event) => {
       case "removeAnnotation": {
         starpdf_remove_annotation(req.handle, req.pageIndex, BigInt(req.objectNum), req.objectGen);
         self.postMessage({ type: "removeAnnotation", id: req.id, success: true });
+        break;
+      }
+      case "replaceText": {
+        const result = starpdf_replace_text(req.handle, req.pageIndex, req.spanId, req.newText);
+        self.postMessage({ type: "replaceText", id: req.id, success: true, result });
+        break;
+      }
+      case "getTextEditability": {
+        const span = starpdf_get_text_editability(req.handle, req.pageIndex, req.spanId);
+        self.postMessage({ type: "getTextEditability", id: req.id, success: true, span });
         break;
       }
       case "exportIncremental": {

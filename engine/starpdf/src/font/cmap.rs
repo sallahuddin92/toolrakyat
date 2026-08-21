@@ -22,6 +22,27 @@ impl UnicodeCMap {
         self.mappings.get(&code).map(String::as_str)
     }
 
+    /// Looks up the character code for a Unicode character (reverse mapping).
+    pub fn reverse_lookup(&self, ch: char) -> Option<u32> {
+        let ch_str = ch.to_string();
+        for (&code, val) in &self.mappings {
+            if val == &ch_str {
+                return Some(code);
+            }
+        }
+        None
+    }
+
+    /// Looks up the character code for a Unicode string fragment (reverse mapping).
+    pub fn reverse_lookup_str(&self, s: &str) -> Option<u32> {
+        for (&code, val) in &self.mappings {
+            if val == s {
+                return Some(code);
+            }
+        }
+        None
+    }
+
     /// Parses a `/ToUnicode` CMap stream buffer with strict resource and security bounds.
     pub fn parse(input: &[u8]) -> PdfResult<Self> {
         let mut cmap = Self::new();

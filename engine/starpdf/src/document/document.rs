@@ -138,21 +138,20 @@ impl<'a> PdfDocument<'a> {
         let resources =
             crate::font::resource::PageResources::resolve_for_page(&page_dict, &mut self.store)?;
 
-        let mut content_bytes = Vec::new();
+        let mut decompressed_streams = Vec::new();
         if let Some(contents_obj) = page_dict.get("Contents") {
             let resolved_contents = self.store.resolve_object(contents_obj)?;
             match resolved_contents {
                 PdfObject::Stream(stream) => {
                     let decompressed = self.decompress_stream_data(&stream)?;
-                    content_bytes.extend_from_slice(&decompressed);
+                    decompressed_streams.push(decompressed);
                 }
                 PdfObject::Array(streams_arr) => {
                     for stream_ref in streams_arr {
                         let stream_obj = self.store.resolve_object(&stream_ref)?;
                         if let Some(stream) = stream_obj.as_stream() {
                             let decompressed = self.decompress_stream_data(stream)?;
-                            content_bytes.extend_from_slice(&decompressed);
-                            content_bytes.push(b' ');
+                            decompressed_streams.push(decompressed);
                         }
                     }
                 }
@@ -160,9 +159,10 @@ impl<'a> PdfDocument<'a> {
             }
         }
 
-        crate::text::extractor::TextExtractor::extract_from_content(
+        let stream_slices: Vec<&[u8]> = decompressed_streams.iter().map(Vec::as_slice).collect();
+        crate::text::extractor::TextExtractor::extract_from_streams(
             page_index,
-            &content_bytes,
+            &stream_slices,
             &resources,
         )
     }
@@ -324,6 +324,37 @@ impl<'a> PdfDocument<'a> {
     ) -> PdfResult<Vec<u8>> {
         let plan = self.apply_mutation(changes)?;
         self.export_incremental(&plan)
+    }
+
+    /// Replaces native existing content-stream text at a specific target.
+    pub fn replace_text(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+        replacement: &str,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::ReplaceText {
+            page_index,
+            target: target.clone(),
+            replacement: replacement.to_string(),
+        }])
+    }
+
+    /// Replaces native existing content-stream text specified by a structural span ID.
+    pub fn replace_text_span(
+        &mut self,
+        page_index: usize,
+        span_id: &str,
+        replacement: &str,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        let target = crate::mutation::text_edit::TextEditTarget::from_span_id(span_id)?;
+        if target.page_index != page_index {
+            return Err(PdfError::TargetTextNotFound(format!(
+                "Span ID page mismatch: target is page {}, requested page {page_index}",
+                target.page_index
+            )));
+        }
+        self.replace_text(page_index, &target, replacement)
     }
 
     /// Applies an ordered, atomic page-operation plan. Intermediate outputs remain private and

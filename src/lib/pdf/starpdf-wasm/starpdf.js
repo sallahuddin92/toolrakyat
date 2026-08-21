@@ -237,6 +237,22 @@ export function starpdf_get_security_info(handle) {
 /**
  * @param {number} handle
  * @param {number} page_index
+ * @param {string} span_id
+ * @returns {any}
+ */
+export function starpdf_get_text_editability(handle, page_index, span_id) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_get_text_editability(handle, page_index, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
  * @param {number} width
  * @param {number} height
  * @param {number} rotation
@@ -343,6 +359,25 @@ export function starpdf_remove_annotation(handle, page_index, obj_num, obj_gen) 
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @param {string} new_text
+ * @returns {any}
+ */
+export function starpdf_replace_text(handle, page_index, span_id, new_text) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(new_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_replace_text(handle, page_index, ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**

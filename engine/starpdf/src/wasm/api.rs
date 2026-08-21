@@ -16,8 +16,8 @@ use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField,
-    WasmPageText, WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
-    WasmUpdateAnnotationInput, WasmWidget,
+    WasmPageText, WasmReplaceTextResult, WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo,
+    WasmTextSpan, WasmUpdateAnnotationInput, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -134,6 +134,14 @@ pub fn starpdf_extract_page_text(handle: u32, page_index: u32) -> Result<JsValue
                     font_name: s.font_name.clone(),
                     font_size: s.font_size,
                     confidence: s.confidence,
+                    span_id: s.span_id.clone(),
+                    stream_index: s.stream_index,
+                    instruction_index: s.instruction_index,
+                    operand_index: s.operand_index,
+                    operator_name: s.operator_name.clone(),
+                    is_editable: s.is_editable,
+                    editability_code: s.editability_status.code().to_string(),
+                    refusal_reason: s.refusal_reason.clone(),
                 })
                 .collect();
 
@@ -172,6 +180,14 @@ pub fn starpdf_extract_all_text(handle: u32) -> Result<JsValue, JsValue> {
                             font_name: s.font_name.clone(),
                             font_size: s.font_size,
                             confidence: s.confidence,
+                            span_id: s.span_id.clone(),
+                            stream_index: s.stream_index,
+                            instruction_index: s.instruction_index,
+                            operand_index: s.operand_index,
+                            operator_name: s.operator_name.clone(),
+                            is_editable: s.is_editable,
+                            editability_code: s.editability_status.code().to_string(),
+                            refusal_reason: s.refusal_reason.clone(),
                         })
                         .collect();
                     WasmPageText {
@@ -183,6 +199,86 @@ pub fn starpdf_extract_all_text(handle: u32) -> Result<JsValue, JsValue> {
                 .collect();
 
             serde_wasm_bindgen::to_value(&results)
+                .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_replace_text(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+    new_text: &str,
+) -> Result<JsValue, JsValue> {
+    let mut layout_str = String::from("EXACT_FIT");
+    let mut mod_count = 0;
+
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let target = crate::mutation::text_edit::TextEditTarget::from_span_id(span_id)?;
+            let plan = doc.replace_text(page_index as usize, &target, new_text)?;
+            if let Some(l) = &plan.layout_policy_result {
+                layout_str = l.as_str().to_string();
+            }
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmReplaceTextResult {
+        success: true,
+        layout_result: layout_str,
+        modified_object_count: mod_count,
+    };
+
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_text_editability(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let page_text = doc.extract_page_text(page_index as usize)?;
+            let span = page_text
+                .spans
+                .iter()
+                .find(|s| s.span_id == span_id)
+                .ok_or_else(|| {
+                    crate::error::PdfError::TargetTextNotFound(format!(
+                        "Span ID '{span_id}' not found on page {page_index}"
+                    ))
+                })?;
+
+            let dto = WasmTextSpan {
+                page_index: span.page_index,
+                text: span.text.clone(),
+                x: span.x,
+                y: span.y,
+                width: span.width,
+                height: span.height,
+                rotation: span.rotation,
+                font_name: span.font_name.clone(),
+                font_size: span.font_size,
+                confidence: span.confidence,
+                span_id: span.span_id.clone(),
+                stream_index: span.stream_index,
+                instruction_index: span.instruction_index,
+                operand_index: span.operand_index,
+                operator_name: span.operator_name.clone(),
+                is_editable: span.is_editable,
+                editability_code: span.editability_status.code().to_string(),
+                refusal_reason: span.refusal_reason.clone(),
+            };
+
+            serde_wasm_bindgen::to_value(&dto)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
         })
         .map_err(to_js_error)

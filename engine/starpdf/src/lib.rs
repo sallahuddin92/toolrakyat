@@ -72,7 +72,10 @@ pub use forms::{
     AcroForm, AcroFormParser, ChoiceOption, FieldType, FieldValue, FormField, WidgetAnnotation,
 };
 pub use io::{ByteCursor, ByteSource};
-pub use mutation::{MutationEngine, MutationPlan, PdfChange};
+pub use mutation::{
+    ContentStreamEditor, LayoutPolicyResult, MutationEngine, MutationPlan, PdfChange,
+    TextEditTarget,
+};
 pub use page_ops::{
     DependencyDisposition, DocumentBuilder, DocumentWriteMode, IncrementalPageEditor, PageEdit,
     PageOperationLimits, PageOperationPlan, PageOperationType, PageRange, PageSource,
@@ -81,8 +84,9 @@ pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,
     TextMatcher,
 };
-pub use syntax::{Lexer, ObjectRef, Parser, PdfObject, StreamObject, Token};
-pub use text::{GraphicsState, Matrix2D, PageText, TextExtractor, TextSpan, TextState};
+pub use text::{
+    GraphicsState, Matrix2D, PageText, TextEditability, TextExtractor, TextSpan, TextState,
+};
 pub use validate::StructuralValidator;
 pub use writer::{CompleteWriter, IncrementalWriter, MinimalWriter, Serializer};
 pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};

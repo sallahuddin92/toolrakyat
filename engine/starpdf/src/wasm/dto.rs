@@ -43,6 +43,22 @@ pub struct WasmTextSpan {
     pub font_name: String,
     pub font_size: f64,
     pub confidence: f64,
+    pub span_id: String,
+    pub stream_index: usize,
+    pub instruction_index: usize,
+    pub operand_index: usize,
+    pub operator_name: String,
+    pub is_editable: bool,
+    pub editability_code: String,
+    pub refusal_reason: Option<String>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmReplaceTextResult {
+    pub success: bool,
+    pub layout_result: String,
+    pub modified_object_count: usize,
 }
 
 #[cfg(feature = "wasm")]

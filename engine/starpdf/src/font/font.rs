@@ -361,6 +361,212 @@ impl Font {
         let fallback = char::from_u32(code).unwrap_or('\u{FFFD}');
         (fallback.to_string(), width)
     }
+
+    /// Checks if text extracted with this font can be edited within the v0.13 boundary.
+    pub fn check_span_editability(
+        &self,
+        original_text: &str,
+    ) -> crate::text::span::TextEditability {
+        if self.is_composite && !self.composite_identity_mapping {
+            return crate::text::span::TextEditability::UnsupportedFontEncoding(
+                "Composite font requires Identity-H/Identity-V with Identity CIDToGIDMap"
+                    .to_string(),
+            );
+        }
+        for ch in original_text.chars() {
+            if is_complex_script_char(ch) {
+                return crate::text::span::TextEditability::UnsupportedComplexScript(format!(
+                    "Character U+{:04X} requires complex script shaping",
+                    ch as u32
+                ));
+            }
+        }
+        if self.is_composite && self.embedded_sfnt.is_none() && self.to_unicode.is_none() {
+            return crate::text::span::TextEditability::UnsupportedFontEncoding(
+                "Composite font missing embedded SFNT and ToUnicode map".to_string(),
+            );
+        }
+        crate::text::span::TextEditability::EditableNativeText
+    }
+
+    /// Encodes a text string into the font's native character/glyph byte representation.
+    pub fn encode_text(&self, text: &str) -> PdfResult<Vec<u8>> {
+        for ch in text.chars() {
+            if is_complex_script_char(ch) {
+                return Err(crate::error::PdfError::UnsupportedComplexScript(format!(
+                    "Character U+{:04X} requires complex script shaping",
+                    ch as u32
+                )));
+            }
+        }
+
+        let mut output = Vec::with_capacity(text.len().saturating_mul(2));
+        for character in text.chars() {
+            if self.is_composite {
+                if !self.composite_identity_mapping {
+                    return Err(crate::error::PdfError::UnsupportedCompositeMapping(
+                        "composite font requires Identity-H/Identity-V and an identity CIDToGIDMap"
+                            .into(),
+                    ));
+                }
+                let glyph = if let Some(sfnt) = &self.embedded_sfnt {
+                    sfnt.cmap
+                        .as_ref()
+                        .and_then(|cmap| cmap.map_char_to_glyph(character as u32))
+                        .or_else(|| {
+                            self.to_unicode
+                                .as_ref()
+                                .and_then(|tu| tu.reverse_lookup(character))
+                                .map(|c| c as u16)
+                        })
+                } else if let Some(tu) = &self.to_unicode {
+                    tu.reverse_lookup(character).map(|c| c as u16)
+                } else {
+                    None
+                };
+
+                let glyph = glyph.ok_or_else(|| {
+                    crate::error::PdfError::UnsupportedFontEncoding(format!(
+                        "UNREPRESENTABLE glyph U+{:04X} in composite font /{}",
+                        character as u32, self.base_font
+                    ))
+                })?;
+                output.extend_from_slice(&glyph.to_be_bytes());
+            } else {
+                let mut mapped_code: Option<u8> = None;
+                if let Some(tu) = &self.to_unicode {
+                    if let Some(code) = tu.reverse_lookup(character) {
+                        if code <= 255 {
+                            mapped_code = Some(code as u8);
+                        }
+                    }
+                }
+
+                if mapped_code.is_none() {
+                    mapped_code = (0u16..=255)
+                        .find(|&code| self.encoding.decode_byte(code as u8) == character)
+                        .map(|c| c as u8);
+                }
+
+                let code = mapped_code.ok_or_else(|| {
+                    crate::error::PdfError::UnsupportedFontEncoding(format!(
+                        "UNREPRESENTABLE glyph U+{:04X} in font /{}",
+                        character as u32, self.base_font
+                    ))
+                })?;
+
+                if let Some(sfnt) = &self.embedded_sfnt {
+                    let has_glyph = sfnt
+                        .cmap
+                        .as_ref()
+                        .and_then(|cmap| cmap.map_char_to_glyph(character as u32))
+                        .is_some()
+                        || sfnt
+                            .cmap
+                            .as_ref()
+                            .and_then(|cmap| cmap.map_char_to_glyph(code as u32))
+                            .is_some();
+                    if !has_glyph {
+                        return Err(crate::error::PdfError::UnsupportedFontEncoding(format!(
+                            "UNREPRESENTABLE glyph U+{:04X} in embedded font /{}",
+                            character as u32, self.base_font
+                        )));
+                    }
+                }
+                output.push(code);
+            }
+        }
+        Ok(output)
+    }
+
+    /// Calculates the horizontal advance width in text space for a text string.
+    pub fn calculate_text_width(
+        &self,
+        text: &str,
+        font_size: f64,
+        char_spacing: f64,
+        word_spacing: f64,
+        horizontal_scaling: f64,
+    ) -> PdfResult<f64> {
+        let mut total_advance = 0.0;
+        for character in text.chars() {
+            let code = if self.is_composite {
+                let glyph = if let Some(sfnt) = &self.embedded_sfnt {
+                    sfnt.cmap
+                        .as_ref()
+                        .and_then(|cmap| cmap.map_char_to_glyph(character as u32))
+                        .map(u32::from)
+                        .or_else(|| {
+                            self.to_unicode
+                                .as_ref()
+                                .and_then(|tu| tu.reverse_lookup(character))
+                        })
+                } else if let Some(tu) = &self.to_unicode {
+                    tu.reverse_lookup(character)
+                } else {
+                    None
+                };
+                glyph.ok_or_else(|| {
+                    crate::error::PdfError::UnsupportedFontEncoding(format!(
+                        "UNREPRESENTABLE glyph U+{:04X} in font /{}",
+                        character as u32, self.base_font
+                    ))
+                })?
+            } else {
+                let code_opt = self
+                    .to_unicode
+                    .as_ref()
+                    .and_then(|tu| tu.reverse_lookup(character))
+                    .or_else(|| {
+                        (0u16..=255)
+                            .find(|&c| self.encoding.decode_byte(c as u8) == character)
+                            .map(u32::from)
+                    });
+                code_opt.ok_or_else(|| {
+                    crate::error::PdfError::UnsupportedFontEncoding(format!(
+                        "UNREPRESENTABLE glyph U+{:04X} in font /{}",
+                        character as u32, self.base_font
+                    ))
+                })?
+            };
+
+            let width = self
+                .widths
+                .get(&code)
+                .copied()
+                .or_else(|| {
+                    self.embedded_sfnt
+                        .as_ref()
+                        .and_then(|f| f.get_advance_width(code))
+                })
+                .unwrap_or(self.default_width);
+
+            let mut advance = (width / 1000.0) * font_size;
+            advance += char_spacing;
+            if character == ' ' {
+                advance += word_spacing;
+            }
+            advance *= horizontal_scaling / 100.0;
+            total_advance += advance;
+        }
+        Ok(total_advance)
+    }
+}
+
+/// Identifies characters belonging to complex script writing systems that require shaping engines.
+pub fn is_complex_script_char(ch: char) -> bool {
+    let u = ch as u32;
+    matches!(
+        u,
+        0x0600..=0x08FF
+            | 0xFB50..=0xFDFF
+            | 0xFE70..=0xFEFF
+            | 0x0900..=0x0D7F
+            | 0x0E00..=0x0EFF
+            | 0x0F00..=0x109F
+            | 0x1780..=0x17FF
+            | 0x19E0..=0x19FF
+    )
 }
 
 #[cfg(test)]

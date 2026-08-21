@@ -45,4 +45,10 @@ pub enum PdfChange {
         page_index: usize,
         annot_ref: ObjectRef,
     },
+    /// Replaces native existing content-stream text within the bounded v0.13 safety envelope.
+    ReplaceText {
+        page_index: usize,
+        target: crate::mutation::text_edit::TextEditTarget,
+        replacement: String,
+    },
 }

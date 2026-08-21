@@ -33,6 +33,8 @@ export function starpdf_get_page_count(handle: number): number;
 
 export function starpdf_get_security_info(handle: number): any;
 
+export function starpdf_get_text_editability(handle: number, page_index: number, span_id: string): any;
+
 export function starpdf_insert_blank_page(handle: number, page_index: number, width: number, height: number, rotation: number): Uint8Array;
 
 export function starpdf_insert_imported_page(handle: number, imported_bytes: Uint8Array, imported_page_index: number, insert_at: number): Uint8Array;
@@ -46,6 +48,8 @@ export function starpdf_move_page(handle: number, from_index: number, to_index: 
 export function starpdf_open(bytes: Uint8Array): number;
 
 export function starpdf_remove_annotation(handle: number, page_index: number, obj_num: bigint, obj_gen: number): boolean;
+
+export function starpdf_replace_text(handle: number, page_index: number, span_id: string, new_text: string): any;
 
 export function starpdf_search(handle: number, query: string, case_sensitive: boolean): any;
 
@@ -87,6 +91,7 @@ export interface InitOutput {
     readonly starpdf_get_info: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_get_security_info: (a: number) => [number, number, number];
+    readonly starpdf_get_text_editability: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_insert_imported_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_merge_documents: (a: any) => [number, number, number, number];
@@ -94,6 +99,7 @@ export interface InitOutput {
     readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
+    readonly starpdf_replace_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
     readonly starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];

@@ -15,9 +15,40 @@ impl TextExtractor {
         content_bytes: &[u8],
         resources: &PageResources,
     ) -> PdfResult<PageText> {
-        let mut parser = ContentParser::from_bytes(content_bytes);
-        let instructions = parser.parse_instructions()?;
-        Self::extract_from_instructions(page_index, &instructions, resources)
+        Self::extract_from_streams(page_index, &[content_bytes], resources)
+    }
+
+    /// Extracts text spans across multiple content streams (for multi-stream pages).
+    pub fn extract_from_streams(
+        page_index: usize,
+        streams: &[&[u8]],
+        resources: &PageResources,
+    ) -> PdfResult<PageText> {
+        let mut page_text = PageText::new(page_index);
+        let mut graphics_stack: Vec<GraphicsState> = Vec::new();
+        let mut current_graphics = GraphicsState::default();
+        let mut text_state = TextState::default();
+
+        let fallback_font = Font::standard_fallback("Helvetica");
+
+        for (stream_index, &stream_bytes) in streams.iter().enumerate() {
+            let mut parser = ContentParser::from_bytes(stream_bytes);
+            let instructions = parser.parse_instructions()?;
+
+            Self::process_instructions(
+                page_index,
+                stream_index,
+                &instructions,
+                resources,
+                &fallback_font,
+                &mut graphics_stack,
+                &mut current_graphics,
+                &mut text_state,
+                &mut page_text,
+            );
+        }
+
+        Ok(page_text)
     }
 
     /// Extracts text spans from pre-parsed content stream instructions.
@@ -33,7 +64,33 @@ impl TextExtractor {
 
         let fallback_font = Font::standard_fallback("Helvetica");
 
-        for instr in instructions {
+        Self::process_instructions(
+            page_index,
+            0,
+            instructions,
+            resources,
+            &fallback_font,
+            &mut graphics_stack,
+            &mut current_graphics,
+            &mut text_state,
+            &mut page_text,
+        );
+
+        Ok(page_text)
+    }
+
+    fn process_instructions(
+        page_index: usize,
+        stream_index: usize,
+        instructions: &[ContentInstruction],
+        resources: &PageResources,
+        fallback_font: &Font,
+        graphics_stack: &mut Vec<GraphicsState>,
+        current_graphics: &mut GraphicsState,
+        text_state: &mut TextState,
+        page_text: &mut PageText,
+    ) {
+        for (instruction_index, instr) in instructions.iter().enumerate() {
             match instr.operator {
                 ContentOperator::Q => {
                     // Save graphics state
@@ -42,7 +99,7 @@ impl TextExtractor {
                 ContentOperator::QEnd => {
                     // Restore graphics state
                     if let Some(prev) = graphics_stack.pop() {
-                        current_graphics = prev;
+                        *current_graphics = prev;
                     }
                 }
                 ContentOperator::Cm => {
@@ -118,15 +175,19 @@ impl TextExtractor {
                                 .font_name
                                 .as_deref()
                                 .and_then(|name| resources.get_font(name))
-                                .unwrap_or(&fallback_font);
+                                .unwrap_or(fallback_font);
 
                             Self::render_text_bytes(
                                 page_index,
+                                stream_index,
+                                instruction_index,
+                                0,
+                                "Tj",
                                 raw_bytes,
                                 font,
-                                &current_graphics,
-                                &mut text_state,
-                                &mut page_text,
+                                current_graphics,
+                                text_state,
+                                page_text,
                             );
                         }
                     }
@@ -139,26 +200,30 @@ impl TextExtractor {
                                 .font_name
                                 .as_deref()
                                 .and_then(|name| resources.get_font(name))
-                                .unwrap_or(&fallback_font);
+                                .unwrap_or(fallback_font);
 
-                            for item in items {
+                            for (operand_index, item) in items.iter().enumerate() {
                                 match item {
                                     ContentOperand::String(bytes) => {
                                         Self::render_text_bytes(
                                             page_index,
+                                            stream_index,
+                                            instruction_index,
+                                            operand_index,
+                                            "TJ",
                                             bytes,
                                             font,
-                                            &current_graphics,
-                                            &mut text_state,
-                                            &mut page_text,
+                                            current_graphics,
+                                            text_state,
+                                            page_text,
                                         );
                                     }
                                     ContentOperand::Integer(adj) => {
                                         let adj_f = *adj as f64;
-                                        Self::apply_tj_adjustment(adj_f, &mut text_state);
+                                        Self::apply_tj_adjustment(adj_f, text_state);
                                     }
                                     ContentOperand::Real(adj_f) => {
-                                        Self::apply_tj_adjustment(*adj_f, &mut text_state);
+                                        Self::apply_tj_adjustment(*adj_f, text_state);
                                     }
                                     _ => {}
                                 }
@@ -169,12 +234,14 @@ impl TextExtractor {
                 _ => {}
             }
         }
-
-        Ok(page_text)
     }
 
     fn render_text_bytes(
         page_index: usize,
+        stream_index: usize,
+        instruction_index: usize,
+        operand_index: usize,
+        operator_name: &str,
         bytes: &[u8],
         font: &Font,
         graphics: &GraphicsState,
@@ -216,18 +283,46 @@ impl TextExtractor {
         let width = total_width_text_space * scale_x;
         let height = text_state.font_size * scale_y;
 
-        page_text.spans.push(TextSpan::new(
+        let span_id =
+            format!("p{page_index}_s{stream_index}_i{instruction_index}_o{operand_index}");
+        let editability = if text_state.in_text_object {
+            font.check_span_editability(&span_text)
+        } else {
+            crate::text::span::TextEditability::ReadOnlyNativeText(
+                "Text outside BT...ET text block".to_string(),
+            )
+        };
+
+        let is_editable = editability.is_editable();
+        let refusal_reason = editability.reason();
+
+        page_text.spans.push(TextSpan {
             page_index,
-            span_text,
+            text: span_text,
             x,
             y,
             width,
             height,
             rotation,
-            font.name.clone(),
-            text_state.font_size,
+            font_name: font.name.clone(),
+            font_size: text_state.font_size,
             confidence,
-        ));
+            source_object: None,
+            span_id,
+            stream_index,
+            instruction_index,
+            operand_index,
+            operator_name: operator_name.to_string(),
+            font_resource_name: text_state
+                .font_name
+                .clone()
+                .unwrap_or_else(|| font.name.clone()),
+            font_base_name: font.base_font.clone(),
+            original_bytes: bytes.to_vec(),
+            is_editable,
+            editability_status: editability,
+            refusal_reason,
+        });
 
         // Advance text matrix horizontally
         let translation = Matrix2D::translation(total_width_text_space, 0.0);
