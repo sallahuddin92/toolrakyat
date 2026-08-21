@@ -49,11 +49,12 @@ The system explicitly distinguishes between:
 - **Disagreement Reconciliation**: If declared `/Length` diverges by small discrepancy from `endstream` marker, the stream length is reconciled to the verified `endstream` boundary.
 - **Audit**: Logged as `STREAM_LENGTH_RECONCILED`.
 
-### C. Strict MediaBox Inheritance, Derivation & Refusal (`OPTIONAL_ENTRY_DEFAULTED`)
-- **Direct Geometry**: If `/MediaBox` exists directly on the page dictionary, it is validated and used.
-- **Inherited Geometry**: If missing, ancestor `/Pages` nodes are traversed up to `MAX_PAGE_TREE_DEPTH` (32) to resolve inherited `/MediaBox`.
-- **Derived Geometry**: If absent from the page and all ancestors, geometry is derived from unambiguous existing box attributes in order: `/CropBox` $\to$ `/TrimBox` $\to$ `/BleedBox` $\to$ `/ArtBox`.
-- **Refusal (No Silent Assumption)**: If no geometry exists (no direct, inherited, or derivable box), operations fail with typed error `PdfError::PageOperation("page has no direct, inherited, or derivable geometry")`. StarPDF **never** silently defaults missing geometry to US Letter without specification proof.
+### C. Strict MediaBox Inheritance & Normative Refusal (`OPTIONAL_ENTRY_DEFAULTED`)
+- **Direct Geometry**: If `/MediaBox` exists directly on the page dictionary, it is validated and used (`DIRECT`).
+- **Inherited Geometry**: If missing, ancestor `/Pages` nodes are traversed up to `MAX_PAGE_TREE_DEPTH` (32) to resolve inherited `/MediaBox` (`INHERITED`).
+- **No Reverse Derivation**: Under ISO 32000 normative semantics, `/MediaBox` is the foundational required boundary. It must **NOT** be reverse-derived from optional boxes (`/CropBox`, `/TrimBox`, `/BleedBox`, `/ArtBox`).
+- **CropBox Default**: Per ISO 32000-1 §14.11.2, `/CropBox` defaults to `/MediaBox` once a valid `/MediaBox` is established.
+- **Deterministic Refusal**: If no valid direct or inherited `/MediaBox` exists anywhere in the hierarchy, operations fail with typed error `PdfError::PageOperation("page has no direct or inherited /MediaBox")`. StarPDF **never** silently guesses or assumes US Letter.
 - **Other Defaulting**: Missing `/Resources` defaults to empty dictionary `<< >>`; missing `/Ff` field flags defaults to `0`; missing `/Rotate` defaults to `0`.
 - **Audit**: Logged as `OPTIONAL_ENTRY_DEFAULTED`.
 
@@ -86,13 +87,14 @@ The system explicitly distinguishes between:
 11. Preceding UTF-8 BOM / Header Junk               : RECOVERED_PASS (4/4)
 12. Stream Length Disagreement                      : RECOVERED_PASS (4/4)
 13. Startxref Offset Drift (+/- 64 B)               : RECOVERED_PASS (4/4)
-14. MediaBox Derivation (CropBox/TrimBox Fallback)  : RECOVERED_PASS (4/4)
-15. Missing Geometry (No Box Anywhere)              : TYPED_REFUSED (4/4)
-16. Encrypted Documents (Mutation Attempt)          : TYPED_UNSUPPORTED (Refusal)
-17. Non-PDF / Corrupted Files                       : MALFORMED_REFUSED (Deterministic)
+14. Missing Direct MediaBox (Ancestor Inherited)    : FULL_PASS (4/4)
+15. CropBox-Only / TrimBox-Only (Missing MediaBox)  : TYPED_REFUSED (4/4)
+16. Missing Geometry (No Box Anywhere)              : TYPED_REFUSED (4/4)
+17. Encrypted Documents (Mutation Attempt)          : TYPED_UNSUPPORTED (Refusal)
+18. Non-PDF / Corrupted Files                       : MALFORMED_REFUSED (Deterministic)
 ================================================================
-TOTAL WORKLOADS EVALUATED: 96
-PASSED / REFUSED AS SPECIFIED: 96/96 (100.0%)
+TOTAL WORKLOADS EVALUATED: 100
+PASSED / REFUSED AS SPECIFIED: 100/100 (100.0%)
 ================================================================
 ```
 

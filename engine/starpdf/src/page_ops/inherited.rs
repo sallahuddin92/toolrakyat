@@ -77,22 +77,19 @@ pub(crate) fn materialize_page_inheritance(
         }
     }
 
-    // Strict geometry policy:
-    // A) If /MediaBox exists on page -> use it.
-    // B) Else walk valid inherited /Pages ancestors -> already done above.
-    // C) Else derive geometry if /CropBox, /TrimBox, /BleedBox, or /ArtBox is present and valid.
-    // D) Otherwise fail with typed refusal (no silent Letter assumption).
-    if !page_dict.contains_key("MediaBox") {
-        for fallback_box_key in ["CropBox", "TrimBox", "BleedBox", "ArtBox"] {
-            if let Some(box_obj) = page_dict.get(fallback_box_key).cloned() {
-                validate_box(fallback_box_key, &box_obj)?;
-                page_dict.insert("MediaBox".to_string(), box_obj);
-                break;
-            }
+    // ISO 32000 Normative Rule:
+    // 1. /MediaBox is REQUIRED on page or inherited from /Pages ancestor.
+    // 2. /MediaBox must NOT be reverse-derived from /CropBox, /TrimBox, /BleedBox, or /ArtBox.
+    // 3. If no direct/inherited /MediaBox exists, fail with typed error.
+    validate_page_geometry(&page_dict, limits)?;
+
+    // Specification default: /CropBox defaults to /MediaBox if not explicitly set
+    if !page_dict.contains_key("CropBox") {
+        if let Some(media_box) = page_dict.get("MediaBox").cloned() {
+            page_dict.insert("CropBox".to_string(), media_box);
         }
     }
 
-    validate_page_geometry(&page_dict, limits)?;
     validate_page_resources(&page_dict, store, limits)?;
     validate_page_annotations(&page_dict, store, limits)?;
     Ok(page_dict)

@@ -438,93 +438,119 @@ fn test_compatibility_scorecard_evaluation() {
 
 #[test]
 fn test_mediabox_strict_inheritance_derivation_and_refusal() {
-    // 1. Direct MediaBox
-    let direct_pdf = create_test_pdf_with_producer("Direct MediaBox", b"");
-    let mut doc = PdfDocument::from_bytes(&direct_pdf).expect("open direct");
-    assert_eq!(doc.page_count().expect("count"), 1);
+    // Helper to generate test PDF with specified page box entries
+    fn make_page_box_pdf(parent_box: &str, page_box: &str) -> Vec<u8> {
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let mut offsets = vec![0usize];
 
-    // 2. Missing direct MediaBox, but has CropBox -> Derived
-    let mut crop_pdf = b"%PDF-1.7\n".to_vec();
-    let mut offsets = vec![0usize];
-    offsets.push(crop_pdf.len());
-    crop_pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-    offsets.push(crop_pdf.len());
-    crop_pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-    offsets.push(crop_pdf.len());
-    crop_pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /CropBox [0 0 500 700] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
-    let c = "BT\n/F1 12 Tf\n50 600 Td (CropBox Derived) Tj\nET\n";
-    offsets.push(crop_pdf.len());
-    crop_pdf.extend_from_slice(
-        format!(
-            "4 0 obj\n<< /Length {} >>\nstream\n{c}endstream\nendobj\n",
-            c.len()
-        )
-        .as_bytes(),
-    );
-    offsets.push(crop_pdf.len());
-    crop_pdf.extend_from_slice(
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
-    let xref_off = crop_pdf.len();
-    crop_pdf
-        .extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
-    for off in offsets.iter().skip(1) {
-        crop_pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            format!("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 {parent_box} >>\nendobj\n")
+                .as_bytes(),
+        );
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("3 0 obj\n<< /Type /Page /Parent 2 0 R {page_box} /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n").as_bytes());
+
+        let c = "BT\n/F1 12 Tf\n50 600 Td (Geometry Test) Tj\nET\n";
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            format!(
+                "4 0 obj\n<< /Length {} >>\nstream\n{c}endstream\nendobj\n",
+                c.len()
+            )
+            .as_bytes(),
+        );
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        );
+
+        let xref_off = pdf.len();
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes(),
+        );
+        for off in offsets.iter().skip(1) {
+            pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n",
+                offsets.len()
+            )
+            .as_bytes(),
+        );
+
+        pdf
     }
-    crop_pdf.extend_from_slice(
-        format!(
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n",
-            offsets.len()
-        )
-        .as_bytes(),
-    );
 
-    let mut crop_doc = PdfDocument::from_bytes(&crop_pdf).expect("open cropbox derived");
-    assert_eq!(crop_doc.page_count().expect("count"), 1);
+    // 1. Direct MediaBox -> PASS
+    let direct_pdf = make_page_box_pdf("", "/MediaBox [0 0 612 792]");
+    let mut doc1 = PdfDocument::from_bytes(&direct_pdf).expect("open direct");
+    assert!(doc1.extract_pages(&[0]).is_ok());
 
-    // 3. Missing direct MediaBox, missing ancestor MediaBox, missing Crop/Trim/Bleed/ArtBox -> Refused!
-    let mut no_geom_pdf = b"%PDF-1.7\n".to_vec();
-    let mut ng_offsets = vec![0usize];
-    ng_offsets.push(no_geom_pdf.len());
-    no_geom_pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-    ng_offsets.push(no_geom_pdf.len());
-    no_geom_pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-    ng_offsets.push(no_geom_pdf.len());
-    // Page with NO MediaBox and NO other box
-    no_geom_pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
-    ng_offsets.push(no_geom_pdf.len());
-    no_geom_pdf.extend_from_slice(
-        format!(
-            "4 0 obj\n<< /Length {} >>\nstream\n{c}endstream\nendobj\n",
-            c.len()
-        )
-        .as_bytes(),
-    );
-    ng_offsets.push(no_geom_pdf.len());
-    no_geom_pdf.extend_from_slice(
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
-    let ng_xref = no_geom_pdf.len();
-    no_geom_pdf.extend_from_slice(
-        format!("xref\n0 {}\n0000000000 65535 f \n", ng_offsets.len()).as_bytes(),
-    );
-    for off in ng_offsets.iter().skip(1) {
-        no_geom_pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
-    }
-    no_geom_pdf.extend_from_slice(
-        format!(
-            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{ng_xref}\n%%EOF\n",
-            ng_offsets.len()
-        )
-        .as_bytes(),
-    );
+    // 2. Inherited MediaBox from /Pages parent -> PASS
+    let inherited_pdf = make_page_box_pdf("/MediaBox [0 0 612 792]", "");
+    let mut doc2 = PdfDocument::from_bytes(&inherited_pdf).expect("open inherited");
+    assert!(doc2.extract_pages(&[0]).is_ok());
 
-    let mut no_geom_doc = PdfDocument::from_bytes(&no_geom_pdf).expect("open doc without box");
-    // Attempting extraction/materialization fails with typed error because page has no geometry
-    let extract_err = no_geom_doc.extract_pages(&[0]);
+    // 3. CropBox missing with MediaBox present -> CropBox defaults to MediaBox -> PASS
+    let crop_missing_pdf = make_page_box_pdf("", "/MediaBox [0 0 612 792]");
+    let mut doc3 = PdfDocument::from_bytes(&crop_missing_pdf).expect("open crop missing");
+    let extracted_bytes = doc3.extract_pages(&[0]).expect("extract page");
+    let mut extracted_doc = PdfDocument::from_bytes(&extracted_bytes).expect("reopen extracted");
+    assert_eq!(extracted_doc.page_count().expect("count"), 1);
+
+    // 4. CropBox present but MediaBox absent everywhere -> REFUSE (MediaBox must not be reverse-inferred from CropBox)
+    let crop_only_pdf = make_page_box_pdf("", "/CropBox [0 0 500 700]");
+    let mut doc4 = PdfDocument::from_bytes(&crop_only_pdf).expect("open crop only");
     assert!(
-        extract_err.is_err(),
-        "Must refuse page with missing geometry without silent Letter assumption"
+        doc4.extract_pages(&[0]).is_err(),
+        "Must refuse CropBox-only page without MediaBox"
+    );
+
+    // 5. TrimBox present but MediaBox absent -> REFUSE
+    let trim_only_pdf = make_page_box_pdf("", "/TrimBox [0 0 400 600]");
+    let mut doc5 = PdfDocument::from_bytes(&trim_only_pdf).expect("open trim only");
+    assert!(
+        doc5.extract_pages(&[0]).is_err(),
+        "Must refuse TrimBox-only page without MediaBox"
+    );
+
+    // 6. BleedBox present but MediaBox absent -> REFUSE
+    let bleed_only_pdf = make_page_box_pdf("", "/BleedBox [0 0 450 650]");
+    let mut doc6 = PdfDocument::from_bytes(&bleed_only_pdf).expect("open bleed only");
+    assert!(
+        doc6.extract_pages(&[0]).is_err(),
+        "Must refuse BleedBox-only page without MediaBox"
+    );
+
+    // 7. ArtBox present but MediaBox absent -> REFUSE
+    let art_only_pdf = make_page_box_pdf("", "/ArtBox [0 0 350 550]");
+    let mut doc7 = PdfDocument::from_bytes(&art_only_pdf).expect("open art only");
+    assert!(
+        doc7.extract_pages(&[0]).is_err(),
+        "Must refuse ArtBox-only page without MediaBox"
+    );
+
+    // 8. Malformed MediaBox (non-array or wrong length) -> REFUSE
+    let malformed_box_pdf = make_page_box_pdf("", "/MediaBox 12345");
+    let mut doc8 = PdfDocument::from_bytes(&malformed_box_pdf).expect("open malformed box");
+    assert!(
+        doc8.extract_pages(&[0]).is_err(),
+        "Must refuse malformed MediaBox"
+    );
+
+    // 9. No boxes anywhere -> REFUSE (no silent Letter assumption)
+    let no_box_pdf = make_page_box_pdf("", "");
+    let mut doc9 = PdfDocument::from_bytes(&no_box_pdf).expect("open no box");
+    assert!(
+        doc9.extract_pages(&[0]).is_err(),
+        "Must refuse page without any MediaBox"
     );
 }
 
