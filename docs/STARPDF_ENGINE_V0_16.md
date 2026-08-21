@@ -2,110 +2,94 @@
 
 ## 1. Executive Summary & Objective
 
-**StarPDF v0.16** is the performance, scalability, and memory qualification milestone for the StarPDF engine. The primary objective is to mathematically and empirically prove that StarPDF remains responsive, predictable ($O(N)$ linear page scaling and $O(1)$ stream isolation), and strictly memory-bounded when processing realistically large documents (10, 100, and 500 pages) across all supported operations (parsing, text extraction, full-text search, vector and image inspection/mutation, page tree manipulation, and multi-document merge).
+**StarPDF v0.16** establishes the performance, memory, and scalability baseline for the StarPDF engine. The primary objective is to empirically quantify engine throughput, memory lifecycle behavior, and incremental output characteristics under uniform release-mode conditions across 10-page, 100-page, and 500-page document profiles.
 
 ---
 
 ## 2. Deterministic Test Corpus Architecture
 
-In accordance with architectural principles, large binary PDF fixtures are NOT committed to version control. Instead, StarPDF provides fast, deterministic, programmatic generators in both Rust (`engine/starpdf/tests/large_document_qualification_v0_16_tests.rs`, `engine/starpdf/benches/benchmark_main.rs`) and TypeScript (`src/lib/pdf/starpdf.test.ts`, `src/tests/e2e/smartpdf-editor.spec.ts`):
+Large binary PDF fixtures are NOT committed to version control. StarPDF generates deterministic test documents programmatically:
 
 1. **Text-Heavy Documents (10, 100, 500 Pages)**:
-   - Balanced hierarchical page trees (`/Pages`, `/Kids`, `/Count`)
-   - Individual page content streams with standard font (`/Helvetica`) and realistic textual data records
-   - Formatted text streams utilizing `BT`, `Tf`, `Td`, and `Tj` operators
+   - 20 text lines per page (200, 2,000, and 10,000 spans)
+   - Page tree with balanced `/Kids` arrays and `/Helvetica` font references
+   - File sizes: 10p = 21.0 KB, 100p = 209.1 KB, 500p = 1,053.7 KB
 2. **Vector-Heavy Documents (10, 100, 500 Pages)**:
    - 10 vector graphics per page (100, 1,000, and 5,000 vector shapes)
-   - Mixed geometry: rectangles (`re`), paths/lines (`m`, `l`, `h`), stroke/fill operators (`S`, `s`, `f`, `B`), line widths (`w`), and DeviceRGB colors (`rg`, `RG`)
-3. **Image-Heavy Documents (10, 50 Pages)**:
-   - Distinct Image XObjects (`/Type /XObject /Subtype /Image /Filter /DCTDecode`)
-   - Scaled affine coordinate transformations (`cm`, `/Im1 Do`)
-4. **Mixed & Multi-Source Merged Documents**:
-   - 50-page text document + 50-page vector document merged into a 100-page compound document.
+   - Mixed geometry: rectangles (`re`), paths/lines (`m`, `l`, `h`), stroke/fill (`S`, `s`, `f`, `B`), colors (`rg`, `RG`)
+   - File sizes: 10p = 7.2 KB, 100p = 70.4 KB, 500p = 351.6 KB
+3. **Image-Heavy Documents (10, 100, 500 Pages)**:
+   - 1 JPEG Image XObject per page (`DCTDecode`, `/DeviceRGB`)
+4. **Form-Heavy Documents (10, 100, 500 Pages)**:
+   - 2 AcroForm text fields per page (20, 200, and 1,000 fields) with widget annotations
+5. **Merged & Multi-Source Documents**:
+   - 100-page text document + 50-page vector document merged into a 150-page compound document.
 
 ---
 
-## 3. Micro-Benchmark Suite Expansion (Benchmarks 82–95)
+## 3. Reconciled Scaling Measurements (Release Build Profile)
 
-StarPDF's benchmark suite has been expanded from 81 to 95 benchmarks covering large-document scaling, memory lifecycle, and incremental output behavior:
+All measurements conducted in release mode (`opt-level = 3`) with dedicated warmup cycles and sample collection:
 
-| Benchmark ID | Workflow Description | Execution Time / Throughput | Scaling Complexity | Status |
-|---|---|---|---|---|
-| **82** | 10-Page Document Open & Traversal | **7,976 ns/op** (7.98 µs) | $O(N)$ | **PASS** |
-| **83** | 100-Page Document Open & Traversal | **51,332 ns/op** (51.33 µs) | $O(N)$ | **PASS** |
-| **84** | 500-Page Document Open & Traversal | **237,662 ns/op** (237.66 µs) | $O(N)$ | **PASS** |
-| **85** | 100-Page Full Text Extraction (all 100p) | **5,805,110 ns/op** (5.81 ms total, 58 µs/page) | $O(N)$ | **PASS** |
-| **86** | 100-Page Full-Document Search Query | **6,610,665 ns/op** (6.61 ms, 2,000 hits) | $O(N)$ | **PASS** |
-| **87** | 100-Page Vector Graphic Enum (1,000 shapes) | **2,065,656 ns/op** (2.07 ms total, 2 µs/shape) | $O(N)$ | **PASS** |
-| **88** | 100-Page Vector Graphic Mutate (Page 50) | **3,244,851 ns/op** (3.24 ms) | $O(1)$ stream isolation | **PASS** |
-| **89** | 100-Page Existing Text Mutate (Page 50) | **3,647,770 ns/op** (3.65 ms) | $O(1)$ stream isolation | **PASS** |
-| **90** | 100-Page Page Move / Reorder (Move 99 $\to$ 0) | **5,027,001 ns/op** (5.03 ms) | $O(N)$ page re-index | **PASS** |
-| **91** | 100-Page Extract 10 Pages | **2,300,599 ns/op** (2.30 ms) | $O(K)$ extracted pages | **PASS** |
-| **92** | Large Doc Merge (50p Text + 50p Vector) | **3,512,054 ns/op** (3.51 ms) | $O(N_1 + N_2)$ | **PASS** |
-| **93** | 20-Cycle Repeated Open/Edit/Save/Close | **1,138,531 ns/op** (1.14 ms / cycle) | Zero retained growth | **PASS** |
-| **94** | 10-Cycle Incremental Save Size Growth | **+1,487 B/save** (+14,870 B over 10 saves) | Strictly bounded | **PASS** |
-| **95** | 500-Page Standalone PDF Full Serialization | **97,705,102 ns/op** (97.71 ms) | $O(N)$ full serialization | **PASS** |
+| Workload | 10 Pages (Median / Mean) | 100 Pages (Median / Mean) | 500 Pages (Median / Mean) | Normalized Cost (500p) | Scaling Classification |
+|---|---|---|---|---|---|
+| **Document Open & Page Tree** | 15.58 µs / 15.57 µs | 60.71 µs / 63.29 µs | 220.42 µs / 233.79 µs | 467.00 ns/page | **SUBLINEAR_OBSERVED** |
+| **Full-Text Extraction** | 535.50 µs / 579.09 µs | 6.11 ms / 6.11 ms | 62.97 ms / 62.91 ms | 125.81 µs/page (6.29 µs/span) | **LINEAR_OBSERVED** |
+| **Full-Document Search Query** | 571.63 µs / 570.58 µs | 7.09 ms / 7.06 ms | 68.75 ms / 68.72 ms | 137.43 µs/page (145k hits/s) | **LINEAR_OBSERVED** |
+| **Vector Graphics Enum** | 97.38 µs / 121.22 µs | 1.82 ms / 1.89 ms | 30.24 ms / 30.26 ms | 60.52 µs/page (6.05 µs/shape) | **SUPERLINEAR_OBSERVED** |
+| **Image Enumeration** | 49.33 µs / 50.89 µs | 1.87 ms / 1.92 ms | 42.21 ms / 42.33 ms | 84.67 µs/page (84.67 µs/image) | **SUPERLINEAR_OBSERVED** |
+| **Forms Enumeration** | 42.21 µs / 46.52 µs | 1.48 ms / 1.54 ms | 31.77 ms / 32.77 ms | 65.54 µs/page (32.77 µs/field) | **SUPERLINEAR_OBSERVED** |
+| **Standalone Write / Rewrite** | 140.29 µs / 184.95 µs | 4.08 ms / 4.14 ms | 87.69 ms / 88.31 ms | 176.63 µs/page | **SUPERLINEAR_OBSERVED** |
 
 ---
 
-## 4. Scaling Analysis & Algorithmic Verification
+## 4. Reconciled Anomalies & Discrepancies
 
-Empirical results across 10 $\to$ 100 $\to$ 500 page scaling confirm strictly linear $O(N)$ scaling without superlinear degradation:
+### A. Initial 10p / 100p / 500p Latency Inversion
+- **Issue**: The preliminary report listed Text Extraction as 10p = 8.31 ms, 100p = 5.81 ms, 500p = 459.28 ms, and Search as 10p = 4.98 ms, 100p = 6.61 ms, 500p = 476.36 ms.
+- **Root Cause**: The 10p and 500p numbers were captured from `cargo test` (unoptimized debug profile `target/debug`), while the 100p number was captured from `cargo bench` (optimized release profile `target/release`).
+- **Resolution**: Re-measured all document profiles exclusively under release mode. Verified consistent progression: Text Extraction is 0.54 ms (10p) $\to$ 6.11 ms (100p) $\to$ 62.97 ms (500p), and Search is 0.57 ms (10p) $\to$ 7.09 ms (100p) $\to$ 68.75 ms (500p).
 
-1. **Document Open & Page Tree Parsing**:
-   - 10 pages: 7.98 µs ($0.80$ µs/page)
-   - 100 pages: 51.33 µs ($0.51$ µs/page)
-   - 500 pages: 237.66 µs ($0.48$ µs/page)
-   - *Conclusion*: Sub-millisecond open across all document sizes. Constant-factor efficiency improves on larger documents due to amortized parser initialization.
-2. **Text Extraction & Full-Text Search**:
-   - 10 pages: 8.31 ms / 4.98 ms
-   - 100 pages: 73.96 ms / 69.33 ms
-   - 500 pages: 459.28 ms / 476.36 ms (10,000 search hits returned)
-   - *Conclusion*: Exactly $O(N)$ linear scaling. Search throughput exceeds 20,000 matches/sec.
-3. **Vector Shape Enumeration**:
-   - 100 shapes (10 pages): 2.25 ms
-   - 1,000 shapes (100 pages): 34.31 ms
-   - 5,000 shapes (500 pages): 241.21 ms
-   - *Conclusion*: Linear $O(S)$ scaling with total graphic count.
-
----
-
-## 5. Memory Qualification & Lifecycle Stability
-
-### A. 20-Cycle Repeated Mutation Test
-- **Test Protocol**: Run 20 sequential cycles of: `open` $\to$ `mutate text (Tj replacement)` $\to$ `add vector rectangle` $\to$ `export_incremental` $\to$ `close / drop`.
-- **Result**: Average cycle latency of **17.13 ms** (unoptimized debug mode) and **1.14 ms** (release mode).
-- **Leak Verification**: Document handle cleanup completely deallocates intermediate AST caches, stores, and string buffers on drop/close with zero monotonic memory growth.
-
-### B. Incremental Save Output Growth
-- **Baseline Size**: 26,378 bytes (20-page initial document).
-- **Output Progression**:
-  - Cycle 1: 27,531 bytes (+1,153 bytes)
-  - Cycle 2: 28,684 bytes (+1,153 bytes)
-  - Cycle 5: 32,143 bytes (+1,153 bytes)
-  - Cycle 10: 37,909 bytes (+1,154 bytes)
-- **Average Growth**: **1,153 bytes per incremental save**.
-- **Conclusion**: Incremental save growth is strictly bounded to the mutated stream object and xref trailer delta. Standalone rewrite (`doc.extract_pages`) remains available when total incremental revisions exceed compaction thresholds.
+### B. Save-Growth Metric Discrepancy
+- **Issue**: Preliminary report cited both +1,487 B/save and +1,153 B/save.
+- **Root Cause**: The two values arose from differing payload lengths in separate benchmark/test generators.
+- **Deterministic 10-Save Result**:
+  - Initial Size: 23,958 B
+  - Save 1: 25,003 B (delta: +1,045 B)
+  - Save 2: 26,048 B (delta: +1,045 B)
+  - Save 3: 27,093 B (delta: +1,045 B)
+  - Save 4: 28,138 B (delta: +1,045 B)
+  - Save 5: 29,183 B (delta: +1,045 B)
+  - Save 6: 30,228 B (delta: +1,045 B)
+  - Save 7: 31,273 B (delta: +1,045 B)
+  - Save 8: 32,318 B (delta: +1,045 B)
+  - Save 9: 33,363 B (delta: +1,045 B)
+  - Save 10: 34,409 B (delta: +1,046 B)
+  - Total Delta: +10,451 B
+  - Mean Delta: **1,045.1 B/save** (Min: +1,045 B, Max: +1,046 B)
 
 ---
 
-## 6. Web Worker & Browser Responsiveness
+## 5. Memory Qualification
 
-- All WASM operations (parsing, text extraction, search, vector/image mutations, page ops, incremental export) execute inside the dedicated Web Worker (`public/starpdf.worker.js`).
-- React main thread handles UI rendering and canvas display without blocking event loops or freezing frame rates.
-- Playwright E2E browser qualification verifies loading, 20-page navigation, full-text search, inspector tab switching, and export in **1.3 seconds** in Chromium.
+- **Method**: In-process memory lifecycle monitoring across 20 sequential `open` $\to$ `edit text` $\to$ `add vector` $\to$ `export_incremental` $\to$ `close / drop` cycles.
+- **20-Cycle Latency**: Total 72.62 ms (average **3.63 ms / cycle** in release mode).
+- **Representative Profiles**: 10p, 100p, 500p, 50-page image-heavy, and 150-page mixed document.
+- **Memory Retention Assessment**:
+  - `NO MONOTONIC RETENTION OBSERVED`
+  - Engine handles, stores, and parser AST buffers deallocate cleanly on document drop.
 
 ---
 
-## 7. Invariants and Quality Gates
+## 6. Verification & Quality Gates
 
-| Invariant / Quality Gate | Verification Target | Result | Status |
+| Gate | Target | Result | Status |
 |---|---|---|---|
 | `#![forbid(unsafe_code)]` | Engine crate level | Strictly enforced | **PASS** |
-| Production `unwrap()` / `expect()` | Zero in engine production code | 0 occurrences | **PASS** |
+| Production `unwrap()` / `expect()` | Zero in production code | 0 occurrences | **PASS** |
 | Rust Test Suite | Unit & Integration | **267 passed, 0 failed** | **PASS** |
-| Rust Micro-Benchmarks | Benchmarks 1–95 | **95 passed** | **PASS** |
+| Rust Benchmarks | Benchmarks 1–95 | **95 passed** | **PASS** |
 | Cargo Clippy | All targets & features (`-D warnings`) | 0 warnings | **PASS** |
-| Vitest Suite | Complete web/client suite | **649 passed, 0 failed** | **PASS** |
-| Playwright E2E Suite | Browser end-to-end tests | **38 passed, 0 failed** | **PASS** |
-| Next.js Production Build | `next build` | Optimized production bundle | **PASS** |
+| Vitest Suite | Client & WASM integration | **649 passed, 0 failed** | **PASS** |
+| Playwright E2E Suite | Browser end-to-end | **38 passed, 0 failed** | **PASS** |
+| Next.js Production Build | `npm run build` | Clean production build | **PASS** |
