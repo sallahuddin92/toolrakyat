@@ -75,6 +75,10 @@ export function SmartPdfEditor() {
   // Unsaved changes confirmation
   const [showConfirmOpenModal, setShowConfirmOpenModal] = useState<boolean>(false);
 
+  // Layout Panel Visibility (Desktop Workspace)
+  const [isThumbnailsOpen, setIsThumbnailsOpen] = useState<boolean>(true);
+  const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(true);
+
   // StarPDF search state
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchResults, setSearchResults] = useState<StarPdfSearchResult[]>([]);
@@ -948,7 +952,7 @@ export function SmartPdfEditor() {
 
   return (
     <div
-      className="flex flex-col h-[820px] rounded-3xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs relative select-none"
+      className="flex flex-col h-[calc(100vh-8rem)] min-h-[680px] max-h-[1200px] rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs relative select-none"
       data-testid="smartpdf-editor-workspace"
     >
       {securityInfo && securityInfo.signature_state !== "UNSIGNED" ? (
@@ -991,6 +995,10 @@ export function SmartPdfEditor() {
         onShowInfo={() => setShowInfoModal(true)}
         onOpenNewFile={handleOpenNewFileClick}
         onMergeClick={() => mergeInputRef.current?.click()}
+        isThumbnailsOpen={isThumbnailsOpen}
+        onToggleThumbnails={() => setIsThumbnailsOpen(!isThumbnailsOpen)}
+        isInspectorOpen={isInspectorOpen}
+        onToggleInspector={() => setIsInspectorOpen(!isInspectorOpen)}
       />
 
       {/* Page Operations Rail / Actions */}
@@ -999,13 +1007,22 @@ export function SmartPdfEditor() {
         pageCount={inspectionResult.metadata.pageCount}
         selectedCount={selectedPages.size}
         isProcessing={isPageProcessing}
-        onDelete={() =>
+        onDelete={() => {
+          if (inspectionResult.metadata.pageCount <= 1) {
+            toast.error("Cannot delete the only page in a document.");
+            return;
+          }
+          const targetNextPage =
+            currentPage >= inspectionResult.metadata.pageCount
+              ? Math.max(1, inspectionResult.metadata.pageCount - 1)
+              : currentPage;
+
           void applyPageOperation(
             { type: "deletePage", pageIndex: currentPage - 1 },
-            Math.min(currentPage, inspectionResult.metadata.pageCount - 1),
+            targetNextPage,
             "Page deleted.",
-          )
-        }
+          );
+        }}
         onMoveLeft={() =>
           void applyPageOperation(
             { type: "movePage", fromIndex: currentPage - 1, toIndex: currentPage - 2 },
@@ -1062,18 +1079,20 @@ export function SmartPdfEditor() {
       {/* Main Workspace: Thumbnails + Viewport Canvas + Inspector */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Thumbnail Rail */}
-        <PdfThumbnailRail
-          pdfDocument={pdfProxy}
-          pageCount={inspectionResult.metadata.pageCount}
-          currentPage={currentPage}
-          onPageSelect={(p) => {
-            setCurrentPage(p);
-            setSelectedItem(null);
-          }}
-          selectedPages={selectedPages}
-          onToggleSelection={handleTogglePageSelection}
-          className="hidden md:block"
-        />
+        {isThumbnailsOpen && (
+          <PdfThumbnailRail
+            pdfDocument={pdfProxy}
+            pageCount={inspectionResult.metadata.pageCount}
+            currentPage={currentPage}
+            onPageSelect={(p) => {
+              setCurrentPage(p);
+              setSelectedItem(null);
+            }}
+            selectedPages={selectedPages}
+            onToggleSelection={handleTogglePageSelection}
+            className="hidden md:block"
+          />
+        )}
 
         {/* Center Viewport Canvas Surface */}
         <main
@@ -1125,28 +1144,30 @@ export function SmartPdfEditor() {
         </main>
 
         {/* Right Form Fields, Text, Image & Annotation Inspector */}
-        <PdfFormInspector
-          fields={inspectionResult.fields}
-          fieldValues={fieldValues}
-          onFieldValueChange={handleFieldValueChange}
-          onResetForm={handleResetForm}
-          isModified={isModified}
-          textSpans={pageTextSpans}
-          onReplaceText={handleReplaceExistingText}
-          images={pageImages}
-          onReplaceImage={handleReplaceImage}
-          onAddImage={handleAddImage}
-          onRemoveImage={handleRemoveImage}
-          graphics={pageGraphics}
-          onUpdateGraphic={handleUpdateGraphic}
-          onAddRectangle={handleAddRectangle}
-          onAddLine={handleAddLine}
-          onDeleteGraphic={handleDeleteGraphic}
-          annotations={inspectionResult.annotations}
-          annotationValues={annotationValues}
-          onAnnotationChange={handleAnnotationChange}
-          className="hidden lg:flex"
-        />
+        {isInspectorOpen && (
+          <PdfFormInspector
+            fields={inspectionResult.fields}
+            fieldValues={fieldValues}
+            onFieldValueChange={handleFieldValueChange}
+            onResetForm={handleResetForm}
+            isModified={isModified}
+            textSpans={pageTextSpans}
+            onReplaceText={handleReplaceExistingText}
+            images={pageImages}
+            onReplaceImage={handleReplaceImage}
+            onAddImage={handleAddImage}
+            onRemoveImage={handleRemoveImage}
+            graphics={pageGraphics}
+            onUpdateGraphic={handleUpdateGraphic}
+            onAddRectangle={handleAddRectangle}
+            onAddLine={handleAddLine}
+            onDeleteGraphic={handleDeleteGraphic}
+            annotations={inspectionResult.annotations}
+            annotationValues={annotationValues}
+            onAnnotationChange={handleAnnotationChange}
+            className="flex"
+          />
+        )}
       </div>
 
       {/* Document Properties Modal */}

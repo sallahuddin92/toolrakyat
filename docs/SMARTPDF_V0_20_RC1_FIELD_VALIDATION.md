@@ -157,14 +157,16 @@ All documents are evaluated locally without remote network uploads. Document ide
 
 ## 10. Issue Classification & Triage
 
-| Finding ID | Document ID | Operation | Observed Behavior | Expected Behavior | Classification |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `RC1-001` | `REALPDF-031` / `032` | Open Encrypted | Typed refusal dialog | Refuse encrypted PDF with clear message | `UNSUPPORTED_BY_DESIGN` |
-| `RC1-002` | `REALPDF-033` | Open Malformed | Typed invalid header refusal | Refuse corrupt PDF safely | `UNSUPPORTED_BY_DESIGN` |
-| `RC1-003` | `REALPDF-001` / `005` | Text Edit on Subset Font | Typed `UNSUPPORTED_FONT_ENCODING` | Safely refuse unrepresentable glyph mutation | `UNSUPPORTED_BY_DESIGN` |
+| Finding ID | Document ID | Operation | Observed Behavior | Expected Behavior | Classification | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `RC1-001` | `REALPDF-031` / `032` | Open Encrypted | Typed refusal dialog | Refuse encrypted PDF with clear message | `UNSUPPORTED_BY_DESIGN` | Expected |
+| `RC1-002` | `REALPDF-033` | Open Malformed | Typed invalid header refusal | Refuse corrupt PDF safely | `UNSUPPORTED_BY_DESIGN` | Expected |
+| `RC1-003` | `REALPDF-001` / `005` | Text Edit on Subset Font | Typed `UNSUPPORTED_FONT_ENCODING` | Safely refuse unrepresentable glyph mutation | `UNSUPPORTED_BY_DESIGN` | Expected |
+| `RC1-004` | `REALPDF-028` (Multipage) | Delete Page | Canvas blurred, loading spinner stuck, page count not decremented | Mutation completes, resulting bytes reloaded, page count updated, canvas re-rendered, loading cleared | `BLOCKER` | **Fixed & Verified** |
+| `RC1-005` | Multiple Documents | Multipage Navigation / Workspace UX | Restricted 2/3 width column with fixed height and permanent privacy sidebar | Full-height production document workspace, collapsible thumbnail rail, collapsible inspector, compact privacy status | `IMPORTANT` | **Fixed & Verified** |
 
-- **BLOCKERS**: 0
-- **IMPORTANT**: 0
+- **BLOCKERS**: 1 (`RC1-004` — Fixed and verified across Chromium, Firefox, WebKit)
+- **IMPORTANT**: 1 (`RC1-005` — Fixed and verified across Chromium, Firefox, WebKit)
 - **COSMETIC**: 0
 - **UNSUPPORTED_BY_DESIGN**: 3 (All handled gracefully via typed refusal without crashes or corruption)
 - **TEST / ENVIRONMENT ISSUES**: 0
@@ -173,6 +175,6 @@ All documents are evaluated locally without remote network uploads. Document ide
 
 ## 11. Final Recommendation
 
-**`PROMOTE_RC1_TOWARD_1_0`**
+**`RC2_REQUIRED`**
 
-SmartPDF / StarPDF v0.20 RC1 demonstrates robust structural stability, zero silent data corruption, exact local-first privacy enforcement, and 100% cross-browser qualification across real-world PDFs.
+Field validation discovered a release-blocking defect (`RC1-004`: Page delete leaves editor stuck) and a significant workspace UX usability issue (`RC1-005`: Embedded 2/3 width container layout). Both issues have been repaired and verified across all browsers (177/177 Playwright E2E tests passing). Because production code modifications were introduced to fix the blocker and workspace UX, a clean **RC2** freeze is required prior to GA.

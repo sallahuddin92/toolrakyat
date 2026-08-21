@@ -19,6 +19,11 @@ import {
   Undo2,
   Redo2,
   FilePlus2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  ShieldCheck,
 } from "lucide-react";
 import { type ExportMode } from "@/lib/pdf/pdf-types";
 
@@ -48,6 +53,10 @@ interface PdfToolbarProps {
   onShowInfo: () => void;
   onOpenNewFile: () => void;
   onMergeClick?: () => void;
+  isThumbnailsOpen?: boolean;
+  onToggleThumbnails?: () => void;
+  isInspectorOpen?: boolean;
+  onToggleInspector?: () => void;
 }
 
 export function PdfToolbar({
@@ -76,6 +85,10 @@ export function PdfToolbar({
   onShowInfo,
   onOpenNewFile,
   onMergeClick,
+  isThumbnailsOpen = true,
+  onToggleThumbnails,
+  isInspectorOpen = true,
+  onToggleInspector,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -83,8 +96,23 @@ export function PdfToolbar({
 
   return (
     <header className="h-14 border-b border-slate-200 bg-white px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-3 shrink-0 select-none">
-      {/* Left: Open / Filename / Modified badge / Undo / Redo */}
+      {/* Left: Rail toggle / Open / Filename / Modified badge / Undo / Redo */}
       <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {onToggleThumbnails && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleThumbnails}
+            className="size-8 text-slate-600 rounded-lg shrink-0 hidden md:inline-flex"
+            title={isThumbnailsOpen ? "Hide Page Thumbnails" : "Show Page Thumbnails"}
+            aria-label={isThumbnailsOpen ? "Hide page thumbnails" : "Show page thumbnails"}
+            data-testid="toolbar-toggle-thumbnails-btn"
+          >
+            {isThumbnailsOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
+          </Button>
+        )}
+
         <Button
           type="button"
           variant="ghost"
@@ -342,78 +370,119 @@ export function PdfToolbar({
         )}
       </div>
 
-      {/* Right: Export Menu */}
-      <div className="relative">
-        <div className="flex items-center rounded-xl bg-sky-600 text-white shadow-xs">
-          <Button
-            type="button"
-            onClick={() => void onExport("editable")}
-            disabled={isExporting}
-            className="h-8 rounded-l-xl rounded-r-none bg-sky-600 hover:bg-sky-700 text-white text-xs px-3 font-medium border-r border-sky-500 gap-1.5"
-            data-testid="export-button"
-          >
-            {isExporting ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Download className="size-3.5" />
-            )}
-            <span>Export Editable</span>
-          </Button>
-          <Button
-            type="button"
-            onClick={() => setExportMenuOpen((prev) => !prev)}
-            disabled={isExporting}
-            className="h-8 px-1.5 rounded-l-none rounded-r-xl bg-sky-600 hover:bg-sky-700 text-white"
-            title="More export options"
-            aria-label="More export options"
-            data-testid="export-menu-toggle"
-          >
-            <ChevronDown className="size-3.5" />
-          </Button>
+      {/* Right: Privacy badge + Inspector toggle + Export Menu */}
+      <div className="flex items-center gap-2">
+        {/* Compact Local Processing Privacy Badge */}
+        <div
+          className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-medium cursor-help"
+          title="All PDF processing happens locally in your browser via StarPDF WebAssembly. 0 bytes uploaded to servers."
+          data-testid="privacy-local-badge"
+        >
+          <ShieldCheck className="size-3.5 text-emerald-600 shrink-0" />
+          <span>Local processing</span>
         </div>
 
-        {/* Dropdown Menu */}
-        {exportMenuOpen && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
-            <div className="absolute right-0 mt-1.5 w-60 rounded-xl bg-white shadow-xl border border-slate-200 py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
-              <button
-                type="button"
-                onClick={() => {
-                  setExportMenuOpen(false);
-                  void onExport("editable");
-                }}
-                className="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex flex-col gap-0.5 text-slate-800"
-                data-testid="export-editable-option"
-              >
-                <span className="font-semibold flex items-center justify-between">
-                  Export Editable PDF
-                  <Check className="size-3 text-sky-600" />
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  Preserves interactive AcroForm fields for future editing.
-                </span>
-              </button>
-
-              <div className="my-1 border-t border-slate-100" />
-
-              <button
-                type="button"
-                onClick={() => {
-                  setExportMenuOpen(false);
-                  void onExport("flattened");
-                }}
-                className="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex flex-col gap-0.5 text-slate-800"
-                data-testid="export-flattened-option"
-              >
-                <span className="font-semibold">Export Flattened PDF</span>
-                <span className="text-[11px] text-slate-500">
-                  Burns form values into static page content; locks widgets.
-                </span>
-              </button>
-            </div>
-          </>
+        {onToggleInspector && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleInspector}
+            className="size-8 text-slate-600 rounded-lg shrink-0 hidden lg:inline-flex"
+            title={isInspectorOpen ? "Hide Inspector Panel" : "Show Inspector Panel"}
+            aria-label={isInspectorOpen ? "Hide inspector panel" : "Show inspector panel"}
+            data-testid="toolbar-toggle-inspector-btn"
+          >
+            {isInspectorOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+          </Button>
         )}
+
+        <div className="relative">
+          <div className="flex items-center rounded-xl bg-sky-600 text-white shadow-xs">
+            <Button
+              type="button"
+              onClick={() => void onExport("editable")}
+              disabled={isExporting}
+              className="h-8 rounded-l-xl rounded-r-none bg-transparent hover:bg-sky-700 text-white px-2.5 sm:px-3 text-xs gap-1.5 border-r border-sky-500 font-medium"
+              data-testid="toolbar-export-btn"
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span className="hidden sm:inline">Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="size-3.5" />
+                  <span className="hidden sm:inline">Export Editable</span>
+                </>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={isExporting}
+              onClick={() => setExportMenuOpen(!exportMenuOpen)}
+              className="size-8 rounded-l-none rounded-r-xl bg-transparent hover:bg-sky-700 text-white"
+              title="More export options"
+              aria-label="More export options"
+              aria-expanded={exportMenuOpen}
+            >
+              <ChevronDown className="size-3.5" />
+            </Button>
+          </div>
+
+          {exportMenuOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setExportMenuOpen(false)}
+              />
+              <div className="absolute right-0 top-full mt-1.5 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl z-50 animate-in fade-in duration-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false);
+                    void onExport("editable");
+                  }}
+                  className="flex w-full items-start gap-2.5 rounded-lg p-2 text-left hover:bg-slate-50 transition-colors"
+                  data-testid="export-editable-option"
+                >
+                  <Check className="size-4 text-sky-600 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-800">
+                      Export Editable PDF
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Preserves interactive AcroForms, markup annotations, and native text
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportMenuOpen(false);
+                    void onExport("flattened");
+                  }}
+                  className="flex w-full items-start gap-2.5 rounded-lg p-2 text-left hover:bg-slate-50 transition-colors mt-0.5"
+                  data-testid="export-flattened-option"
+                >
+                  <Download className="size-4 text-slate-500 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-800">
+                      Export Flattened PDF
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      Locks and embeds all form values and annotations permanently
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </header>
   );

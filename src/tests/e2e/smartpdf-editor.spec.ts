@@ -21,6 +21,9 @@ async function uploadPdfBytes(
   await expect
     .poll(() => canvas.evaluate((node) => (node as HTMLCanvasElement).width))
     .toBeGreaterThan(0);
+  await expect
+    .poll(() => canvas.evaluate((node) => node.getAttribute("data-rendered")))
+    .toBe("true");
   await page.waitForTimeout(300);
   return canvas;
 }
@@ -348,8 +351,16 @@ async function changedRegionRatio(
   after: Buffer,
   region: { left: number; top: number; width: number; height: number },
 ) {
-  const beforePixels = await sharp(before).extract(region).raw().toBuffer();
-  const afterPixels = await sharp(after).extract(region).raw().toBuffer();
+  const metadata = await sharp(before).metadata();
+  const scale = (metadata.width ?? 612) / 612;
+  const scaledRegion = {
+    left: Math.max(0, Math.round(region.left * scale)),
+    top: Math.max(0, Math.round(region.top * scale)),
+    width: Math.min(Math.round(region.width * scale), (metadata.width ?? 0) - Math.max(0, Math.round(region.left * scale))),
+    height: Math.min(Math.round(region.height * scale), (metadata.height ?? 0) - Math.max(0, Math.round(region.top * scale))),
+  };
+  const beforePixels = await sharp(before).extract(scaledRegion).raw().toBuffer();
+  const afterPixels = await sharp(after).extract(scaledRegion).raw().toBuffer();
   let changedChannels = 0;
   for (let index = 0; index < beforePixels.length; index += 1) {
     if (Math.abs(beforePixels[index] - afterPixels[index]) > 8) changedChannels += 1;
@@ -1061,21 +1072,14 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       Buffer.from(workerResult.output),
     );
     const mutatedPng = await mutatedCanvas.screenshot();
-    const metadata = await sharp(originalPng).metadata();
-    const region = {
-      left: 45,
-      top: 125,
-      width: Math.min(320, (metadata.width ?? 0) - 45),
-      height: 60,
-    };
-    expect(region.width).toBeGreaterThan(300);
-    const originalRegion = await sharp(originalPng).extract(region).raw().toBuffer();
-    const mutatedRegion = await sharp(mutatedPng).extract(region).raw().toBuffer();
-    let changedChannels = 0;
-    for (let index = 0; index < originalRegion.length; index += 1) {
-      if (Math.abs(originalRegion[index] - mutatedRegion[index]) > 8) changedChannels += 1;
-    }
-    expect(changedChannels / originalRegion.length).toBeGreaterThan(0.005);
+    expect(
+      await changedRegionRatio(originalPng, mutatedPng, {
+        left: 45,
+        top: 125,
+        width: 320,
+        height: 60,
+      }),
+    ).toBeGreaterThan(0.005);
   });
 
   test("StarPDF visibly mutates PDFKit producer text and checkbox widgets without name aliasing", async ({
@@ -2249,6 +2253,113 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
     }
   });
+
+  test("v0.20 RC Blocker Fix: Page Delete Never Leaves Editor Stuck or Canvas Blurred", async ({
+    page,
+  }) => {
+    // Load a multipage document (2 pages)
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "multipage-delete-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Initial page count: 2
+    await expect(page.getByText("1 / 2")).toBeVisible({ timeout: 5000 });
+
+    // Duplicate twice to have 4 pages
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("4", { timeout: 10000 });
+
+    // 1. Delete Middle Page
+    await page.getByTestId("page-delete").click();
+
+    // Verify loading spinner is absent, blur overlay is gone, and page count is 3
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(workspace).toContainText("3", { timeout: 5000 });
+    await expect(page.locator("canvas").first()).toBeVisible();
+
+    // 2. Delete Last Page (navigate to last page, then delete -> clamps to previous page)
+    const nextBtn = page.locator('button[title="Next Page"]');
+    while (await nextBtn.isEnabled()) {
+      await nextBtn.click();
+      await page.waitForTimeout(100);
+    }
+
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(workspace).toContainText("2", { timeout: 5000 });
+    await expect(page.locator("canvas").first()).toBeVisible();
+
+    // 3. Delete First Page (navigate to page 1, delete -> stays on page 1 of 1)
+    const prevBtn = page.locator('button[title="Previous Page"]');
+    while (await prevBtn.isEnabled()) {
+      await prevBtn.click();
+      await page.waitForTimeout(100);
+    }
+
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("canvas").first()).toBeVisible();
+
+    // Deleting the single remaining page should be disabled
+    await expect(page.getByTestId("page-delete")).toBeDisabled();
+
+    // Export and verify file downloads cleanly
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("multipage-delete-test-edited.pdf");
+  });
+
+  test("v0.20 Workspace UX: Collapsible Panels and Thumbnail Navigation", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workspace-ux.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Thumbnail rail is visible by default
+    const thumbRail = page.locator('[data-testid="pdf-thumbnail-rail"]');
+    await expect(thumbRail).toBeVisible();
+
+    // Toggle thumbnail rail off
+    await page.locator('[data-testid="toolbar-toggle-thumbnails-btn"]').click();
+    await expect(thumbRail).not.toBeVisible();
+
+    // Toggle thumbnail rail back on
+    await page.locator('[data-testid="toolbar-toggle-thumbnails-btn"]').click();
+    await expect(thumbRail).toBeVisible();
+
+    // Toggle Inspector off
+    const inspectorToggle = page.locator('[data-testid="toolbar-toggle-inspector-btn"]');
+    await expect(inspectorToggle).toBeVisible();
+    await inspectorToggle.click();
+    await expect(page.getByRole("button", { name: "Forms (0)" })).not.toBeVisible();
+
+    // Toggle Inspector back on
+    await inspectorToggle.click();
+    await expect(page.getByRole("button", { name: "Forms (0)" })).toBeVisible();
+
+    // Click thumbnail for page 2 to navigate
+    await page.getByRole("button", { name: "Page 2" }).click();
+    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+
+    // Verify local processing badge is present
+    await expect(page.locator('[data-testid="privacy-local-badge"]')).toBeVisible();
+  });
 });
+
 
 

@@ -48,7 +48,8 @@ export function PdfPageCanvas({
   onPageRendered,
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isRendering, setIsRendering] = useState<boolean>(true);
+  const [isRendering, setIsRendering] = useState<boolean>(false);
+  const [renderCompleted, setRenderCompleted] = useState<boolean>(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const currentRenderTask = useRef<RenderTask | null>(null);
 
@@ -56,10 +57,22 @@ export function PdfPageCanvas({
     let isCancelled = false;
 
     async function renderPage() {
-      if (!pdfDocument || !canvasRef.current) return;
+      if (!pdfDocument || !canvasRef.current) {
+        setIsRendering(false);
+        setRenderCompleted(false);
+        return;
+      }
+
+      // Guard against out-of-bounds page requests during page count changes
+      if (pageNumber < 1 || (pdfDocument.numPages && pageNumber > pdfDocument.numPages)) {
+        setIsRendering(false);
+        setRenderCompleted(false);
+        return;
+      }
 
       try {
         setIsRendering(true);
+        setRenderCompleted(false);
         setRenderError(null);
 
         // Cancel previous task if still in flight
@@ -69,12 +82,18 @@ export function PdfPageCanvas({
         }
 
         const page = await pdfDocument.getPage(pageNumber);
-        if (isCancelled || !canvasRef.current) return;
+        if (isCancelled || !canvasRef.current) {
+          setIsRendering(false);
+          return;
+        }
 
         const viewport = page.getViewport({ scale, rotation });
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d", { alpha: false });
-        if (!context) return;
+        if (!context) {
+          setIsRendering(false);
+          return;
+        }
 
         const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
 
@@ -101,6 +120,7 @@ export function PdfPageCanvas({
 
         if (!isCancelled) {
           setIsRendering(false);
+          setRenderCompleted(true);
           onPageRendered?.(pageNumber, viewport.width, viewport.height);
         }
       } catch (err: unknown) {
@@ -111,6 +131,10 @@ export function PdfPageCanvas({
             console.error("PDF page render error:", err);
             setRenderError("Failed to render page.");
           }
+          setIsRendering(false);
+        }
+      } finally {
+        if (isCancelled) {
           setIsRendering(false);
         }
       }
@@ -124,12 +148,17 @@ export function PdfPageCanvas({
         currentRenderTask.current.cancel();
         currentRenderTask.current = null;
       }
+      setIsRendering(false);
     };
   }, [pdfDocument, pageNumber, scale, rotation, onPageRendered]);
 
   return (
     <div className={`relative inline-block shadow-lg rounded-md bg-white overflow-hidden ${className}`}>
-      <canvas ref={canvasRef} className="block transition-all" />
+      <canvas
+        ref={canvasRef}
+        data-rendered={renderCompleted && !isRendering ? "true" : "false"}
+        className="block transition-all"
+      />
       {/* Interactive Selection Overlay */}
       {onSelectItem && !isRendering && (
         <PdfInteractiveOverlay

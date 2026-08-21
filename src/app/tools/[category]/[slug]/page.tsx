@@ -70,7 +70,7 @@ export default async function ToolDetailPage({
       description={tool.description}
       categoryId={tool.categoryId}
       toolId={tool.id}
-      privacyNote={tool.privacyNote}
+      privacyNote={tool.id === "pdf-editor" ? undefined : tool.privacyNote}
       acceptedFileTypes={tool.acceptedFileTypes}
       maxFileSizeMB={tool.maxFileSizeMB}
     >
