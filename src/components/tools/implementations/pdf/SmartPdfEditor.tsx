@@ -11,8 +11,8 @@ import {
 import {
   type DocumentInspectionResult,
   type ExportMode,
+  type AcroFormField,
 } from "@/lib/pdf/pdf-types";
-import { PdfError } from "@/lib/pdf/pdf-errors";
 import { StarPdfClient, type StarPdfDocumentHandle } from "@/lib/pdf/starpdf-client";
 import {
   runStarPdfPageOperation,
@@ -27,6 +27,7 @@ import type {
   StarPdfUpdateVectorGraphicInput,
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
+import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -35,6 +36,13 @@ import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfFormInspector } from "./PdfFormInspector";
 import { PdfDocumentInfo } from "./PdfDocumentInfo";
 import { PdfPageOperations } from "./PdfPageOperations";
+import { PdfContextualToolbar, type SelectedItem } from "./PdfContextualToolbar";
+import { PdfConfirmDialog } from "./PdfConfirmDialog";
+
+interface HistoryEntry {
+  bytes: Uint8Array;
+  description: string;
+}
 
 export function SmartPdfEditor() {
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
@@ -53,6 +61,18 @@ export function SmartPdfEditor() {
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
   const [isPageProcessing, setIsPageProcessing] = useState<boolean>(false);
+
+  // Selection state on canvas
+  const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
+
+  // Operation history stack (bounded to 25 snapshots)
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const [historyLength, setHistoryLength] = useState<number>(0);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+
+  // Unsaved changes confirmation
+  const [showConfirmOpenModal, setShowConfirmOpenModal] = useState<boolean>(false);
 
   // StarPDF search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -86,15 +106,29 @@ export function SmartPdfEditor() {
     };
   }, [cleanupProxy]);
 
+  const pushHistorySnapshot = useCallback((newBytes: Uint8Array, description: string) => {
+    const currentIdx = historyIndexRef.current;
+    const sliced = historyRef.current.slice(0, currentIdx + 1);
+    sliced.push({ bytes: newBytes, description });
+    if (sliced.length > 25) sliced.shift();
+    historyRef.current = sliced;
+    const nextIdx = sliced.length - 1;
+    historyIndexRef.current = nextIdx;
+    setHistoryLength(sliced.length);
+    setHistoryIndex(nextIdx);
+    setIsModified(true);
+  }, []);
+
   const loadDocument = useCallback(
-    async (bytes: Uint8Array, docFilename: string, docSize: number, initialPage = 1) => {
+    async (bytes: Uint8Array, docFilename: string, docSize: number, initialPage = 1, isHistoryRestore = false) => {
       setIsLoading(true);
       setError(null);
       setSecurityInfo(null);
-      setLoadingMessage("Parsing PDF structure & detecting form fields...");
+      setSelectedItem(null);
+      setLoadingMessage("Parsing PDF structure & inspecting page objects...");
 
       try {
-        // 1. Open StarPDF first so security policy is established before other parsers/editors.
+        // 1. Open StarPDF first so security policy is established
         let starDoc: StarPdfDocumentHandle | null = null;
         try {
           starDoc = await StarPdfClient.open(bytes);
@@ -102,11 +136,10 @@ export function SmartPdfEditor() {
           setSecurityInfo(detectedSecurity);
           if (detectedSecurity.encryption_state !== "NOT_ENCRYPTED") {
             await starDoc.close();
-            const message =
-              "This PDF is encrypted with an unsupported security handler. Editing is unavailable; StarPDF does not decrypt or bypass document security.";
-            setError(message);
+            const friendly = formatPdfErrorMessage("STANDARD_SECURITY_DETECTED");
+            setError(friendly.userMessage);
             setIsLoading(false);
-            toast.error(message);
+            toast.error(friendly.userMessage);
             return;
           }
         } catch (starErr) {
@@ -116,7 +149,7 @@ export function SmartPdfEditor() {
         // 2. Inspect using pdf-lib (AcroForms, metadata, dimensions)
         const inspected = await inspectPdfDocument(bytes, docFilename, docSize);
 
-        // 3. Load into PDF.js for canvas rendering (copy bytes buffer to prevent detached ArrayBuffer)
+        // 3. Load into PDF.js for canvas rendering
         setLoadingMessage("Initializing document viewer...");
         const pdfjsLib = await getPdfjsLib();
         const loadingTask = pdfjsLib.getDocument({
@@ -137,36 +170,86 @@ export function SmartPdfEditor() {
         setInspectionResult(inspected);
         setStarPdfDoc(starDoc);
         setPdfProxy(proxy);
-        setCurrentPage(initialPage);
+        const validPage = Math.max(1, Math.min(initialPage, inspected.metadata.pageCount || 1));
+        setCurrentPage(validPage);
         setScale(1.0);
         setFieldValues(initialValues);
-        setIsModified(false);
-        setSelectedPages(new Set([initialPage]));
+        setSelectedPages(new Set([validPage]));
         setSearchQuery("");
         setSearchResults([]);
         setActiveSearchIndex(0);
         setIsLoading(false);
 
-        if (inspected.fields.length > 0) {
-          toast.success(`Loaded "${docFilename}" with ${inspected.fields.length} interactive form field(s).`);
-        } else {
-          toast.success(`Loaded "${docFilename}" (${inspected.metadata.pageCount} pages).`);
+        if (!isHistoryRestore) {
+          setIsModified(false);
+          historyRef.current = [{ bytes, description: "Initial document" }];
+          historyIndexRef.current = 0;
+          setHistoryLength(1);
+          setHistoryIndex(0);
+          if (inspected.fields.length > 0) {
+            toast.success(`Loaded "${docFilename}" with ${inspected.fields.length} interactive form field(s).`);
+          } else {
+            toast.success(`Loaded "${docFilename}" (${inspected.metadata.pageCount} pages).`);
+          }
         }
       } catch (err: unknown) {
         setIsLoading(false);
         cleanupProxy();
-        if (err instanceof PdfError) {
-          setError(err.message);
-          toast.error(err.message);
-        } else {
-          const msg = err instanceof Error ? err.message : "Failed to load PDF document.";
-          setError(msg);
-          toast.error(msg);
-        }
+        const friendly = formatPdfErrorMessage(err);
+        setError(friendly.userMessage);
+        toast.error(friendly.userMessage);
       }
     },
     [cleanupProxy],
   );
+
+  const handleUndo = useCallback(async () => {
+    const currentIdx = historyIndexRef.current;
+    if (currentIdx > 0) {
+      const prevIdx = currentIdx - 1;
+      const targetEntry = historyRef.current[prevIdx];
+      historyIndexRef.current = prevIdx;
+      setHistoryIndex(prevIdx);
+      cleanupProxy();
+      await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
+      toast.success(`Undo: ${historyRef.current[currentIdx].description}`);
+    }
+  }, [cleanupProxy, currentPage, filename, loadDocument]);
+
+  const handleRedo = useCallback(async () => {
+    const currentIdx = historyIndexRef.current;
+    if (currentIdx < historyRef.current.length - 1) {
+      const nextIdx = currentIdx + 1;
+      const targetEntry = historyRef.current[nextIdx];
+      historyIndexRef.current = nextIdx;
+      setHistoryIndex(nextIdx);
+      cleanupProxy();
+      await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
+      toast.success(`Redo: ${targetEntry.description}`);
+    }
+  }, [cleanupProxy, currentPage, filename, loadDocument]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (e.shiftKey) {
+          e.preventDefault();
+          void handleRedo();
+        } else {
+          e.preventDefault();
+          void handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        void handleRedo();
+      } else if (e.key === "Escape") {
+        setSelectedItem(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const handleFieldValueChange = useCallback(
     (name: string, value: string | boolean | string[]) => {
@@ -257,7 +340,7 @@ export function SmartPdfEditor() {
     setCurrentPage(searchResults[prevIdx].page_index + 1);
   }, [searchResults, activeSearchIndex]);
 
-  // Synchronize text spans and images on page change
+  // Synchronize text spans, images, and graphics on page change
   useEffect(() => {
     let cancelled = false;
     if (!starPdfDoc) return;
@@ -309,7 +392,6 @@ export function SmartPdfEditor() {
         const result = await starPdfDoc.replaceText(currentPage - 1, spanId, newText);
         const updatedBytes = await starPdfDoc.exportIncremental();
 
-        // Reload PDF.js with modified bytes
         const pdfjsLib = await getPdfjsLib();
         const loadingTask = pdfjsLib.getDocument({
           data: updatedBytes.slice(0),
@@ -323,19 +405,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, `Edit text "${newText}"`);
 
-        // Re-extract page text spans
         const pageText = await starPdfDoc.extractPageText(currentPage - 1);
         setPageTextSpans(pageText.spans || []);
 
         toast.success(`Text updated (${result.layout_result}). Native content stream modified.`);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to replace text.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleReplaceImage = useCallback(
@@ -360,18 +441,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Replace image");
 
         const images = await starPdfDoc.enumerateImages(currentPage - 1);
         setPageImages(images || []);
 
         toast.success("Image replaced successfully.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to replace image.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleAddImage = useCallback(
@@ -396,18 +477,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Add image");
 
         const images = await starPdfDoc.enumerateImages(currentPage - 1);
         setPageImages(images || []);
 
         toast.success("Image added to page successfully.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to add image.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleRemoveImage = useCallback(
@@ -430,18 +511,19 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Remove image");
+        setSelectedItem(null);
 
         const images = await starPdfDoc.enumerateImages(currentPage - 1);
         setPageImages(images || []);
 
         toast.success("Image removed from page.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to remove image.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleUpdateGraphic = useCallback(
@@ -464,18 +546,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Update vector shape");
 
         const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
         setPageGraphics(graphics || []);
 
         toast.success("Vector shape updated successfully.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to update vector shape.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleAddRectangle = useCallback(
@@ -533,18 +615,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Add rectangle");
 
         const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
         setPageGraphics(graphics || []);
 
         toast.success("Rectangle added successfully.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to add rectangle.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleAddLine = useCallback(
@@ -597,18 +679,18 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Add line");
 
         const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
         setPageGraphics(graphics || []);
 
         toast.success("Line added successfully.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to add line.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleDeleteGraphic = useCallback(
@@ -635,18 +717,19 @@ export function SmartPdfEditor() {
         }
         setPdfProxy(proxy);
         setSourceBytes(updatedBytes);
-        setIsModified(true);
+        pushHistorySnapshot(updatedBytes, "Delete shape");
+        setSelectedItem(null);
 
         const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
         setPageGraphics(graphics || []);
 
         toast.success("Vector shape removed from page.");
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to delete vector shape.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       }
     },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
   const handleExport = useCallback(
@@ -664,7 +747,7 @@ export function SmartPdfEditor() {
         );
 
         // Create browser download
-        const blob = new Blob([result.pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+        const blob = new Blob([new Uint8Array(result.pdfBytes)], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -674,14 +757,15 @@ export function SmartPdfEditor() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
+        setIsModified(false);
         toast.success(
           mode === "editable"
             ? `Exported "${result.filename}" with interactive form fields.`
             : `Exported "${result.filename}" with flattened form content.`,
         );
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Failed to export PDF.";
-        toast.error(msg);
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
       } finally {
         setIsExporting(false);
       }
@@ -690,7 +774,7 @@ export function SmartPdfEditor() {
   );
 
   const downloadPdf = useCallback((bytes: Uint8Array, outputFilename: string) => {
-    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
+    const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -704,7 +788,7 @@ export function SmartPdfEditor() {
   const applyPageOperation = useCallback(
     async (operation: StarPdfPageOperation, nextPage: number, successMessage: string) => {
       if (!sourceBytes || isPageProcessing) return;
-      if (isModified) {
+      if (isModified && Object.keys(fieldValues).length > 0) {
         toast.error("Export or reset pending form edits before changing pages.");
         return;
       }
@@ -712,25 +796,23 @@ export function SmartPdfEditor() {
       try {
         const output = await runStarPdfPageOperation(sourceBytes, operation);
         cleanupProxy();
-        await loadDocument(output, filename, output.byteLength, nextPage);
+        await loadDocument(output, filename, output.byteLength, nextPage, true);
+        pushHistorySnapshot(output, successMessage);
         toast.success(successMessage);
       } catch (operationError) {
-        const message =
-          operationError instanceof Error
-            ? operationError.message
-            : "StarPDF could not complete the page operation.";
-        setError(message);
-        toast.error(message);
+        const friendly = formatPdfErrorMessage(operationError);
+        setError(friendly.userMessage);
+        toast.error(friendly.userMessage);
       } finally {
         setIsPageProcessing(false);
       }
     },
-    [cleanupProxy, filename, isModified, isPageProcessing, loadDocument, sourceBytes],
+    [cleanupProxy, fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
   );
 
   const handleExtractPages = useCallback(async () => {
     if (!sourceBytes || isPageProcessing || selectedPages.size === 0) return;
-    if (isModified) {
+    if (isModified && Object.keys(fieldValues).length > 0) {
       toast.error("Export or reset pending form edits before extracting pages.");
       return;
     }
@@ -747,21 +829,18 @@ export function SmartPdfEditor() {
       downloadPdf(output, `${baseName}-extracted.pdf`);
       toast.success(`Extracted ${pageIndices.length} page(s) as a standalone PDF.`);
     } catch (operationError) {
-      const message =
-        operationError instanceof Error
-          ? operationError.message
-          : "StarPDF could not extract the selected pages.";
-      setError(message);
-      toast.error(message);
+      const friendly = formatPdfErrorMessage(operationError);
+      setError(friendly.userMessage);
+      toast.error(friendly.userMessage);
     } finally {
       setIsPageProcessing(false);
     }
-  }, [downloadPdf, filename, isModified, isPageProcessing, selectedPages, sourceBytes]);
+  }, [downloadPdf, fieldValues, filename, isModified, isPageProcessing, selectedPages, sourceBytes]);
 
   const handleMergeFiles = useCallback(
     async (files: FileList | null) => {
       if (!sourceBytes || !files?.length || isPageProcessing) return;
-      if (isModified) {
+      if (isModified && Object.keys(fieldValues).length > 0) {
         toast.error("Export or reset pending form edits before adding another PDF.");
         return;
       }
@@ -772,21 +851,19 @@ export function SmartPdfEditor() {
         );
         const output = await mergeStarPdfDocuments([sourceBytes, ...additions]);
         cleanupProxy();
-        await loadDocument(output, filename, output.byteLength);
-        toast.success(`Added ${additions.length} PDF document(s).`);
+        await loadDocument(output, filename, output.byteLength, 1, true);
+        pushHistorySnapshot(output, `Merged ${additions.length} PDF(s)`);
+        toast.success(`Added and merged ${additions.length} PDF document(s).`);
       } catch (operationError) {
-        const message =
-          operationError instanceof Error
-            ? operationError.message
-            : "StarPDF could not merge the selected documents.";
-        setError(message);
-        toast.error(message);
+        const friendly = formatPdfErrorMessage(operationError);
+        setError(friendly.userMessage);
+        toast.error(friendly.userMessage);
       } finally {
         if (mergeInputRef.current) mergeInputRef.current.value = "";
         setIsPageProcessing(false);
       }
     },
-    [cleanupProxy, filename, isModified, isPageProcessing, loadDocument, sourceBytes],
+    [cleanupProxy, fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
   );
 
   const handleTogglePageSelection = useCallback((pageNumber: number) => {
@@ -798,7 +875,7 @@ export function SmartPdfEditor() {
     });
   }, []);
 
-  const handleOpenNewFile = useCallback(() => {
+  const performOpenNewFile = useCallback(() => {
     cleanupProxy();
     setSourceBytes(null);
     setFilename("");
@@ -812,7 +889,20 @@ export function SmartPdfEditor() {
     setScale(1.0);
     setSearchQuery("");
     setSearchResults([]);
+    historyRef.current = [];
+    historyIndexRef.current = -1;
+    setHistoryLength(0);
+    setHistoryIndex(-1);
+    setSelectedItem(null);
   }, [cleanupProxy]);
+
+  const handleOpenNewFileClick = useCallback(() => {
+    if (isModified) {
+      setShowConfirmOpenModal(true);
+    } else {
+      performOpenNewFile();
+    }
+  }, [isModified, performOpenNewFile]);
 
   // Dropzone screen when no document is active
   if (!sourceBytes || !inspectionResult) {
@@ -828,22 +918,30 @@ export function SmartPdfEditor() {
     );
   }
 
+  const currentPageInfo = inspectionResult.pages[currentPage - 1] || {
+    width: 612,
+    height: 792,
+    rotation: 0,
+  };
+
   return (
     <div
-      className="flex flex-col h-[820px] rounded-3xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs"
+      className="flex flex-col h-[820px] rounded-3xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs relative select-none"
       data-testid="smartpdf-editor-workspace"
     >
       {securityInfo && securityInfo.signature_state !== "UNSIGNED" ? (
         <div
-          className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center justify-between"
           data-testid="starpdf-signed-document-warning"
           role="status"
         >
-          This PDF contains a digital signature. StarPDF preserves the original signed bytes when
-          appending an update, but it does not verify cryptographic signature validity. A saved edit
-          is a post-signature revision.
+          <span>
+            This PDF contains a digital signature. StarPDF preserves original signed bytes when appending updates,
+            but does not verify cryptographic signature validity for post-signature revision.
+          </span>
         </div>
       ) : null}
+
       {/* Top Application Toolbar */}
       <PdfToolbar
         filename={filename}
@@ -851,6 +949,11 @@ export function SmartPdfEditor() {
         pageCount={inspectionResult.metadata.pageCount}
         scale={scale}
         isExporting={isExporting}
+        isModified={isModified}
+        canUndo={historyIndex > 0}
+        canRedo={historyIndex < historyLength - 1}
+        onUndo={() => void handleUndo()}
+        onRedo={() => void handleRedo()}
         searchQuery={searchQuery}
         searchResultCount={searchResults.length}
         activeSearchIndex={activeSearchIndex}
@@ -864,9 +967,11 @@ export function SmartPdfEditor() {
         onFitPage={handleFitPage}
         onExport={handleExport}
         onShowInfo={() => setShowInfoModal(true)}
-        onOpenNewFile={handleOpenNewFile}
+        onOpenNewFile={handleOpenNewFileClick}
+        onMergeClick={() => mergeInputRef.current?.click()}
       />
 
+      {/* Page Operations Rail / Actions */}
       <PdfPageOperations
         currentPage={currentPage}
         pageCount={inspectionResult.metadata.pageCount}
@@ -909,8 +1014,8 @@ export function SmartPdfEditor() {
             {
               type: "insertBlankPage",
               pageIndex: currentPage,
-              width: inspectionResult.pages[currentPage - 1]?.width || 612,
-              height: inspectionResult.pages[currentPage - 1]?.height || 792,
+              width: currentPageInfo.width,
+              height: currentPageInfo.height,
               rotation: 0,
             },
             currentPage + 1,
@@ -920,6 +1025,7 @@ export function SmartPdfEditor() {
         onExtract={() => void handleExtractPages()}
         onMerge={() => mergeInputRef.current?.click()}
       />
+
       <input
         ref={mergeInputRef}
         type="file"
@@ -930,14 +1036,17 @@ export function SmartPdfEditor() {
         onChange={(event) => void handleMergeFiles(event.target.files)}
       />
 
-      {/* Main Workspace: Thumbnails + Viewport Canvas + Form Inspector */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main Workspace: Thumbnails + Viewport Canvas + Inspector */}
+      <div className="flex-1 flex overflow-hidden relative">
         {/* Left Thumbnail Rail */}
         <PdfThumbnailRail
           pdfDocument={pdfProxy}
           pageCount={inspectionResult.metadata.pageCount}
           currentPage={currentPage}
-          onPageSelect={setCurrentPage}
+          onPageSelect={(p) => {
+            setCurrentPage(p);
+            setSelectedItem(null);
+          }}
           selectedPages={selectedPages}
           onToggleSelection={handleTogglePageSelection}
           className="hidden md:block"
@@ -946,15 +1055,41 @@ export function SmartPdfEditor() {
         {/* Center Viewport Canvas Surface */}
         <main
           ref={viewportContainerRef}
-          className="flex-1 bg-slate-100/90 overflow-auto p-6 sm:p-8 flex items-center justify-center min-w-0"
+          className="flex-1 bg-slate-100/90 overflow-auto p-6 sm:p-8 flex items-center justify-center min-w-0 relative"
           aria-label="PDF Document Page Viewport"
+          onClick={() => setSelectedItem(null)}
         >
+          {/* Contextual Action Bar */}
+          <PdfContextualToolbar
+            selection={selectedItem}
+            onDeselect={() => setSelectedItem(null)}
+            onReplaceText={handleReplaceExistingText}
+            onReplaceImage={handleReplaceImage}
+            onRemoveImage={handleRemoveImage}
+            onUpdateGraphic={handleUpdateGraphic}
+            onDeleteGraphic={handleDeleteGraphic}
+            onFormFieldChange={handleFieldValueChange}
+            formFieldValue={
+              selectedItem?.type === "form"
+                ? fieldValues[(selectedItem.data as AcroFormField).name]
+                : undefined
+            }
+          />
+
           <div className="my-auto transition-transform duration-75">
             <PdfPageCanvas
               pdfDocument={pdfProxy}
               pageNumber={currentPage}
               scale={scale}
-              rotation={inspectionResult.pages[currentPage - 1]?.rotation || 0}
+              rotation={currentPageInfo.rotation}
+              pageWidth={currentPageInfo.width}
+              pageHeight={currentPageInfo.height}
+              textSpans={pageTextSpans}
+              images={pageImages}
+              graphics={pageGraphics}
+              fields={inspectionResult.fields}
+              selectedItem={selectedItem}
+              onSelectItem={setSelectedItem}
             />
           </div>
         </main>
@@ -986,6 +1121,21 @@ export function SmartPdfEditor() {
         metadata={inspectionResult.metadata}
         isOpen={showInfoModal}
         onClose={() => setShowInfoModal(false)}
+      />
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      <PdfConfirmDialog
+        isOpen={showConfirmOpenModal}
+        title="Discard unsaved changes?"
+        description="You have unsaved edits in this document. Opening another PDF will discard these modifications."
+        confirmLabel="Discard & Open"
+        cancelLabel="Keep Editing"
+        isDestructive={true}
+        onConfirm={() => {
+          setShowConfirmOpenModal(false);
+          performOpenNewFile();
+        }}
+        onCancel={() => setShowConfirmOpenModal(false)}
       />
     </div>
   );

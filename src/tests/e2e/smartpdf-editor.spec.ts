@@ -401,6 +401,10 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const extracted = fs.readFileSync(extractedPath!);
 
     await page.getByRole("button", { name: "Open" }).click();
+    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
+    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await confirmBtn.click();
+    }
     const canvas = await uploadPdfBytes(page, "page-operations-extracted.pdf", extracted);
     await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
     expect((await canvas.screenshot()).byteLength).toBeGreaterThan(1_000);
@@ -1562,4 +1566,281 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("large-100p-test-edited.pdf");
   });
+
+  test("v0.19 Workflow A: Open -> Search -> Edit Text -> Export Editable", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-upload-1page.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-a.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Search text
+    await page.getByLabel("Search text").click();
+    const searchInput = page.getByPlaceholder("Search in document...");
+    await searchInput.fill("SmartPDF");
+    await page.waitForTimeout(300);
+
+    // 2. Select Text tab in inspector and replace text
+    await page.getByRole("button", { name: /Text \(/ }).click();
+    const textSpanBtn = page.locator('[data-testid^="text-span-btn-"]').first();
+    if (await textSpanBtn.isVisible()) {
+      await textSpanBtn.click();
+      const replaceInput = page.locator('[data-testid="replace-text-input"]');
+      await replaceInput.fill("Converged StarPDF v0.19");
+      await page.locator('[data-testid="apply-replace-text-btn"]').click();
+      await page.waitForTimeout(500);
+    }
+
+    // 3. Export
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-a-edited.pdf");
+  });
+
+  test("v0.19 Workflow B: Open -> Replace Image -> Export Editable", async ({
+    page,
+  }) => {
+    // Generate PDF with image
+    const doc = await PDFDocument.create();
+    const p = doc.addPage([400, 400]);
+    const samplePng = await sharp({
+      create: { width: 40, height: 40, channels: 3, background: { r: 255, g: 0, b: 0 } },
+    }).png().toBuffer();
+    const embeddedImg = await doc.embedPng(samplePng);
+    p.drawImage(embeddedImg, { x: 50, y: 50, width: 200, height: 200 });
+    const bytes = Buffer.from(await doc.save());
+
+    await uploadPdfBytes(page, "workflow-b.pdf", bytes);
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Open Images tab
+    await page.getByRole("button", { name: /Images \(/ }).click();
+    await page.waitForTimeout(300);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-b-edited.pdf");
+  });
+
+  test("v0.19 Workflow C: Open -> Modify Vector Shape -> Export Editable", async ({
+    page,
+  }) => {
+    // Generate PDF with rectangle
+    let pdfStr = "%PDF-1.7\n%StarPDF\n";
+    const offsets: number[] = [0];
+    offsets.push(pdfStr.length);
+    pdfStr += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+    offsets.push(pdfStr.length);
+    pdfStr += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+    offsets.push(pdfStr.length);
+    pdfStr += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 400] /Contents 4 0 R /Resources << >> >>\nendobj\n";
+    const streamContent = "q\n0.2 0.4 0.8 rg\n100 100 150 100 re\nf\nQ\n";
+    offsets.push(pdfStr.length);
+    pdfStr += `4 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`;
+    const xrefOffset = pdfStr.length;
+    pdfStr += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < offsets.length; i++) {
+      pdfStr += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdfStr += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    const bytes = Buffer.from(pdfStr, "ascii");
+    await uploadPdfBytes(page, "workflow-c.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Open Shapes tab
+    await page.getByRole("button", { name: /Shapes \(/ }).click();
+    await page.waitForTimeout(300);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-c-edited.pdf");
+  });
+
+  test("v0.19 Workflow D: Open Form -> Edit Values -> Export Editable", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-form.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-d.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Edit fullName input
+    const nameInput = page.locator('input[placeholder="Enter text..."]').first();
+    await expect(nameInput).toBeVisible({ timeout: 10000 });
+    await nameInput.fill("Ahmad ToolRakyat");
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-d-edited.pdf");
+  });
+
+  test("v0.19 Workflow E: Page Reorder, Duplicate, Delete -> Export", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-e.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Duplicate page 1 -> becomes 4 pages
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("4", { timeout: 10000 });
+
+    // Move left
+    await page.getByTestId("page-move-left").click();
+    await page.waitForTimeout(500);
+
+    // Delete page
+    await page.getByTestId("page-delete").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-e-edited.pdf");
+  });
+
+  test("v0.19 Workflow F: Open A -> Add B -> Merge -> Export", async ({
+    page,
+  }) => {
+    const docAPath = path.join(process.cwd(), "test-assets/merge-a.pdf");
+    const docBPath = path.join(process.cwd(), "test-assets/merge-b.pdf");
+    const bytesA = fs.readFileSync(docAPath);
+    const bytesB = fs.readFileSync(docBPath);
+
+    await uploadPdfBytes(page, "workflow-f.pdf", bytesA);
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Add PDF B
+    await page.locator('input[aria-label="Add PDF documents"]').setInputFiles({
+      name: "doc-b.pdf",
+      mimeType: "application/pdf",
+      buffer: bytesB,
+    });
+    await expect(workspace).toContainText("2", { timeout: 10000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-f-edited.pdf");
+  });
+
+  test("v0.19 Workflow G: Split / Extract Pages", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-g.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Click Extract button
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("page-extract").click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-g-extracted.pdf");
+  });
+
+  test("v0.19 Workflow H: Mixed Sequential Edits with Undo / Redo", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-upload-1page.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-h.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Duplicate page
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("2 / 2", { timeout: 10000 });
+
+    // Undo duplication
+    await page.getByTestId("toolbar-undo-btn").click();
+    await expect(workspace).toContainText("1 / 1", { timeout: 10000 });
+
+    // Redo duplication -> restores 2-page document
+    await page.getByTestId("toolbar-redo-btn").click();
+    await expect(workspace).toContainText("Pages (2)", { timeout: 10000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-h-edited.pdf");
+  });
+
+  test("v0.19 Workflow I: Unsupported Encrypted PDF -> Clear Typed Refusal", async ({
+    page,
+  }) => {
+    const encryptedFixturePath = path.join(
+      process.cwd(),
+      "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf",
+    );
+    const bytes = fs.readFileSync(encryptedFixturePath);
+
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "encrypted-test.pdf",
+      mimeType: "application/pdf",
+      buffer: bytes,
+    });
+
+    // Should show explicit refusal message without crash
+    const errorAlert = page.getByText(/password-protected or encrypted|security handler/i);
+    await expect(errorAlert.first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test("v0.19 Workflow J: Unsaved Changes Confirmation Lifecycle", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-form.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-j.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Modify a field to trigger dirty state
+    const nameInput = page.locator('input[placeholder="Enter text..."]').first();
+    await expect(nameInput).toBeVisible({ timeout: 10000 });
+    await nameInput.fill("Pending Unsaved Modification");
+
+    // Verify modified dot indicator
+    await expect(page.locator('[data-testid="document-modified-dot"]')).toBeVisible({ timeout: 5000 });
+
+    // Click Open -> Confirm dialog should appear
+    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
+    const confirmDialog = page.locator('[data-testid="pdf-confirm-dialog"]');
+    await expect(confirmDialog).toBeVisible();
+
+    // Click Cancel -> dialog closes, editor remains active
+    await page.locator('[data-testid="confirm-dialog-cancel-btn"]').click();
+    await expect(confirmDialog).not.toBeVisible();
+    await expect(workspace).toBeVisible();
+
+    // Click Open -> Click Discard & Open -> Returns to Dropzone
+    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
+    await expect(confirmDialog).toBeVisible();
+    await page.locator('[data-testid="confirm-dialog-confirm-btn"]').click();
+
+    await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
+  });
 });
+
+

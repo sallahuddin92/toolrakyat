@@ -3,12 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "@/lib/pdf/pdfjs-init";
 import { Loader2 } from "lucide-react";
+import { PdfInteractiveOverlay } from "./PdfInteractiveOverlay";
+import type { SelectedItem } from "./PdfContextualToolbar";
+import type {
+  StarPdfImageInfo,
+  StarPdfTextSpan,
+  StarPdfVectorGraphicInfo,
+} from "@/lib/pdf/starpdf-types";
+import type { AcroFormField } from "@/lib/pdf/pdf-types";
 
 interface PdfPageCanvasProps {
   pdfDocument: PDFDocumentProxy | null;
   pageNumber: number;
   scale: number;
   rotation?: number;
+  pageWidth?: number;
+  pageHeight?: number;
+  textSpans?: StarPdfTextSpan[];
+  images?: StarPdfImageInfo[];
+  graphics?: StarPdfVectorGraphicInfo[];
+  fields?: AcroFormField[];
+  selectedItem?: SelectedItem | null;
+  onSelectItem?: (item: SelectedItem | null) => void;
   className?: string;
   onPageRendered?: (pageNumber: number, width: number, height: number) => void;
 }
@@ -18,6 +34,14 @@ export function PdfPageCanvas({
   pageNumber,
   scale,
   rotation = 0,
+  pageWidth = 612,
+  pageHeight = 792,
+  textSpans = [],
+  images = [],
+  graphics = [],
+  fields = [],
+  selectedItem = null,
+  onSelectItem,
   className = "",
   onPageRendered,
 }: PdfPageCanvasProps) {
@@ -104,8 +128,23 @@ export function PdfPageCanvas({
   return (
     <div className={`relative inline-block shadow-lg rounded-md bg-white overflow-hidden ${className}`}>
       <canvas ref={canvasRef} className="block transition-all" />
+      {/* Interactive Selection Overlay */}
+      {onSelectItem && !isRendering && (
+        <PdfInteractiveOverlay
+          pageWidth={pageWidth}
+          pageHeight={pageHeight}
+          scale={scale}
+          rotation={rotation}
+          textSpans={textSpans}
+          images={images}
+          graphics={graphics}
+          fields={fields}
+          selectedItem={selectedItem}
+          onSelectItem={onSelectItem}
+        />
+      )}
       {isRendering && (
-        <div className="absolute inset-0 bg-white/60 backdrop-blur-xs flex items-center justify-center">
+        <div className="absolute inset-0 bg-white/60 backdrop-blur-xs flex items-center justify-center pointer-events-none">
           <Loader2 className="size-6 animate-spin text-sky-600" />
         </div>
       )}
