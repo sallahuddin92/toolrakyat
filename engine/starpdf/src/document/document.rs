@@ -58,14 +58,17 @@ impl<'a> PdfDocument<'a> {
         };
 
         // 2. Locate and parse XRef table and Trailer
-        let xref_table =
+        let (xref_table, store_source) =
             match XrefResolver::load_xref_and_trailer_with_limits(effective_source, &limits) {
-                Ok(table) => table,
-                Err(_) => XrefResolver::load_xref_and_trailer_with_limits(source, &limits)?,
+                Ok(table) => (table, effective_source),
+                Err(_) => (
+                    XrefResolver::load_xref_and_trailer_with_limits(source, &limits)?,
+                    source,
+                ),
             };
 
         // 3. Initialize Lazy Object Store
-        let mut store = ObjectStore::new_with_limits(effective_source, xref_table, limits);
+        let mut store = ObjectStore::new_with_limits(store_source, xref_table, limits);
 
         // 4. Resolve /Root Catalog
         let catalog_ref = store
@@ -91,7 +94,7 @@ impl<'a> PdfDocument<'a> {
             .ok_or_else(|| PdfError::InvalidSyntax("Catalog missing /Pages reference".into()))?;
 
         Ok(Self {
-            source: effective_source,
+            source: store_source,
             version,
             store,
             catalog_ref,

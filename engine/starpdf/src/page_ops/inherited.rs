@@ -77,6 +77,21 @@ pub(crate) fn materialize_page_inheritance(
         }
     }
 
+    // Strict geometry policy:
+    // A) If /MediaBox exists on page -> use it.
+    // B) Else walk valid inherited /Pages ancestors -> already done above.
+    // C) Else derive geometry if /CropBox, /TrimBox, /BleedBox, or /ArtBox is present and valid.
+    // D) Otherwise fail with typed refusal (no silent Letter assumption).
+    if !page_dict.contains_key("MediaBox") {
+        for fallback_box_key in ["CropBox", "TrimBox", "BleedBox", "ArtBox"] {
+            if let Some(box_obj) = page_dict.get(fallback_box_key).cloned() {
+                validate_box(fallback_box_key, &box_obj)?;
+                page_dict.insert("MediaBox".to_string(), box_obj);
+                break;
+            }
+        }
+    }
+
     validate_page_geometry(&page_dict, limits)?;
     validate_page_resources(&page_dict, store, limits)?;
     validate_page_annotations(&page_dict, store, limits)?;

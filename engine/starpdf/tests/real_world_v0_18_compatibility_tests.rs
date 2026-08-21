@@ -435,3 +435,199 @@ fn test_compatibility_scorecard_evaluation() {
     assert_eq!(typed_unsupported_count, 1);
     assert_eq!(malformed_refused_count, 1);
 }
+
+#[test]
+fn test_mediabox_strict_inheritance_derivation_and_refusal() {
+    // 1. Direct MediaBox
+    let direct_pdf = create_test_pdf_with_producer("Direct MediaBox", b"");
+    let mut doc = PdfDocument::from_bytes(&direct_pdf).expect("open direct");
+    assert_eq!(doc.page_count().expect("count"), 1);
+
+    // 2. Missing direct MediaBox, but has CropBox -> Derived
+    let mut crop_pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = vec![0usize];
+    offsets.push(crop_pdf.len());
+    crop_pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    offsets.push(crop_pdf.len());
+    crop_pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    offsets.push(crop_pdf.len());
+    crop_pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /CropBox [0 0 500 700] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
+    let c = "BT\n/F1 12 Tf\n50 600 Td (CropBox Derived) Tj\nET\n";
+    offsets.push(crop_pdf.len());
+    crop_pdf.extend_from_slice(
+        format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{c}endstream\nendobj\n",
+            c.len()
+        )
+        .as_bytes(),
+    );
+    offsets.push(crop_pdf.len());
+    crop_pdf.extend_from_slice(
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    );
+    let xref_off = crop_pdf.len();
+    crop_pdf
+        .extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
+    for off in offsets.iter().skip(1) {
+        crop_pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    crop_pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n",
+            offsets.len()
+        )
+        .as_bytes(),
+    );
+
+    let mut crop_doc = PdfDocument::from_bytes(&crop_pdf).expect("open cropbox derived");
+    assert_eq!(crop_doc.page_count().expect("count"), 1);
+
+    // 3. Missing direct MediaBox, missing ancestor MediaBox, missing Crop/Trim/Bleed/ArtBox -> Refused!
+    let mut no_geom_pdf = b"%PDF-1.7\n".to_vec();
+    let mut ng_offsets = vec![0usize];
+    ng_offsets.push(no_geom_pdf.len());
+    no_geom_pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    ng_offsets.push(no_geom_pdf.len());
+    no_geom_pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    ng_offsets.push(no_geom_pdf.len());
+    // Page with NO MediaBox and NO other box
+    no_geom_pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
+    ng_offsets.push(no_geom_pdf.len());
+    no_geom_pdf.extend_from_slice(
+        format!(
+            "4 0 obj\n<< /Length {} >>\nstream\n{c}endstream\nendobj\n",
+            c.len()
+        )
+        .as_bytes(),
+    );
+    ng_offsets.push(no_geom_pdf.len());
+    no_geom_pdf.extend_from_slice(
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    );
+    let ng_xref = no_geom_pdf.len();
+    no_geom_pdf.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", ng_offsets.len()).as_bytes(),
+    );
+    for off in ng_offsets.iter().skip(1) {
+        no_geom_pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    no_geom_pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{ng_xref}\n%%EOF\n",
+            ng_offsets.len()
+        )
+        .as_bytes(),
+    );
+
+    let mut no_geom_doc = PdfDocument::from_bytes(&no_geom_pdf).expect("open doc without box");
+    // Attempting extraction/materialization fails with typed error because page has no geometry
+    let extract_err = no_geom_doc.extract_pages(&[0]);
+    assert!(
+        extract_err.is_err(),
+        "Must refuse page with missing geometry without silent Letter assumption"
+    );
+}
+
+#[test]
+fn test_pre_header_prefix_offset_matrix() {
+    let prefixes: [&[u8]; 4] = [
+        b"\xEF\xBB\xBF", // UTF-8 BOM (3 bytes)
+        b"1234567890",   // 10-byte junk
+        &[b'A'; 100],    // 100-byte prefix
+        &[b'%'; 4096],   // 4096-byte prefix
+    ];
+
+    for prefix in prefixes {
+        let base_pdf = create_test_pdf_with_producer("Prefix Matrix Doc", b"");
+        let mut prefixed_pdf = prefix.to_vec();
+        prefixed_pdf.extend_from_slice(&base_pdf);
+
+        let mut doc = PdfDocument::from_bytes(&prefixed_pdf)
+            .expect("Failed to open document with valid pre-header prefix");
+        assert_eq!(doc.page_count().expect("count"), 1);
+
+        let text = doc.extract_page_text(0).expect("extract text");
+        assert!(text.plain_text().contains("Prefix Matrix Doc"));
+
+        // Validate export incremental and reopen
+        let span = &text.spans[0];
+        let target = TextEditTarget::from_span(span);
+        let plan = doc
+            .replace_text(0, &target, "MUTATED_PREFIX")
+            .expect("replace text");
+        let exported = doc.export_incremental(&plan).expect("export incremental");
+
+        let mut reopened = PdfDocument::from_bytes(&exported).expect("reopen mutated prefixed PDF");
+        assert_eq!(reopened.page_count().expect("count"), 1);
+        let re_text = reopened
+            .extract_page_text(0)
+            .expect("extract text reopened");
+        assert!(re_text.plain_text().contains("MUTATED_PREFIX"));
+    }
+}
+
+#[test]
+fn test_stream_length_embedded_endstream_in_binary_data() {
+    // Generate PDF where binary stream contains embedded ASCII bytes "endstream" inside its body
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    let mut offsets = vec![0usize];
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
+
+    // Construct binary payload containing "endstream" midway:
+    // 20 bytes of 'A', then "endstream", then 20 bytes of 'B' (total 49 bytes)
+    let mut payload = vec![b'A'; 20];
+    payload.extend_from_slice(b"endstream");
+    payload.extend_from_slice(&[b'B'; 20]);
+    let payload_len = payload.len();
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {payload_len} >>\nstream\n").as_bytes());
+    pdf.extend_from_slice(&payload);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(
+        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+    );
+
+    let xref_off = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
+    for off in offsets.iter().skip(1) {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n",
+            offsets.len()
+        )
+        .as_bytes(),
+    );
+
+    let mut doc = PdfDocument::from_bytes(&pdf)
+        .expect("Failed to open PDF with embedded endstream in stream");
+    assert_eq!(doc.page_count().expect("count"), 1);
+
+    // Resolve stream object 4 0 R directly and verify raw payload bytes are intact
+    let obj = doc
+        .store_mut()
+        .resolve(starpdf::syntax::ObjectRef::new(4, 0))
+        .expect("resolve stream");
+    if let starpdf::syntax::PdfObject::Stream(s) = obj {
+        assert_eq!(s.data.len(), payload_len, "Stream must preserve full /Length bytes without premature truncation at embedded endstream");
+        assert_eq!(
+            &s.data[..],
+            &payload[..],
+            "Stream data must match original binary payload exactly"
+        );
+    } else {
+        panic!("Expected Stream object");
+    }
+}
