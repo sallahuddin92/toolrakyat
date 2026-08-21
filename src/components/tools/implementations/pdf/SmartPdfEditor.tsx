@@ -28,6 +28,7 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
+import { ShieldCheck } from "lucide-react";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -948,13 +949,56 @@ export function SmartPdfEditor() {
   // Dropzone screen when no document is active
   if (!sourceBytes || !inspectionResult) {
     return (
-      <div className="py-6 sm:py-12">
-        <PdfDropzone
-          onFileSelect={loadDocument}
-          isLoading={isLoading}
-          loadingMessage={loadingMessage}
-          error={error}
-        />
+      <div
+        className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative select-none"
+        data-testid="smartpdf-editor-workspace"
+      >
+        {/* Top Header for Empty Application State */}
+        <header className="h-14 border-b border-slate-200 bg-white px-4 sm:px-6 flex items-center justify-between shrink-0 select-none">
+          <div className="flex items-center gap-3">
+            <div className="grid size-8 place-items-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white font-bold text-xs shadow-xs">
+              SP
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-900 text-sm tracking-tight">SmartPDF</span>
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  Powered by StarPDF
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-full">
+              <ShieldCheck className="size-3.5 text-emerald-600" />
+              Local processing
+            </span>
+          </div>
+        </header>
+
+        {/* Center Empty Workspace with Dropzone */}
+        <div className="flex-1 flex items-center justify-center p-6 sm:p-12 overflow-auto bg-slate-50/50">
+          <div className="w-full max-w-xl space-y-6">
+            <PdfDropzone
+              onFileSelect={loadDocument}
+              isLoading={isLoading}
+              loadingMessage={loadingMessage}
+              error={error}
+            />
+          </div>
+        </div>
+
+        {/* Bottom Status Bar for Empty State */}
+        <footer
+          className="h-8 border-t border-slate-200 bg-white px-4 flex items-center justify-between text-xs text-slate-400 shrink-0 select-none"
+          data-testid="smartpdf-status-bar"
+        >
+          <span>No document open</span>
+          <span className="flex items-center gap-1.5 text-slate-500">
+            <ShieldCheck className="size-3.5 text-emerald-600" />
+            Zero bytes uploaded • 100% Client-Side WebAssembly
+          </span>
+        </footer>
       </div>
     );
   }
@@ -967,12 +1011,12 @@ export function SmartPdfEditor() {
 
   return (
     <div
-      className="flex flex-col h-[calc(100vh-8rem)] min-h-[680px] max-h-[1200px] rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden shadow-xs relative select-none"
+      className="flex flex-col h-full w-full bg-slate-100 overflow-hidden relative select-none"
       data-testid="smartpdf-editor-workspace"
     >
       {securityInfo && securityInfo.signature_state !== "UNSIGNED" ? (
         <div
-          className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center justify-between"
+          className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center justify-between shrink-0"
           data-testid="starpdf-signed-document-warning"
           role="status"
         >
@@ -1089,8 +1133,8 @@ export function SmartPdfEditor() {
         onChange={(event) => void handleMergeFiles(event.target.files)}
       />
 
-      {/* Main Workspace: Thumbnails + Viewport Canvas + Inspector */}
-      <div className="flex-1 flex overflow-hidden relative">
+      {/* Main Workspace: Thumbnails + Viewport Canvas */}
+      <div className="flex-1 flex overflow-hidden relative min-h-0">
         {/* Left Thumbnail Rail */}
         {isThumbnailsOpen && (
           <PdfThumbnailRail
@@ -1156,6 +1200,38 @@ export function SmartPdfEditor() {
           </div>
         </main>
       </div>
+
+      {/* Bottom Status Bar */}
+      <footer
+        className="h-8 border-t border-slate-200 bg-white px-4 flex items-center justify-between text-xs text-slate-500 shrink-0 select-none"
+        data-testid="smartpdf-status-bar"
+      >
+        <div className="flex items-center gap-3">
+          <span>Page {currentPage} / {inspectionResult.metadata.pageCount}</span>
+          <span className="text-slate-300">•</span>
+          <span>Zoom {Math.round(scale * 100)}%</span>
+          {isModified && (
+            <>
+              <span className="text-slate-300">•</span>
+              <span className="text-amber-600 font-medium">Unsaved changes</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {selectedItem ? (
+            <span className="text-sky-700 font-medium bg-sky-50 px-2 py-0.5 rounded border border-sky-200/60">
+              Selected: {selectedItem.type.toUpperCase()}
+            </span>
+          ) : (
+            <span className="text-slate-400">No selection</span>
+          )}
+          <span className="text-slate-300">•</span>
+          <span className="flex items-center gap-1 text-slate-500">
+            <ShieldCheck className="size-3.5 text-emerald-600" />
+            Local processing
+          </span>
+        </div>
+      </footer>
 
       {/* Document Properties Modal */}
       <PdfDocumentInfo

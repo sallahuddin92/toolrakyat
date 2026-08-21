@@ -6,7 +6,7 @@ import { RecentlyUsedTracker } from "@/components/tools/RecentlyUsedTracker";
 import { ToolPageShell } from "@/components/tools/ToolPageShell";
 import { ToolPlaceholder } from "@/components/tools/ToolPlaceholder";
 import { WordCounterTool } from "@/components/tools/implementations/text/WordCounterTool";
-import { SmartPdfEditor } from "@/components/tools/implementations/pdf/SmartPdfEditor";
+import { SmartPdfLaunchCard } from "@/components/tools/implementations/pdf/SmartPdfLaunchCard";
 import { getToolByCategoryAndSlug } from "@/lib/tools/registry";
 import { TOOL_CATEGORIES, type ToolCategoryId } from "@/lib/tools/types";
 
@@ -47,7 +47,7 @@ export default async function ToolDetailPage({
   if (tool.id === "text-word-counter") {
     content = <WordCounterTool />;
   } else if (tool.id === "pdf-editor") {
-    content = <SmartPdfEditor />;
+    content = <SmartPdfLaunchCard />;
   } else if (!tool.isImplemented) {
     content = (
       <ToolPlaceholder
