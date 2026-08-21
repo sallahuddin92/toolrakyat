@@ -638,8 +638,7 @@ impl VectorEditor {
         for op in &inst.operands {
             match op {
                 ContentOperand::Integer(i) => {
-                    write!(writer, "{i} ")
-                        .map_err(|e| PdfError::Serialization(e.to_string()))?;
+                    write!(writer, "{i} ").map_err(|e| PdfError::Serialization(e.to_string()))?;
                 }
                 ContentOperand::Real(r) => {
                     if (r.fract()).abs() < 1e-6 {
@@ -651,8 +650,7 @@ impl VectorEditor {
                     }
                 }
                 ContentOperand::Name(n) => {
-                    write!(writer, "/{n} ")
-                        .map_err(|e| PdfError::Serialization(e.to_string()))?;
+                    write!(writer, "/{n} ").map_err(|e| PdfError::Serialization(e.to_string()))?;
                 }
                 ContentOperand::String(s) => {
                     write!(writer, "(").map_err(|e| PdfError::Serialization(e.to_string()))?;

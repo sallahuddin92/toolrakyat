@@ -1419,4 +1419,78 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(page.getByTestId("starpdf-signed-document-warning")).toHaveCount(0);
     await expect(page.getByTestId("starpdf-document-error")).toHaveCount(0);
   });
+
+  test("qualifies 20-page document load, search, tab inspection, and export in browser", async ({
+    page,
+  }) => {
+    // Generate a deterministic 20-page test PDF buffer
+    let pdfStr = "%PDF-1.7\n%StarPDF\n";
+    const offsets: number[] = [0];
+    const numPages = 20;
+
+    offsets.push(pdfStr.length);
+    pdfStr += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+    offsets.push(pdfStr.length);
+    let kids = "";
+    for (let i = 0; i < numPages; i++) {
+      kids += `${3 + i * 2} 0 R `;
+    }
+    pdfStr += `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>\nendobj\n`;
+
+    const fontObjNum = 3 + numPages * 2;
+    for (let i = 0; i < numPages; i++) {
+      const pageObjNum = 3 + i * 2;
+      const contentObjNum = 4 + i * 2;
+
+      offsets.push(pdfStr.length);
+      pdfStr += `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>\nendobj\n`;
+
+      let streamContent = "BT\n/F1 12 Tf\n";
+      for (let l = 0; l < 8; l++) {
+        const y = 700 - l * 20;
+        streamContent += `50 ${y} Td (Page ${i + 1} Section ${l + 1}: Large Document Benchmark Content) Tj\n`;
+      }
+      streamContent += "ET\n";
+
+      offsets.push(pdfStr.length);
+      pdfStr += `${contentObjNum} 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`;
+    }
+
+    offsets.push(pdfStr.length);
+    pdfStr += `${fontObjNum} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+    const xrefOffset = pdfStr.length;
+    pdfStr += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < offsets.length; i++) {
+      pdfStr += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdfStr += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    const pdfBuffer = Buffer.from(pdfStr, "ascii");
+    await uploadPdfBytes(page, "large-20p-test.pdf", pdfBuffer);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+    await expect(workspace).toContainText("1 / 20");
+
+    // 1. Search across 20 pages
+    await page.getByLabel("Search text").click();
+    const searchInput = page.getByPlaceholder("Search in document...");
+    await searchInput.fill("Benchmark");
+    await page.waitForTimeout(400);
+
+    // 2. Switch tabs in Inspector
+    await page.getByRole("button", { name: /Text \(/ }).click();
+    await expect(page.getByText(/Page Text \(/)).toBeVisible();
+
+    await page.getByRole("button", { name: /Shapes \(/ }).click();
+    await expect(page.getByText(/Vector Shapes \(/)).toBeVisible();
+
+    // 3. Export
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("large-20p-test-edited.pdf");
+  });
 });

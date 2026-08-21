@@ -565,4 +565,110 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(finalGraphics[0].line_width).toBe(5.0);
     await doc4.close();
   });
+
+  it("qualifies large multi-page document operations and 20-cycle retention", async () => {
+    // Generate a deterministic 30-page PDF in TypeScript
+    const generateMultiPagePdf = (numPages: number): Uint8Array => {
+      let pdf = "%PDF-1.7\n%StarPDF\n";
+      const offsets: number[] = [0];
+
+      const o1 = pdf.length;
+      offsets.push(o1);
+      pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+      const o2 = pdf.length;
+      offsets.push(o2);
+      let kids = "";
+      for (let i = 0; i < numPages; i++) {
+        kids += `${3 + i * 2} 0 R `;
+      }
+      pdf += `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>\nendobj\n`;
+
+      const fontObjNum = 3 + numPages * 2;
+      for (let i = 0; i < numPages; i++) {
+        const pageObjNum = 3 + i * 2;
+        const contentObjNum = 4 + i * 2;
+
+        offsets.push(pdf.length);
+        pdf += `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>\nendobj\n`;
+
+        let streamContent = "BT\n/F1 12 Tf\n";
+        for (let l = 0; l < 10; l++) {
+          const y = 700 - l * 20;
+          streamContent += `50 ${y} Td (Page ${i + 1} Line ${l + 1}: StarPDF qualification payload #${(i * 10 + l) % 1000}) Tj\n`;
+        }
+        streamContent += "ET\n";
+
+        offsets.push(pdf.length);
+        pdf += `${contentObjNum} 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`;
+      }
+
+      offsets.push(pdf.length);
+      pdf += `${fontObjNum} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+      const xrefOffset = pdf.length;
+      pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+      for (let i = 1; i < offsets.length; i++) {
+        pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+      }
+      pdf += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+      return new TextEncoder().encode(pdf);
+    };
+
+    const doc30Bytes = generateMultiPagePdf(30);
+    const doc = await StarPdfClient.open(doc30Bytes);
+    const count = await doc.getPageCount();
+    expect(count).toBe(30);
+
+    // 1. Text extraction across pages
+    const p15Text = await doc.extractPageText(14);
+    expect(p15Text.plain_text).toContain("Page 15 Line 1");
+    expect(p15Text.spans.length).toBe(10);
+
+    // 2. Full Search
+    const searchHits = await doc.search("qualification", { caseSensitive: false });
+    expect(searchHits.length).toBe(300);
+
+    // 3. Vector addition on page 15
+    const addRectRes = await doc.addRectangle({
+      page_index: 14,
+      x: 100,
+      y: 100,
+      width: 150,
+      height: 80,
+      stroke_color_rgb: [1, 0, 0],
+      fill_color_rgb: [0.9, 0.9, 1],
+      line_width: 2.0,
+      is_stroked: true,
+      is_filled: true,
+    });
+    expect(addRectRes.success).toBe(true);
+
+    const docMutated = await doc.exportIncremental();
+    await doc.close();
+
+    // 4. Verify reopen and shape presence
+    const reopenedDoc = await StarPdfClient.open(docMutated);
+    const p15Shapes = await reopenedDoc.enumerateGraphics(14);
+    expect(p15Shapes.length).toBe(1);
+    expect(p15Shapes[0].graphic_type).toBe("Rectangle");
+
+    // 5. 20-cycle repeated open/edit/save/close test
+    let currentBytes = doc30Bytes;
+    for (let c = 1; c <= 20; c++) {
+      const cycleDoc = await StarPdfClient.open(currentBytes);
+      const text = await cycleDoc.extractPageText(0);
+      const span = text.spans[0];
+      await cycleDoc.replaceText(0, span.span_id, `CYCLE_${c}_MUTATION`);
+      currentBytes = await cycleDoc.exportIncremental();
+      await cycleDoc.close();
+      expect(cycleDoc.isClosed).toBe(true);
+    }
+
+    const finalDoc = await StarPdfClient.open(currentBytes);
+    const finalP0Text = await finalDoc.extractPageText(0);
+    expect(finalP0Text.plain_text).toContain("CYCLE_20_MUTATION");
+    await finalDoc.close();
+  });
 });
