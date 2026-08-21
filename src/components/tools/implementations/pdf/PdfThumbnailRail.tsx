@@ -5,7 +5,7 @@ import type { PDFDocumentProxy, RenderTask } from "@/lib/pdf/pdfjs-init";
 import { cn } from "@/lib/utils";
 
 interface ThumbnailItemProps {
-  pdfDocument: PDFDocumentProxy;
+  pdfDocument: PDFDocumentProxy | null;
   pageNumber: number;
   isActive: boolean;
   onClick: () => void;
@@ -102,7 +102,11 @@ function ThumbnailItem({
               : "border-slate-200 group-hover:border-slate-300",
           )}
         >
-          <canvas ref={canvasRef} className="block h-auto max-w-full" />
+          {pdfDocument ? (
+            <canvas ref={canvasRef} className="block h-auto max-w-full" />
+          ) : (
+            <div className="h-32 w-full animate-pulse bg-slate-100" />
+          )}
         </div>
         <span>Page {pageNumber}</span>
       </button>
@@ -138,7 +142,7 @@ export function PdfThumbnailRail({
   onToggleSelection,
   className = "",
 }: PdfThumbnailRailProps) {
-  if (!pdfDocument || pageCount === 0) return null;
+  if (pageCount === 0) return null;
 
   return (
     <aside
@@ -155,7 +159,7 @@ export function PdfThumbnailRail({
       <div className="space-y-3">
         {Array.from({ length: pageCount }, (_, i) => i + 1).map((pageNum) => (
           <ThumbnailItem
-            key={`${pdfDocument.numPages}-p${pageNum}`}
+            key={`thumb-p${pageNum}-of-${pageCount}`}
             pdfDocument={pdfDocument}
             pageNumber={pageNum}
             isActive={currentPage === pageNum}

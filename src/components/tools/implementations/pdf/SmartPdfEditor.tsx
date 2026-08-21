@@ -92,18 +92,30 @@ export function SmartPdfEditor() {
 
   const viewportContainerRef = useRef<HTMLDivElement | null>(null);
   const mergeInputRef = useRef<HTMLInputElement | null>(null);
+  const pdfProxyRef = useRef<PDFDocumentProxy | null>(null);
+  const starPdfDocRef = useRef<StarPdfDocumentHandle | null>(null);
+
+  useEffect(() => {
+    pdfProxyRef.current = pdfProxy;
+  }, [pdfProxy]);
+
+  useEffect(() => {
+    starPdfDocRef.current = starPdfDoc;
+  }, [starPdfDoc]);
 
   // Clean up PDF.js proxy and StarPDF handle when unmounting or resetting
   const cleanupProxy = useCallback(() => {
-    if (pdfProxy) {
-      void pdfProxy.destroy();
+    if (pdfProxyRef.current) {
+      void pdfProxyRef.current.destroy();
+      pdfProxyRef.current = null;
       setPdfProxy(null);
     }
-    if (starPdfDoc) {
-      void starPdfDoc.close();
+    if (starPdfDocRef.current) {
+      void starPdfDocRef.current.close();
+      starPdfDocRef.current = null;
       setStarPdfDoc(null);
     }
-  }, [pdfProxy, starPdfDoc]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -164,7 +176,15 @@ export function SmartPdfEditor() {
         });
         const proxy = await loadingTask.promise;
 
-        // 4. Initialize field values dictionary
+        // 4. Clean up previous handles now that new proxy is ready
+        if (pdfProxyRef.current && pdfProxyRef.current !== proxy) {
+          void pdfProxyRef.current.destroy();
+        }
+        if (starPdfDocRef.current && starPdfDocRef.current !== starDoc) {
+          void starPdfDocRef.current.close();
+        }
+
+        // 5. Initialize field values dictionary
         const initialValues: Record<string, string | boolean | string[]> = {};
         for (const field of inspected.fields) {
           initialValues[field.name] = field.value;
@@ -221,11 +241,10 @@ export function SmartPdfEditor() {
       const targetEntry = historyRef.current[prevIdx];
       historyIndexRef.current = prevIdx;
       setHistoryIndex(prevIdx);
-      cleanupProxy();
       await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
       toast.success(`Undo: ${historyRef.current[currentIdx].description}`);
     }
-  }, [cleanupProxy, currentPage, filename, loadDocument]);
+  }, [currentPage, filename, loadDocument]);
 
   const handleRedo = useCallback(async () => {
     const currentIdx = historyIndexRef.current;
@@ -234,11 +253,10 @@ export function SmartPdfEditor() {
       const targetEntry = historyRef.current[nextIdx];
       historyIndexRef.current = nextIdx;
       setHistoryIndex(nextIdx);
-      cleanupProxy();
       await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
       toast.success(`Redo: ${targetEntry.description}`);
     }
-  }, [cleanupProxy, currentPage, filename, loadDocument]);
+  }, [currentPage, filename, loadDocument]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -821,7 +839,6 @@ export function SmartPdfEditor() {
       setIsPageProcessing(true);
       try {
         const output = await runStarPdfPageOperation(sourceBytes, operation);
-        cleanupProxy();
         await loadDocument(output, filename, output.byteLength, nextPage, true);
         pushHistorySnapshot(output, successMessage);
         toast.success(successMessage);
@@ -833,7 +850,7 @@ export function SmartPdfEditor() {
         setIsPageProcessing(false);
       }
     },
-    [cleanupProxy, fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
+    [fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
   );
 
   const handleExtractPages = useCallback(async () => {
@@ -1090,7 +1107,7 @@ export function SmartPdfEditor() {
             }}
             selectedPages={selectedPages}
             onToggleSelection={handleTogglePageSelection}
-            className="hidden md:block"
+            className="flex"
           />
         )}
 
