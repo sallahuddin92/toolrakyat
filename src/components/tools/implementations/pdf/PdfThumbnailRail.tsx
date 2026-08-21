@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { PDFDocumentProxy } from "@/lib/pdf/pdfjs-init";
+import { useEffect, useRef } from "react";
+import type { PDFDocumentProxy, RenderTask } from "@/lib/pdf/pdfjs-init";
 import { cn } from "@/lib/utils";
 
 interface ThumbnailItemProps {
@@ -22,22 +22,31 @@ function ThumbnailItem({
   onToggleSelection,
 }: ThumbnailItemProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [rendered, setRendered] = useState(false);
+  const currentTaskRef = useRef<RenderTask | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
 
     async function renderThumbnail() {
-      if (!canvasRef.current || rendered) return;
+      if (!canvasRef.current || !pdfDocument) return;
+
+      if (pageNumber < 1 || (pdfDocument.numPages && pageNumber > pdfDocument.numPages)) {
+        return;
+      }
 
       try {
+        if (currentTaskRef.current) {
+          currentTaskRef.current.cancel();
+          currentTaskRef.current = null;
+        }
+
         const page = await pdfDocument.getPage(pageNumber);
         if (isCancelled || !canvasRef.current) return;
 
         // Scale to fit ~120px width thumbnail
         const unscaledViewport = page.getViewport({ scale: 1.0 });
         const targetWidth = 120;
-        const scale = targetWidth / unscaledViewport.width;
+        const scale = targetWidth / (unscaledViewport.width || 1);
         const viewport = page.getViewport({ scale });
 
         const canvas = canvasRef.current;
@@ -52,11 +61,9 @@ function ThumbnailItem({
           viewport: viewport,
           canvas: canvas,
         });
+        currentTaskRef.current = renderTask;
 
         await renderTask.promise;
-        if (!isCancelled) {
-          setRendered(true);
-        }
       } catch {
         // Silently handle cancelled renders
       }
@@ -66,8 +73,12 @@ function ThumbnailItem({
 
     return () => {
       isCancelled = true;
+      if (currentTaskRef.current) {
+        currentTaskRef.current.cancel();
+        currentTaskRef.current = null;
+      }
     };
-  }, [pdfDocument, pageNumber, rendered]);
+  }, [pdfDocument, pageNumber]);
 
   return (
     <div className="relative">
@@ -132,18 +143,19 @@ export function PdfThumbnailRail({
   return (
     <aside
       className={cn(
-        "w-44 shrink-0 border-r border-slate-200 bg-slate-50/80 p-3 overflow-y-auto max-h-[750px] space-y-2",
+        "w-44 shrink-0 border-r border-slate-200 bg-slate-50/90 p-3 overflow-y-auto h-full space-y-2 select-none",
         className,
       )}
       aria-label="Document page thumbnails"
+      data-testid="pdf-thumbnail-rail"
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-2 pb-1">
-        Pages ({pageCount})
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-2 pb-1 flex items-center justify-between">
+        <span>Pages ({pageCount})</span>
       </div>
       <div className="space-y-3">
         {Array.from({ length: pageCount }, (_, i) => i + 1).map((pageNum) => (
           <ThumbnailItem
-            key={pageNum}
+            key={`${pdfDocument.numPages}-p${pageNum}`}
             pdfDocument={pdfDocument}
             pageNumber={pageNum}
             isActive={currentPage === pageNum}
