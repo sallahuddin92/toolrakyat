@@ -35,27 +35,34 @@ The system explicitly distinguishes between:
 
 ---
 
-## 3. Bounded Recovery Boundaries
+## 3. Bounded Recovery Boundaries & Exact Invariants
 
 ### A. Extended Startxref Search & Drift Tolerance (`XREF_RECOVERED`)
-- **Search Window**: Expands from default 2048 bytes up to 65,536 bytes from EOF to tolerate non-standard appended metadata or trailing web comments.
+- **Search Window**: Expands from default 2,048 bytes up to 65,536 bytes from EOF to tolerate non-standard appended metadata or trailing web comments.
 - **Offset Drift**: When CRLF/LF translations or byte padding shift the `startxref` pointer, a bounded window of $\pm 64$ bytes is searched for the `xref` keyword or `N G obj` indirect stream object.
+- **Validation**: If `Token::Integer` is encountered, it must match the 3-token sequence `(Integer, Integer, KeywordObj)` before being parsed as an XRef stream. Otherwise, the $\pm 64$-byte window is searched for `xref`.
 - **Audit**: Logged as `XREF_RECOVERED`.
 
-### B. Stream Length Reconciliation (`STREAM_LENGTH_RECONCILED`)
-- When `/Length N` in a stream dictionary diverges from the actual location of the `endstream` keyword (e.g. by 1–4 bytes due to newline discrepancies), the parser reconciles the stream length to match the unambiguous `endstream` delimiter.
+### B. Stream Length Reconciliation & Boundary Invariant (`STREAM_LENGTH_RECONCILED`)
+- **Boundary Invariant**: When `/Length N` is declared, exactly `N` bytes are sliced from `stream_start`. The parser checks for `endstream` within $\le 64$ bytes of `stream_start + N` (accounting for standard EOL delimiters `\r`, `\n`).
+- **Embedded Endstream Immunity**: Any occurrence of the byte sequence `endstream` embedded inside the binary payload ($0 \le \text{offset} < N$) is completely ignored because the stream length is bounded by `N`.
+- **Disagreement Reconciliation**: If declared `/Length` diverges by small discrepancy from `endstream` marker, the stream length is reconciled to the verified `endstream` boundary.
 - **Audit**: Logged as `STREAM_LENGTH_RECONCILED`.
 
-### C. Optional Entry Defaulting (`OPTIONAL_ENTRY_DEFAULTED`)
-- **Missing `/Resources`**: Inherited from ancestor `/Pages` nodes; defaults to empty dictionary `<< >>` if absent from entire hierarchy.
-- **Missing `/MediaBox`**: Inherited from ancestor `/Pages`; defaults to standard US Letter `[0, 0, 612, 792]` if root node lacks explicit box.
-- **Missing `/Ff` (Field Flags)**: Defaults to `0`.
-- **Missing `/Rotate`**: Defaults to `0`.
+### C. Strict MediaBox Inheritance, Derivation & Refusal (`OPTIONAL_ENTRY_DEFAULTED`)
+- **Direct Geometry**: If `/MediaBox` exists directly on the page dictionary, it is validated and used.
+- **Inherited Geometry**: If missing, ancestor `/Pages` nodes are traversed up to `MAX_PAGE_TREE_DEPTH` (32) to resolve inherited `/MediaBox`.
+- **Derived Geometry**: If absent from the page and all ancestors, geometry is derived from unambiguous existing box attributes in order: `/CropBox` $\to$ `/TrimBox` $\to$ `/BleedBox` $\to$ `/ArtBox`.
+- **Refusal (No Silent Assumption)**: If no geometry exists (no direct, inherited, or derivable box), operations fail with typed error `PdfError::PageOperation("page has no direct, inherited, or derivable geometry")`. StarPDF **never** silently defaults missing geometry to US Letter without specification proof.
+- **Other Defaulting**: Missing `/Resources` defaults to empty dictionary `<< >>`; missing `/Ff` field flags defaults to `0`; missing `/Rotate` defaults to `0`.
 - **Audit**: Logged as `OPTIONAL_ENTRY_DEFAULTED`.
 
-### D. Producer Compatibility Paths (`PRODUCER_COMPATIBILITY_PATH`)
-- **Leading UTF-8 BOM / Comments**: Header search scans up to 4096 bytes before `%PDF-` and slices the byte stream to ensure all internal object offsets remain valid.
-- **Tolerant Token Delimiters**: Handles missing whitespace before delimiters `/`, `[`, `]`, `<<`, `>>`, `(`, `<`.
+### D. Pre-Header / BOM Recovery & Offset Model (`PRODUCER_COMPATIBILITY_PATH`)
+- **Header Discovery**: Up to 4,096 bytes before `%PDF-` are scanned for standard `%PDF-` signature.
+- **Offset Model**:
+  - `effective_source = ByteSource::new(&bytes[header_pos..])` aligns with standard ISO 32000-1 §7.5.2 (offsets generated relative to `%PDF-`).
+  - Coherent fallback: If `load_xref_and_trailer_with_limits` succeeds with `effective_source`, the object store uses `effective_source`. If fallback to unstripped `source` succeeds (producers that count physical byte 0), the object store uses `source`.
+  - Offset rebasing and resolution are validated across classic xref, xref streams, object streams (`ObjStm`), and incremental `/Prev` chains.
 - **Audit**: Logged as `PRODUCER_COMPATIBILITY_PATH`.
 
 ---
@@ -79,11 +86,13 @@ The system explicitly distinguishes between:
 11. Preceding UTF-8 BOM / Header Junk               : RECOVERED_PASS (4/4)
 12. Stream Length Disagreement                      : RECOVERED_PASS (4/4)
 13. Startxref Offset Drift (+/- 64 B)               : RECOVERED_PASS (4/4)
-14. Encrypted Documents (Mutation Attempt)          : TYPED_UNSUPPORTED (Refusal)
-15. Non-PDF / Corrupted Files                       : MALFORMED_REFUSED (Deterministic)
+14. MediaBox Derivation (CropBox/TrimBox Fallback)  : RECOVERED_PASS (4/4)
+15. Missing Geometry (No Box Anywhere)              : TYPED_REFUSED (4/4)
+16. Encrypted Documents (Mutation Attempt)          : TYPED_UNSUPPORTED (Refusal)
+17. Non-PDF / Corrupted Files                       : MALFORMED_REFUSED (Deterministic)
 ================================================================
-TOTAL WORKLOADS EVALUATED: 88
-PASSED / REFUSED AS SPECIFIED: 88/88 (100.0%)
+TOTAL WORKLOADS EVALUATED: 96
+PASSED / REFUSED AS SPECIFIED: 96/96 (100.0%)
 ================================================================
 ```
 
@@ -120,6 +129,8 @@ PASSED / REFUSED AS SPECIFIED: 88/88 (100.0%)
 - [x] Zero `unwrap()` or `expect()` in production library code.
 - [x] Strict bounded search windows for recovery ($\pm 64$ bytes drift, $\le 65,536$ bytes startxref search).
 - [x] `RecoveryKind` and structured recovery audit log exposed to WASM/TypeScript.
+- [x] Strict MediaBox derivation policy enforced with zero silent Letter assumptions.
+- [x] Embedded `endstream` inside binary stream data preserved without truncation.
 - [x] `cargo fmt --check` passes cleanly.
 - [x] `cargo clippy --all-targets --all-features -- -D warnings` passes with 0 warnings.
 - [x] `cargo test` passes all unit and integration tests (100% pass).
