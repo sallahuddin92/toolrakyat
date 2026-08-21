@@ -17,6 +17,7 @@ use crate::font::{FontProgramKind, SfntFont};
 use crate::forms::field::FieldType;
 use crate::mutation::change::PdfChange;
 use crate::mutation::result::MutationPlan;
+use crate::mutation::text_edit::{ContentStreamEditor, LayoutPolicyResult, TextEditTarget};
 use crate::syntax::object::{ObjectRef, PdfObject, StreamObject};
 
 const MAX_MUTATIONS_PER_BATCH: usize = 500;
@@ -71,6 +72,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         let mut modified_objects = BTreeMap::new();
         let mut overall_status = AppearanceStatus::AppearancePreserved;
         let mut regenerated_form_appearance = false;
+        let mut last_layout_result = None;
 
         for change in changes {
             match change {
@@ -172,6 +174,22 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     self.mutate_remove_annotation(*page_index, *annot_ref, &mut modified_objects)?;
                     overall_status = overall_status.combine(AppearanceStatus::ValueUpdated);
                 }
+                PdfChange::ReplaceText {
+                    page_index,
+                    target,
+                    replacement,
+                } => {
+                    let (status, layout) = self.mutate_replace_text(
+                        *page_index,
+                        target,
+                        replacement,
+                        &mut modified_objects,
+                    )?;
+                    overall_status = overall_status.combine(status);
+                    if last_layout_result.is_none() {
+                        last_layout_result = Some(layout);
+                    }
+                }
             }
 
             if modified_objects.len() > MAX_GENERATED_OBJECTS {
@@ -189,7 +207,298 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             modified_objects,
             appearance_status: overall_status,
             glyph_mapping_quality: self.mapping_quality,
+            layout_policy_result: last_layout_result,
         })
+    }
+
+    fn mutate_replace_text(
+        &mut self,
+        page_index: usize,
+        target: &TextEditTarget,
+        replacement: &str,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<(AppearanceStatus, LayoutPolicyResult)> {
+        if page_index >= self.page_refs.len() {
+            return Err(PdfError::PageNotFound(page_index));
+        }
+        let page_ref = self.page_refs[page_index];
+        let page_obj = self.store.resolve(page_ref)?.clone();
+        let mut page_dict = page_obj
+            .as_dict()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "page dictionary",
+                actual: page_obj.type_name(),
+            })?
+            .clone();
+
+        // 1. Resolve page resources and fonts
+        let resources =
+            crate::font::resource::PageResources::resolve_for_page(&page_dict, self.store)?;
+
+        // 2. Resolve target content stream
+        let contents_obj = page_dict
+            .get("Contents")
+            .ok_or_else(|| PdfError::TargetTextNotFound("Page missing /Contents".to_string()))?;
+        let resolved_contents = self.store.resolve_object(contents_obj)?;
+
+        let (target_stream_ref, mut target_stream_obj, is_direct_page_stream) =
+            match resolved_contents {
+                PdfObject::Stream(s) => {
+                    if target.stream_index != 0 {
+                        return Err(PdfError::TargetTextNotFound(format!(
+                            "Page has 1 content stream, requested stream index {}",
+                            target.stream_index
+                        )));
+                    }
+                    if let Some(r) = contents_obj.as_reference() {
+                        (Some(r), s, false)
+                    } else {
+                        (None, s, true)
+                    }
+                }
+                PdfObject::Array(arr) => {
+                    if target.stream_index >= arr.len() {
+                        return Err(PdfError::TargetTextNotFound(format!(
+                            "Page has {} content streams, requested stream index {}",
+                            arr.len(),
+                            target.stream_index
+                        )));
+                    }
+                    let stream_item = &arr[target.stream_index];
+                    let stream_ref = stream_item.as_reference().ok_or_else(|| {
+                        PdfError::InvalidOperation(
+                            "Page /Contents array items must be indirect references".into(),
+                        )
+                    })?;
+                    let resolved_stream = self.store.resolve_object(stream_item)?;
+                    let s = resolved_stream
+                        .as_stream()
+                        .ok_or_else(|| PdfError::TypeMismatch {
+                            expected: "stream",
+                            actual: resolved_stream.type_name(),
+                        })?;
+                    (Some(stream_ref), s.clone(), false)
+                }
+                other => {
+                    return Err(PdfError::TypeMismatch {
+                        expected: "stream or array of streams",
+                        actual: other.type_name(),
+                    });
+                }
+            };
+
+        // 3. Decompress original stream data
+        let decompress_limits = crate::filter::limits::DecompressLimits::default();
+        let decompressed_data = match target_stream_obj
+            .dict
+            .get("Filter")
+            .and_then(PdfObject::as_name)
+        {
+            Some("FlateDecode") => crate::filter::flate::FlateDecoder::decode(
+                &target_stream_obj.data,
+                &decompress_limits,
+            )?,
+            Some(other) => {
+                return Err(PdfError::InvalidOperation(format!(
+                    "Unsupported stream filter /{other}"
+                )));
+            }
+            None => target_stream_obj.data.clone(),
+        };
+
+        // 4. Parse content stream instructions and find font at target instruction
+        let mut parser = crate::content::ContentParser::from_bytes(&decompressed_data);
+        let instructions = parser.parse_instructions()?;
+        if target.instruction_index >= instructions.len() {
+            return Err(PdfError::TargetTextNotFound(format!(
+                "Instruction index {} out of bounds (stream has {} instructions)",
+                target.instruction_index,
+                instructions.len()
+            )));
+        }
+
+        // Find active font in content stream up to instruction_index
+        let mut active_font_name: Option<String> = None;
+        let mut active_font_size = 12.0;
+        let char_spacing = 0.0;
+        let word_spacing = 0.0;
+        let horiz_scaling = 100.0;
+
+        for instr in &instructions[0..=target.instruction_index] {
+            if instr.operator == crate::content::ContentOperator::Tf && instr.operands.len() >= 2 {
+                active_font_name = instr.operands[0].as_name().map(ToString::to_string);
+                active_font_size = instr.operands[1].as_f64().unwrap_or(12.0);
+            }
+        }
+
+        let fallback_font = crate::font::font::Font::standard_fallback("Helvetica");
+        let font = active_font_name
+            .as_deref()
+            .and_then(|name| resources.get_font(name))
+            .unwrap_or(&fallback_font);
+
+        // 5. Validate font editability & encode replacement text
+        let editability = font.check_span_editability(replacement);
+        match editability {
+            crate::text::span::TextEditability::EditableNativeText => {}
+            crate::text::span::TextEditability::UnsupportedComplexScript(reason) => {
+                return Err(PdfError::UnsupportedComplexScript(reason));
+            }
+            crate::text::span::TextEditability::UnsupportedFontEncoding(reason) => {
+                return Err(PdfError::UnsupportedFontEncoding(reason));
+            }
+            crate::text::span::TextEditability::UnsupportedVerticalWriting => {
+                return Err(PdfError::InvalidOperation(
+                    "UNSUPPORTED_VERTICAL_WRITING".into(),
+                ));
+            }
+            other => {
+                return Err(PdfError::InvalidOperation(
+                    other.reason().unwrap_or_default(),
+                ));
+            }
+        }
+
+        let encoded_replacement = font.encode_text(replacement)?;
+
+        // 6. Evaluate layout / width policy
+        let target_instr = &instructions[target.instruction_index];
+        let original_bytes = match target_instr.operator {
+            crate::content::ContentOperator::Tj => target_instr
+                .operands
+                .first()
+                .and_then(crate::content::ContentOperand::as_bytes)
+                .unwrap_or(&[]),
+            crate::content::ContentOperator::TJ => {
+                let items = target_instr
+                    .operands
+                    .first()
+                    .and_then(crate::content::ContentOperand::as_array);
+                if let Some(arr) = items {
+                    if target.operand_index < arr.len() {
+                        arr[target.operand_index].as_bytes().unwrap_or(&[])
+                    } else {
+                        &[]
+                    }
+                } else {
+                    &[]
+                }
+            }
+            _ => &[],
+        };
+
+        let decoded_original = font.decode_bytes(original_bytes);
+        let orig_text: String = decoded_original.into_iter().map(|(s, _)| s).collect();
+
+        let orig_width = font.calculate_text_width(
+            &orig_text,
+            active_font_size,
+            char_spacing,
+            word_spacing,
+            horiz_scaling,
+        )?;
+        let new_width = font.calculate_text_width(
+            replacement,
+            active_font_size,
+            char_spacing,
+            word_spacing,
+            horiz_scaling,
+        )?;
+
+        let layout_result = if (orig_width - new_width).abs() < 0.01 {
+            LayoutPolicyResult::ExactFit
+        } else if new_width <= orig_width + 0.5 {
+            LayoutPolicyResult::FitWithinOriginalBox {
+                original_width: orig_width,
+                new_width,
+            }
+        } else {
+            if new_width > orig_width * 3.0 && (new_width - orig_width) > 150.0 {
+                return Err(PdfError::UnsupportedLayout(format!(
+                    "Replacement text advance ({new_width:.1}pt) significantly exceeds original width ({orig_width:.1}pt) and would require complex line reflow"
+                )));
+            }
+            LayoutPolicyResult::WidthChanged {
+                original_width: orig_width,
+                new_width,
+            }
+        };
+
+        // 7. Mutate content stream
+        let modified_decompressed = ContentStreamEditor::replace_in_stream(
+            &decompressed_data,
+            target,
+            &encoded_replacement,
+        )?;
+
+        // 8. Re-compress or update stream data
+        let final_stream_data = if target_stream_obj.dict.contains_key("Filter") {
+            miniz_oxide::deflate::compress_to_vec_zlib(&modified_decompressed, 6)
+        } else {
+            modified_decompressed
+        };
+
+        target_stream_obj.data = final_stream_data;
+        target_stream_obj.stream_length = target_stream_obj.data.len();
+        target_stream_obj.dict.insert(
+            "Length".to_string(),
+            PdfObject::Integer(target_stream_obj.data.len() as i64),
+        );
+
+        // Check if stream is shared with other pages
+        let mut count_referencing_pages = 0;
+        if let Some(r) = target_stream_ref {
+            for &other_page_ref in &self.page_refs {
+                if let Ok(other_obj) = self.store.resolve(other_page_ref) {
+                    if let Some(other_dict) = other_obj.as_dict() {
+                        if let Some(c) = other_dict.get("Contents") {
+                            if let Some(cr) = c.as_reference() {
+                                if cr == r {
+                                    count_referencing_pages += 1;
+                                }
+                            } else if let Some(arr) = c.as_array() {
+                                for item in arr {
+                                    if item.as_reference() == Some(r) {
+                                        count_referencing_pages += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if count_referencing_pages > 1 {
+            // Stream is shared with other pages: clone into a new indirect stream for this page
+            let new_stream_ref = ObjectRef::new(self.next_alloc_obj_num, 0);
+            self.next_alloc_obj_num = self.next_alloc_obj_num.saturating_add(1);
+
+            modified.insert(new_stream_ref, PdfObject::Stream(target_stream_obj));
+
+            // Update page Contents to point to new_stream_ref
+            if let Some(contents_entry) = page_dict.get_mut("Contents") {
+                match contents_entry {
+                    PdfObject::Reference(_) => {
+                        *contents_entry = PdfObject::Reference(new_stream_ref);
+                    }
+                    PdfObject::Array(arr) => {
+                        if target.stream_index < arr.len() {
+                            arr[target.stream_index] = PdfObject::Reference(new_stream_ref);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            modified.insert(page_ref, PdfObject::Dictionary(page_dict));
+        } else if let Some(r) = target_stream_ref {
+            modified.insert(r, PdfObject::Stream(target_stream_obj));
+        } else if is_direct_page_stream {
+            page_dict.insert("Contents".to_string(), PdfObject::Stream(target_stream_obj));
+            modified.insert(page_ref, PdfObject::Dictionary(page_dict));
+        }
+
+        Ok((AppearanceStatus::ValueUpdated, layout_result))
     }
 
     fn mutate_text_field(

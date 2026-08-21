@@ -1374,6 +1374,96 @@ ET
         );
     }
 
+    // 60. Single text span editability check
+    {
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let page_text = doc.extract_page_text(0).unwrap();
+        let span = &page_text.spans[0];
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(span.is_editable);
+            std::hint::black_box(&span.editability_status);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "60. Span Editability Check:  {:>8} ns/op  ({:.2?} for {} checks)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 61. Content stream parsing, operand mutation and re-serialization
+    {
+        let raw_stream =
+            b"q\n1 0 0 1 50 700 cm\nBT\n/F1 12 Tf\n(Benchmark Original Text) Tj\nET\nQ\n";
+        let target = starpdf::mutation::text_edit::TextEditTarget::new(0, 0, 4, 0);
+        let new_bytes = b"Benchmark Replaced Text";
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let modified = starpdf::mutation::text_edit::ContentStreamEditor::replace_in_stream(
+                raw_stream, &target, new_bytes,
+            )
+            .unwrap();
+            std::hint::black_box(modified);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "61. Stream Parse/Mutate/Ser: {:>8} ns/op  ({:.2?} for {} replacements)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 62. Full Native Text Replacement & Layout Policy Check
+    {
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let page_text = doc.extract_page_text(0).unwrap();
+        let target = starpdf::mutation::text_edit::TextEditTarget::from_span(&page_text.spans[0]);
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc_run = PdfDocument::from_bytes(&sample_pdf).unwrap();
+            let plan = doc_run
+                .replace_text(0, &target, "StarPDF Performance Suite Document")
+                .unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "62. Text Replace & Layout:   {:>8} ns/op  ({:.2?} for {} replacements)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 63. Incremental Export with Modified Content Stream
+    {
+        let mut doc = PdfDocument::from_bytes(&sample_pdf).unwrap();
+        let page_text = doc.extract_page_text(0).unwrap();
+        let target = starpdf::mutation::text_edit::TextEditTarget::from_span(&page_text.spans[0]);
+        let plan = doc
+            .replace_text(0, &target, "Export Benchmark Suite")
+            .unwrap();
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let exported = doc.export_incremental(&plan).unwrap();
+            std::hint::black_box(exported);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "63. Incremental Text Export: {:>8} ns/op  ({:.2?} for {} exports)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
     println!("================================================================");
 }
 

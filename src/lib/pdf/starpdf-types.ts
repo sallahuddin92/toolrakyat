@@ -52,6 +52,33 @@ export interface StarPdfTextSpan {
   font_name: string;
   font_size: number;
   confidence: number;
+  span_id: string;
+  stream_index: number;
+  instruction_index: number;
+  operand_index: number;
+  operator_name: string;
+  is_editable: boolean;
+  editability_code:
+    | "EDITABLE_NATIVE_TEXT"
+    | "UNSUPPORTED_FONT_ENCODING"
+    | "UNSUPPORTED_COMPLEX_SCRIPT"
+    | "UNSUPPORTED_VERTICAL_WRITING"
+    | "INLINE_IMAGE_OR_OVERLAY"
+    | "FORM_OR_ANNOTATION_TEXT"
+    | "READ_ONLY_SECURITY_RESTRICTED"
+    | string;
+  refusal_reason?: string;
+}
+
+export interface StarPdfReplaceTextResult {
+  success: boolean;
+  layout_result:
+    | "EXACT_FIT"
+    | "FIT_WITHIN_ORIGINAL_BOX"
+    | "WIDTH_CHANGED"
+    | "UNSUPPORTED_LAYOUT"
+    | string;
+  modified_object_count: number;
 }
 
 export interface StarPdfPageText {
@@ -205,7 +232,8 @@ export type StarPdfWorkerRequest =
   | { type: "setChoiceValues"; id: string; handle: number; objectNum: number; objectGen: number; values: string[] }
   | { type: "addAnnotation"; id: string; handle: number; pageIndex: number; input: StarPdfAddAnnotationInput }
   | { type: "updateAnnotation"; id: string; handle: number; objectNum: number; objectGen: number; input: StarPdfUpdateAnnotationInput }
-  | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objectNum: number; objectGen: number }
+  | { type: "replaceText"; id: string; handle: number; pageIndex: number; spanId: string; newText: string }
+  | { type: "getTextEditability"; id: string; handle: number; pageIndex: number; spanId: string }
   | { type: "exportIncremental"; id: string; handle: number }
   | { type: "deletePage"; id: string; handle: number; pageIndex: number }
   | { type: "movePage"; id: string; handle: number; fromIndex: number; toIndex: number }
@@ -243,6 +271,8 @@ export type StarPdfWorkerResponse =
   | { type: "addAnnotation"; id: string; success: true }
   | { type: "updateAnnotation"; id: string; success: true }
   | { type: "removeAnnotation"; id: string; success: true }
+  | { type: "replaceText"; id: string; success: true; result: StarPdfReplaceTextResult }
+  | { type: "getTextEditability"; id: string; success: true; span: StarPdfTextSpan }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "deletePage"; id: string; success: true; bytes: Uint8Array }
   | { type: "movePage"; id: string; success: true; bytes: Uint8Array }

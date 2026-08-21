@@ -329,6 +329,67 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     await expect(StarPdfClient.open(bytes)).rejects.toThrow();
   });
 
+  it("extracts text spans with structural identity and editability status", async () => {
+    const bytes = await StarPdfClient.createMinimalPdf("StarPDF Native Text");
+    const doc = await StarPdfClient.open(bytes);
+
+    const pageText = await doc.extractPageText(0);
+    expect(pageText.spans.length).toBe(1);
+    const span = pageText.spans[0];
+    expect(span.text).toBe("StarPDF Native Text");
+    expect(span.span_id).toMatch(/^p0_s\d+_i\d+_o\d+$/);
+    expect(span.is_editable).toBe(true);
+    expect(span.editability_code).toBe("EDITABLE_NATIVE_TEXT");
+
+    const editability = await doc.getTextEditability(0, span.span_id);
+    expect(editability.span_id).toBe(span.span_id);
+    expect(editability.is_editable).toBe(true);
+
+    await doc.close();
+  });
+
+  it("replaces existing text natively and verifies roundtrip search", async () => {
+    const bytes = await StarPdfClient.createMinimalPdf("Original Alpha Text");
+    const doc = await StarPdfClient.open(bytes);
+
+    const pageText = await doc.extractPageText(0);
+    const span = pageText.spans[0];
+    expect(span.text).toBe("Original Alpha Text");
+
+    const result = await doc.replaceText(0, span.span_id, "Replaced Omega Text");
+    expect(result.success).toBe(true);
+    expect(["EXACT_FIT", "FIT_WITHIN_ORIGINAL_BOX", "WIDTH_CHANGED"]).toContain(result.layout_result);
+
+    const updatedBytes = await doc.exportIncremental();
+    expect(updatedBytes.length).toBeGreaterThan(bytes.length);
+
+    // Reopen modified PDF
+    const reopened = await StarPdfClient.open(updatedBytes);
+    const reopenedText = await reopened.extractPageText(0);
+    expect(reopenedText.plain_text).toContain("Replaced Omega Text");
+    expect(reopenedText.plain_text).not.toContain("Original Alpha Text");
+
+    const searchHits = await reopened.search("Omega", { caseSensitive: false });
+    expect(searchHits.length).toBe(1);
+    expect(searchHits[0].matched_text).toBe("Omega");
+
+    await reopened.close();
+    await doc.close();
+  });
+
+  it("refuses complex script replacement safely without crashing", async () => {
+    const bytes = await StarPdfClient.createMinimalPdf("Ascii Title");
+    const doc = await StarPdfClient.open(bytes);
+
+    const pageText = await doc.extractPageText(0);
+    const span = pageText.spans[0];
+
+    // Arabic requires complex script shaping not supported in bounded simple font replacement
+    await expect(doc.replaceText(0, span.span_id, "العربية")).rejects.toThrow();
+
+    await doc.close();
+  });
+
   it("handles scanned PDF returning zero text without crash", async () => {
     const bytes = loadTestAsset("scanned-test.pdf");
     const doc = await StarPdfClient.open(bytes);

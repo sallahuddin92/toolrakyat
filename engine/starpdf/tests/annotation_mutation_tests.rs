@@ -313,6 +313,7 @@ fn test_unknown_annotation_subtype_is_preserved_during_supported_update() {
         ]),
         appearance_status: AppearanceStatus::AppearancePreserved,
         glyph_mapping_quality: None,
+        layout_policy_result: None,
     };
     let with_unknown = doc.export_incremental(&initial_plan).unwrap();
 

@@ -19,7 +19,7 @@ import {
   mergeStarPdfDocuments,
   type StarPdfPageOperation,
 } from "@/lib/pdf/starpdf-page-worker-client";
-import type { StarPdfSearchResult, StarPdfSecurityInfo } from "@/lib/pdf/starpdf-types";
+import type { StarPdfSearchResult, StarPdfSecurityInfo, StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -40,6 +40,7 @@ export function SmartPdfEditor() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [fieldValues, setFieldValues] = useState<Record<string, string | boolean | string[]>>({});
+  const [pageTextSpans, setPageTextSpans] = useState<StarPdfTextSpan[]>([]);
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
   const [isPageProcessing, setIsPageProcessing] = useState<boolean>(false);
@@ -77,7 +78,7 @@ export function SmartPdfEditor() {
   }, [cleanupProxy]);
 
   const loadDocument = useCallback(
-    async (bytes: Uint8Array, docFilename: string, docSize: number) => {
+    async (bytes: Uint8Array, docFilename: string, docSize: number, initialPage = 1) => {
       setIsLoading(true);
       setError(null);
       setSecurityInfo(null);
@@ -127,11 +128,11 @@ export function SmartPdfEditor() {
         setInspectionResult(inspected);
         setStarPdfDoc(starDoc);
         setPdfProxy(proxy);
-        setCurrentPage(1);
+        setCurrentPage(initialPage);
         setScale(1.0);
         setFieldValues(initialValues);
         setIsModified(false);
-        setSelectedPages(new Set([1]));
+        setSelectedPages(new Set([initialPage]));
         setSearchQuery("");
         setSearchResults([]);
         setActiveSearchIndex(0);
@@ -247,6 +248,62 @@ export function SmartPdfEditor() {
     setCurrentPage(searchResults[prevIdx].page_index + 1);
   }, [searchResults, activeSearchIndex]);
 
+  // Synchronize text spans on page change
+  useEffect(() => {
+    let cancelled = false;
+    if (!starPdfDoc) return;
+    void starPdfDoc
+      .extractPageText(currentPage - 1)
+      .then((pageText) => {
+        if (!cancelled) {
+          setPageTextSpans(pageText.spans || []);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to extract page text:", err);
+        if (!cancelled) setPageTextSpans([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [starPdfDoc, currentPage, sourceBytes]);
+
+  const handleReplaceExistingText = useCallback(
+    async (spanId: string, newText: string) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        const result = await starPdfDoc.replaceText(currentPage - 1, spanId, newText);
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        // Reload PDF.js with modified bytes
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        // Re-extract page text spans
+        const pageText = await starPdfDoc.extractPageText(currentPage - 1);
+        setPageTextSpans(pageText.spans || []);
+
+        toast.success(`Text updated (${result.layout_result}). Native content stream modified.`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to replace text.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
   const handleExport = useCallback(
     async (mode: ExportMode) => {
       if (!sourceBytes || !inspectionResult) return;
@@ -310,9 +367,7 @@ export function SmartPdfEditor() {
       try {
         const output = await runStarPdfPageOperation(sourceBytes, operation);
         cleanupProxy();
-        await loadDocument(output, filename, output.byteLength);
-        setCurrentPage(nextPage);
-        setSelectedPages(new Set([nextPage]));
+        await loadDocument(output, filename, output.byteLength, nextPage);
         toast.success(successMessage);
       } catch (operationError) {
         const message =
@@ -559,13 +614,15 @@ export function SmartPdfEditor() {
           </div>
         </main>
 
-        {/* Right Form Fields Inspector */}
+        {/* Right Form Fields & Text Inspector */}
         <PdfFormInspector
           fields={inspectionResult.fields}
           fieldValues={fieldValues}
           onFieldValueChange={handleFieldValueChange}
           onResetForm={handleResetForm}
           isModified={isModified}
+          textSpans={pageTextSpans}
+          onReplaceText={handleReplaceExistingText}
           className="hidden lg:flex"
         />
       </div>

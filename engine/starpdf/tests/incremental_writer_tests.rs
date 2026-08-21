@@ -35,6 +35,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
         )]),
         appearance_status: AppearanceStatus::ValueUpdated,
         glyph_mapping_quality: None,
+        layout_policy_result: None,
     };
 
     let updated_bytes = doc.export_incremental(&plan).unwrap();
@@ -68,6 +69,7 @@ fn test_incremental_writer_roundtrip_minimal_doc() {
         )]),
         appearance_status: AppearanceStatus::ValueUpdated,
         glyph_mapping_quality: None,
+        layout_policy_result: None,
     };
 
     let second_updated_bytes = reopened.export_incremental(&plan_2).unwrap();

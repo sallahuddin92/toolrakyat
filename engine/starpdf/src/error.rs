@@ -32,6 +32,11 @@ pub enum PdfError {
     UnsupportedPageDependency(String),
     PartialFieldImport(String),
     ExcludedPageTarget(String),
+    UnsupportedFontEncoding(String),
+    UnsupportedComplexScript(String),
+    UnsupportedLayout(String),
+    TargetTextNotFound(String),
+    TextEditRefused(String),
     InvalidOperation(String),
 }
 
@@ -80,6 +85,15 @@ impl fmt::Display for PdfError {
             }
             Self::PartialFieldImport(msg) => write!(f, "PARTIAL_FIELD_IMPORT_REFUSED: {msg}"),
             Self::ExcludedPageTarget(msg) => write!(f, "EXCLUDED_PAGE_TARGET: {msg}"),
+            Self::UnsupportedFontEncoding(msg) => {
+                write!(f, "UNSUPPORTED_FONT_ENCODING: {msg}")
+            }
+            Self::UnsupportedComplexScript(msg) => {
+                write!(f, "UNSUPPORTED_COMPLEX_SCRIPT: {msg}")
+            }
+            Self::UnsupportedLayout(msg) => write!(f, "UNSUPPORTED_LAYOUT: {msg}"),
+            Self::TargetTextNotFound(msg) => write!(f, "TARGET_TEXT_NOT_FOUND: {msg}"),
+            Self::TextEditRefused(msg) => write!(f, "TEXT_EDIT_REFUSED: {msg}"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

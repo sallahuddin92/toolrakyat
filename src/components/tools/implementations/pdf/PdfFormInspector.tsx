@@ -1,13 +1,14 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
 import { type AcroFormField } from "@/lib/pdf/pdf-types";
+import type { StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { RotateCcw, FileEdit } from "lucide-react";
+import { RotateCcw, FileEdit, Type, CheckCircle2, AlertTriangle, XCircle, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PdfFormInspectorProps {
@@ -16,6 +17,8 @@ interface PdfFormInspectorProps {
   onFieldValueChange: (name: string, value: string | boolean | string[]) => void;
   onResetForm: () => void;
   isModified: boolean;
+  textSpans?: StarPdfTextSpan[];
+  onReplaceText?: (spanId: string, newText: string) => Promise<void>;
   className?: string;
 }
 
@@ -25,33 +28,32 @@ export function PdfFormInspector({
   onFieldValueChange,
   onResetForm,
   isModified,
+  textSpans = [],
+  onReplaceText,
   className = "",
 }: PdfFormInspectorProps) {
   const baseId = useId();
+  const [activeTab, setActiveTab] = useState<"fields" | "text">(() =>
+    fields.length > 0 ? "fields" : "text",
+  );
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [replacementText, setReplacementText] = useState<string>("");
+  const [isReplacing, setIsReplacing] = useState<boolean>(false);
 
-  if (fields.length === 0) {
-    return (
-      <aside
-        className={cn(
-          "w-80 shrink-0 border-l border-slate-200 bg-white p-6 flex flex-col justify-between overflow-y-auto max-h-[750px]",
-          className,
-        )}
-        aria-label="Form Fields Inspector"
-      >
-        <div className="space-y-4 text-center my-auto">
-          <div className="size-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-            <FileEdit className="size-6" />
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-sm font-semibold text-slate-800">No AcroForm Fields</h4>
-            <p className="text-xs text-slate-500 max-w-[220px] mx-auto leading-relaxed">
-              This document does not contain interactive form widgets. You can still navigate pages and export copies.
-            </p>
-          </div>
-        </div>
-      </aside>
-    );
-  }
+  const handleSelectSpan = (span: StarPdfTextSpan) => {
+    setSelectedSpanId(span.span_id);
+    setReplacementText(span.text);
+  };
+
+  const handleApplyTextEdit = async () => {
+    if (!selectedSpanId || !onReplaceText) return;
+    setIsReplacing(true);
+    try {
+      await onReplaceText(selectedSpanId, replacementText);
+    } finally {
+      setIsReplacing(false);
+    }
+  };
 
   return (
     <aside
@@ -59,10 +61,10 @@ export function PdfFormInspector({
         "w-80 shrink-0 border-l border-slate-200 bg-white p-4 flex flex-col justify-between overflow-y-auto max-h-[750px] space-y-4",
         className,
       )}
-      aria-label="Form Fields Inspector"
+      aria-label="Inspector Panel"
     >
       <div className="space-y-4">
-        {/* Header */}
+        {/* Top Header */}
         <div className="flex items-center justify-between pb-2 border-b border-slate-100">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
@@ -78,10 +80,154 @@ export function PdfFormInspector({
           )}
         </div>
 
-        {/* Fields List */}
-        <div className="space-y-4 pr-1">
-          {fields.map((field, index) => {
-            const inputId = `${baseId}-${field.name}-${index}`;
+        {/* Tab Switcher */}
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setActiveTab("fields")}
+            className={cn(
+              "flex-1 text-xs font-medium py-1.5 px-2 rounded-md transition-all flex items-center justify-center gap-1.5",
+              activeTab === "fields"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            <FileEdit className="size-3.5" />
+            Forms ({fields.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("text")}
+            className={cn(
+              "flex-1 text-xs font-medium py-1.5 px-2 rounded-md transition-all flex items-center justify-center gap-1.5",
+              activeTab === "text"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            <Type className="size-3.5" />
+            Text ({textSpans.length})
+          </button>
+        </div>
+
+        {activeTab === "text" ? (
+          /* Text Spans List & Native Editor */
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <span className="text-xs font-semibold text-slate-800">
+                Page Text ({textSpans.length} spans)
+              </span>
+              <span className="text-[10px] text-slate-400">Bounded v0.13</span>
+            </div>
+
+            {textSpans.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-6">
+                No extractable text spans found on this page.
+              </p>
+            ) : (
+              <div className="space-y-2 pr-1 max-h-[480px] overflow-y-auto">
+                {textSpans.map((span) => {
+                  const isSelected = selectedSpanId === span.span_id;
+                  const isEditable = span.is_editable;
+
+                  return (
+                    <div
+                      key={span.span_id}
+                      onClick={() => handleSelectSpan(span)}
+                      className={cn(
+                        "p-2.5 rounded-lg border text-xs transition-all cursor-pointer",
+                        isSelected
+                          ? "border-sky-500 bg-sky-50/50 shadow-sm"
+                          : "border-slate-200/80 bg-slate-50/60 hover:border-slate-300",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-1 mb-1">
+                        <span className="font-mono text-[10px] text-slate-500 truncate max-w-[130px]" title={span.font_name}>
+                          {span.font_name} ({Math.round(span.font_size)}pt)
+                        </span>
+                        {isEditable ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 text-[9px] px-1.5 py-0 border-0 flex items-center gap-0.5">
+                            <CheckCircle2 className="size-2.5" />
+                            Editable
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-[9px] px-1.5 py-0 flex items-center gap-0.5">
+                            <AlertTriangle className="size-2.5" />
+                            {span.editability_code === "UNSUPPORTED_COMPLEX_SCRIPT"
+                              ? "Complex Script"
+                              : span.editability_code === "UNSUPPORTED_FONT_ENCODING"
+                              ? "Font Unmapped"
+                              : "Refused"}
+                          </Badge>
+                        )}
+                      </div>
+
+                      <p className="font-medium text-slate-800 text-xs break-words line-clamp-2">
+                        &ldquo;{span.text}&rdquo;
+                      </p>
+
+                      {isSelected && isEditable && (
+                        <div className="mt-2.5 pt-2 border-t border-sky-200/60 space-y-2" onClick={(e) => e.stopPropagation()}>
+                          <Label className="text-[10px] font-semibold text-sky-900">
+                            Replacement Text:
+                          </Label>
+                          <Input
+                            type="text"
+                            value={replacementText}
+                            onChange={(e) => setReplacementText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void handleApplyTextEdit();
+                            }}
+                            className="h-7 text-xs bg-white border-sky-300 focus:border-sky-500"
+                            placeholder="Enter new text..."
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleApplyTextEdit()}
+                            disabled={isReplacing || replacementText === span.text}
+                            className="w-full h-7 text-xs bg-sky-600 hover:bg-sky-700 text-white gap-1"
+                          >
+                            {isReplacing ? "Replacing..." : "Apply Text Replacement"}
+                            <ArrowRight className="size-3" />
+                          </Button>
+                        </div>
+                      )}
+
+                      {isSelected && !isEditable && (
+                        <div className="mt-2 pt-2 border-t border-amber-200/60 text-[10px] text-amber-900 bg-amber-50/80 p-1.5 rounded">
+                          <p className="font-semibold flex items-center gap-1">
+                            <XCircle className="size-3 text-amber-700" />
+                            Replacement Refused:
+                          </p>
+                          <p className="mt-0.5 text-amber-800 leading-snug">
+                            {span.refusal_reason || "This font program does not support safe bidirectional Unicode glyph re-encoding."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : fields.length === 0 ? (
+          <div className="space-y-4 text-center my-12">
+            <div className="size-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+              <FileEdit className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold text-slate-800">No AcroForm Fields</h4>
+              <p className="text-[11px] text-slate-500 max-w-[200px] mx-auto leading-relaxed">
+                Use the &ldquo;Text&rdquo; tab to inspect and replace native content-stream text.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* Form Fields List */
+          <div className="space-y-4 pr-1">
+            {fields.map((field, index) => {
+              const inputId = `${baseId}-${field.name}-${index}`;
             const currentValue = fieldValues[field.name] ?? field.value;
 
             return (
@@ -205,6 +351,7 @@ export function PdfFormInspector({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Footer Reset Control */}
