@@ -36,6 +36,32 @@ export function starpdf_add_image(handle, page_index, image_bytes, x, y, width, 
 
 /**
  * @param {number} handle
+ * @param {any} input_val
+ * @returns {any}
+ */
+export function starpdf_add_line(handle, input_val) {
+    const ret = wasm.starpdf_add_line(handle, input_val);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {any} input_val
+ * @returns {any}
+ */
+export function starpdf_add_rectangle(handle, input_val) {
+    const ret = wasm.starpdf_add_rectangle(handle, input_val);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {boolean}
  */
 export function starpdf_close(handle) {
@@ -60,6 +86,19 @@ export function starpdf_create_minimal_pdf(text) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * @param {number} handle
+ * @param {any} input_val
+ * @returns {any}
+ */
+export function starpdf_delete_graphic(handle, input_val) {
+    const ret = wasm.starpdf_delete_graphic(handle, input_val);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -91,6 +130,31 @@ export function starpdf_duplicate_page(handle, page_index, destination_index) {
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v1;
+}
+
+/**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_enumerate_all_graphics(handle) {
+    const ret = wasm.starpdf_enumerate_all_graphics(handle);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @returns {any}
+ */
+export function starpdf_enumerate_graphics(handle, page_index) {
+    const ret = wasm.starpdf_enumerate_graphics(handle, page_index);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -578,6 +642,19 @@ export function starpdf_update_annotation(handle, obj_num, obj_gen, update_val) 
 
 /**
  * @param {number} handle
+ * @param {any} input_val
+ * @returns {any}
+ */
+export function starpdf_update_graphic(handle, input_val) {
+    const ret = wasm.starpdf_update_graphic(handle, input_val);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {boolean}
  */
 export function starpdf_validate(handle) {
@@ -621,6 +698,12 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
+        __wbg___wbindgen_bigint_get_as_i64_c4ecf48528083721: function(arg0, arg1) {
+            const v = arg1;
+            const ret = typeof(v) === 'bigint' ? v : undefined;
+            getDataViewMemory0().setBigInt64(arg0 + 8 * 1, isLikeNone(ret) ? BigInt(0) : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
+        },
         __wbg___wbindgen_boolean_get_c9c83ebd41b34df3: function(arg0) {
             const v = arg0;
             const ret = typeof(v) === 'boolean' ? v : undefined;
@@ -637,6 +720,10 @@ function __wbg_get_imports() {
             const ret = arg0 in arg1;
             return ret;
         },
+        __wbg___wbindgen_is_bigint_8ffbbef442139384: function(arg0) {
+            const ret = typeof(arg0) === 'bigint';
+            return ret;
+        },
         __wbg___wbindgen_is_function_5e4570eb24ffa122: function(arg0) {
             const ret = typeof(arg0) === 'function';
             return ret;
@@ -648,6 +735,10 @@ function __wbg_get_imports() {
         },
         __wbg___wbindgen_is_undefined_6cff064c44e0d823: function(arg0) {
             const ret = arg0 === undefined;
+            return ret;
+        },
+        __wbg___wbindgen_jsval_eq_0a18949a61670320: function(arg0, arg1) {
+            const ret = arg0 === arg1;
             return ret;
         },
         __wbg___wbindgen_jsval_loose_eq_acf2776254a8d832: function(arg0, arg1) {

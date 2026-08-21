@@ -213,11 +213,12 @@ impl<'a, 'b> ImageExtractor<'a, 'b> {
                                                 .and_then(PdfObject::as_i64)
                                                 .unwrap_or(0)
                                                 as u32;
-                                            let color_space = match stream_obj.dict.get("ColorSpace") {
+                                            let color_space = match stream_obj
+                                                .dict
+                                                .get("ColorSpace")
+                                            {
                                                 Some(PdfObject::Name(n)) => n.clone(),
-                                                Some(PdfObject::Array(_)) => {
-                                                    "Indexed/Array".into()
-                                                }
+                                                Some(PdfObject::Array(_)) => "Indexed/Array".into(),
                                                 Some(_) => "Unknown".into(),
                                                 None => "DeviceRGB".into(),
                                             };

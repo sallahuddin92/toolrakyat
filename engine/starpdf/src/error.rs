@@ -40,6 +40,10 @@ pub enum PdfError {
     UnsupportedImageFormat(String),
     ImageNotFound(String),
     NestedFormXObjectRefusal(String),
+    VectorGraphicNotFound(String),
+    VectorEditRefused(String),
+    UnsupportedVectorOperator(String),
+    ComplexClippingRefusal(String),
     Serialization(String),
     Compression(String),
     InvalidObject(String),
@@ -105,6 +109,12 @@ impl fmt::Display for PdfError {
             Self::NestedFormXObjectRefusal(msg) => {
                 write!(f, "NESTED_FORM_XOBJECT_REFUSAL: {msg}")
             }
+            Self::VectorGraphicNotFound(msg) => write!(f, "VECTOR_GRAPHIC_NOT_FOUND: {msg}"),
+            Self::VectorEditRefused(msg) => write!(f, "VECTOR_EDIT_REFUSED: {msg}"),
+            Self::UnsupportedVectorOperator(msg) => {
+                write!(f, "UNSUPPORTED_VECTOR_OPERATOR: {msg}")
+            }
+            Self::ComplexClippingRefusal(msg) => write!(f, "COMPLEX_CLIPPING_REFUSAL: {msg}"),
             Self::Serialization(msg) => write!(f, "SERIALIZATION_ERROR: {msg}"),
             Self::Compression(msg) => write!(f, "COMPRESSION_ERROR: {msg}"),
             Self::InvalidObject(msg) => write!(f, "INVALID_OBJECT: {msg}"),

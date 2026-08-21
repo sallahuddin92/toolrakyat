@@ -32,7 +32,8 @@
     clippy::derivable_impls,
     clippy::unnecessary_wraps,
     clippy::needless_range_loop,
-    clippy::doc_markdown
+    clippy::doc_markdown,
+    clippy::struct_excessive_bools
 )]
 
 pub mod annotation;
@@ -52,6 +53,7 @@ pub mod security;
 pub mod syntax;
 pub mod text;
 pub mod validate;
+pub mod vector;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 pub mod writer;
@@ -93,5 +95,10 @@ pub use text::{
     GraphicsState, Matrix2D, PageText, TextEditability, TextExtractor, TextSpan, TextState,
 };
 pub use validate::StructuralValidator;
+pub use vector::{
+    AddVectorGraphicSpec, DeleteVectorGraphicSpec, UpdateVectorGraphicSpec, VectorColor,
+    VectorEditability, VectorEditor, VectorExtractor, VectorGeometry, VectorGraphicInfo,
+    VectorGraphicType,
+};
 pub use writer::{CompleteWriter, IncrementalWriter, MinimalWriter, Serializer};
 pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};

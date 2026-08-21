@@ -34,6 +34,12 @@ import initWasm, {
   starpdf_replace_image,
   starpdf_add_image,
   starpdf_remove_image,
+  starpdf_enumerate_graphics,
+  starpdf_enumerate_all_graphics,
+  starpdf_update_graphic,
+  starpdf_add_rectangle,
+  starpdf_add_line,
+  starpdf_delete_graphic,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -222,6 +228,31 @@ self.onmessage = async (event) => {
       case "removeImage": {
         const result = starpdf_remove_image(req.handle, req.pageIndex, req.imageId);
         self.postMessage({ type: "removeImage", id: req.id, success: true, result });
+        break;
+      }
+      case "enumerateGraphics": {
+        const graphics = starpdf_enumerate_graphics(req.handle, req.pageIndex);
+        self.postMessage({ type: "enumerateGraphics", id: req.id, success: true, graphics });
+        break;
+      }
+      case "updateGraphic": {
+        const result = starpdf_update_graphic(req.handle, req.input);
+        self.postMessage({ type: "updateGraphic", id: req.id, success: true, result });
+        break;
+      }
+      case "addRectangle": {
+        const result = starpdf_add_rectangle(req.handle, req.input);
+        self.postMessage({ type: "addRectangle", id: req.id, success: true, result });
+        break;
+      }
+      case "addLine": {
+        const result = starpdf_add_line(req.handle, req.input);
+        self.postMessage({ type: "addLine", id: req.id, success: true, result });
+        break;
+      }
+      case "deleteGraphic": {
+        const result = starpdf_delete_graphic(req.handle, req.input);
+        self.postMessage({ type: "deleteGraphic", id: req.id, success: true, result });
         break;
       }
       case "exportIncremental": {

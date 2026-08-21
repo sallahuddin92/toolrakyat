@@ -59,4 +59,16 @@ pub enum PdfChange {
     AddImage { spec: crate::image::AddImageSpec },
     /// Removes an Image XObject draw operation from a page.
     RemoveImage { spec: crate::image::RemoveImageSpec },
+    /// Updates an existing vector graphic or path object in a page content stream.
+    UpdateVectorGraphic {
+        spec: crate::vector::UpdateVectorGraphicSpec,
+    },
+    /// Adds a new vector graphic to a page content stream.
+    AddVectorGraphic {
+        spec: crate::vector::AddVectorGraphicSpec,
+    },
+    /// Deletes an existing vector graphic from a page content stream.
+    DeleteVectorGraphic {
+        spec: crate::vector::DeleteVectorGraphicSpec,
+    },
 }

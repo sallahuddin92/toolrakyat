@@ -243,3 +243,99 @@ pub struct WasmImageMutationResult {
     pub success: bool,
     pub modified_object_count: usize,
 }
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmVectorGraphicInfo {
+    pub graphic_id: String,
+    pub page_index: usize,
+    pub stream_index: usize,
+    pub start_instruction_index: usize,
+    pub end_instruction_index: usize,
+    pub graphic_type: String,
+    pub bounds: [f64; 4],
+    pub local_bounds: [f64; 4],
+    pub transform: [f64; 6],
+    pub stroke_color_rgb: Option<[f64; 3]>,
+    pub fill_color_rgb: Option<[f64; 3]>,
+    pub stroke_color_hex: Option<String>,
+    pub fill_color_hex: Option<String>,
+    pub line_width: f64,
+    pub is_stroked: bool,
+    pub is_filled: bool,
+    pub is_shared: bool,
+    pub is_editable: bool,
+    pub editability_code: String,
+    pub refusal_reason: Option<String>,
+    pub rect_x: Option<f64>,
+    pub rect_y: Option<f64>,
+    pub rect_w: Option<f64>,
+    pub rect_h: Option<f64>,
+    pub line_x1: Option<f64>,
+    pub line_y1: Option<f64>,
+    pub line_x2: Option<f64>,
+    pub line_y2: Option<f64>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmUpdateVectorGraphicInput {
+    pub page_index: usize,
+    pub graphic_id: String,
+    pub rect_x: Option<f64>,
+    pub rect_y: Option<f64>,
+    pub rect_w: Option<f64>,
+    pub rect_h: Option<f64>,
+    pub line_x1: Option<f64>,
+    pub line_y1: Option<f64>,
+    pub line_x2: Option<f64>,
+    pub line_y2: Option<f64>,
+    pub stroke_color_rgb: Option<[f64; 3]>,
+    pub fill_color_rgb: Option<[f64; 3]>,
+    pub line_width: Option<f64>,
+    pub is_stroked: Option<bool>,
+    pub is_filled: Option<bool>,
+    pub clone_if_shared: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmAddRectangleInput {
+    pub page_index: usize,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub stroke_color_rgb: Option<[f64; 3]>,
+    pub fill_color_rgb: Option<[f64; 3]>,
+    pub line_width: f64,
+    pub is_stroked: bool,
+    pub is_filled: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmAddLineInput {
+    pub page_index: usize,
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+    pub stroke_color_rgb: Option<[f64; 3]>,
+    pub line_width: f64,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmDeleteVectorGraphicInput {
+    pub page_index: usize,
+    pub graphic_id: String,
+    pub clone_if_shared: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmVectorMutationResult {
+    pub success: bool,
+    pub modified_object_count: usize,
+}
