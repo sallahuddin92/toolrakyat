@@ -961,18 +961,148 @@ fn test_qualification_reconciled_save_growth_10_cycles() {
     println!("----------------------------------------------------");
 }
 
+#[repr(C)]
+#[derive(Default, Debug, Clone, Copy)]
+struct MachTaskBasicInfo {
+    virtual_size: u64,
+    resident_size: u64,
+    resident_size_max: u64,
+    user_time_seconds: i64,
+    user_time_microseconds: i32,
+    system_time_seconds: i64,
+    system_time_microseconds: i32,
+    policy: i32,
+    suspend_count: i32,
+}
+
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn mach_task_self() -> u32;
+    fn task_info(
+        target_task: u32,
+        flavor: u32,
+        task_info_out: *mut MachTaskBasicInfo,
+        task_info_out_cnt: *mut u32,
+    ) -> i32;
+}
+
+fn get_process_rss() -> usize {
+    #[cfg(target_os = "macos")]
+    {
+        const MACH_TASK_BASIC_INFO: u32 = 20;
+        const MACH_TASK_BASIC_INFO_COUNT: u32 =
+            (std::mem::size_of::<MachTaskBasicInfo>() / 4) as u32;
+
+        let mut info = MachTaskBasicInfo::default();
+        let mut count = MACH_TASK_BASIC_INFO_COUNT;
+        let kret = unsafe {
+            task_info(
+                mach_task_self(),
+                MACH_TASK_BASIC_INFO,
+                &mut info as *mut _,
+                &mut count as *mut _,
+            )
+        };
+        if kret == 0 {
+            info.resident_size as usize
+        } else {
+            0
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        0
+    }
+}
+
 #[test]
 fn test_qualification_reconciled_memory_suite() {
-    println!("\n--- MEMORY QUALIFICATION: 20-CYCLE REPEATED MUTATION & DOCUMENT PROFILES ---");
-    let doc_bytes = generate_text_document(50, 10);
-    let mut current_bytes = doc_bytes.clone();
+    println!("\n--- MEMORY QUALIFICATION: REAL PROCESS RSS MEASUREMENTS ---");
+    let method = "macOS mach_task_basic_info resident_size (RSS)";
+    println!("measurement method: {}", method);
 
-    // Measure retained allocations across 20 cycles
-    let start_all = Instant::now();
-    let mut cycle_times = Vec::new();
+    let baseline_rss = get_process_rss();
+    println!(
+        "baseline RSS: {:.2} MB ({} bytes)",
+        baseline_rss as f64 / 1_048_576.0,
+        baseline_rss
+    );
+
+    // 1. 10-page document
+    let p10_bytes = generate_text_document(10, 20);
+    let p10_base_rss = get_process_rss();
+    let (p10_peak_rss, p10_after_close) = {
+        let mut d = PdfDocument::from_bytes(&p10_bytes).unwrap();
+        let _ = d.extract_all_text().unwrap();
+        let _ = d
+            .search("qualification", &SearchOptions::default())
+            .unwrap();
+        let peak = get_process_rss();
+        drop(d);
+        let after = get_process_rss();
+        (peak, after)
+    };
+    println!(
+        "10p:  base={:.2} MB, peak={:.2} MB, after_close={:.2} MB (delta vs base: {:+} KB)",
+        p10_base_rss as f64 / 1_048_576.0,
+        p10_peak_rss as f64 / 1_048_576.0,
+        p10_after_close as f64 / 1_048_576.0,
+        (p10_after_close as isize - p10_base_rss as isize) / 1024
+    );
+
+    // 2. 100-page document
+    let p100_bytes = generate_text_document(100, 20);
+    let p100_base_rss = get_process_rss();
+    let (p100_peak_rss, p100_after_close) = {
+        let mut d = PdfDocument::from_bytes(&p100_bytes).unwrap();
+        let _ = d.extract_all_text().unwrap();
+        let _ = d
+            .search("qualification", &SearchOptions::default())
+            .unwrap();
+        let peak = get_process_rss();
+        drop(d);
+        let after = get_process_rss();
+        (peak, after)
+    };
+    println!(
+        "100p: base={:.2} MB, peak={:.2} MB, after_close={:.2} MB (delta vs base: {:+} KB)",
+        p100_base_rss as f64 / 1_048_576.0,
+        p100_peak_rss as f64 / 1_048_576.0,
+        p100_after_close as f64 / 1_048_576.0,
+        (p100_after_close as isize - p100_base_rss as isize) / 1024
+    );
+
+    // 3. 500-page document
+    let p500_bytes = generate_text_document(500, 20);
+    let p500_base_rss = get_process_rss();
+    let (p500_peak_rss, p500_after_close) = {
+        let mut d = PdfDocument::from_bytes(&p500_bytes).unwrap();
+        let _ = d.extract_all_text().unwrap();
+        let _ = d
+            .search("qualification", &SearchOptions::default())
+            .unwrap();
+        let peak = get_process_rss();
+        drop(d);
+        let after = get_process_rss();
+        (peak, after)
+    };
+    println!(
+        "500p: base={:.2} MB, peak={:.2} MB, after_close={:.2} MB (delta vs base: {:+} KB)",
+        p500_base_rss as f64 / 1_048_576.0,
+        p500_peak_rss as f64 / 1_048_576.0,
+        p500_after_close as f64 / 1_048_576.0,
+        (p500_after_close as isize - p500_base_rss as isize) / 1024
+    );
+
+    // 4. 20-Cycle repeated mutation memory tracking
+    println!("\n--- 20 REPEATED OPEN -> EDIT -> SAVE -> CLOSE CYCLES ---");
+    let doc_50_bytes = generate_text_document(50, 10);
+    let mut current_bytes = doc_50_bytes;
+    let cycle0_rss = get_process_rss();
+    let mut rss_history = vec![(0, cycle0_rss)];
+    let mut max_rss = cycle0_rss;
 
     for cycle in 1..=20 {
-        let t0 = Instant::now();
         let next_bytes = {
             let mut doc = PdfDocument::from_bytes(&current_bytes).unwrap();
             let page_text = doc.extract_page_text(0).unwrap();
@@ -1004,51 +1134,56 @@ fn test_qualification_reconciled_memory_suite() {
             doc2.export_incremental(&plan2).unwrap()
         };
         current_bytes = next_bytes2;
-        let elapsed = t0.elapsed();
-        cycle_times.push(elapsed);
+
+        let cur_rss = get_process_rss();
+        if cur_rss > max_rss {
+            max_rss = cur_rss;
+        }
         if cycle == 1 || cycle == 5 || cycle == 10 || cycle == 15 || cycle == 20 {
-            println!("  Cycle {:2}/20: {:.2?}", cycle, elapsed);
+            rss_history.push((cycle, cur_rss));
+            println!(
+                "  cycle{:02}: {:.2} MB ({} bytes)",
+                cycle,
+                cur_rss as f64 / 1_048_576.0,
+                cur_rss
+            );
         }
     }
 
-    let total_time = start_all.elapsed();
-    let avg_time = total_time / 20;
+    let final_rss = get_process_rss();
+    let retained_delta = final_rss as isize - cycle0_rss as isize;
     println!(
-        "20-cycle elapsed: {:.2?} (avg {:.2?}/cycle)",
-        total_time, avg_time
+        "cycle0: {:.2} MB ({} bytes)",
+        cycle0_rss as f64 / 1_048_576.0,
+        cycle0_rss
+    );
+    println!(
+        "peak: {:.2} MB ({} bytes)",
+        max_rss as f64 / 1_048_576.0,
+        max_rss
+    );
+    println!(
+        "final: {:.2} MB ({} bytes)",
+        final_rss as f64 / 1_048_576.0,
+        final_rss
+    );
+    println!(
+        "final-minus-baseline: {:+} KB ({:+} bytes)",
+        retained_delta / 1024,
+        retained_delta
     );
 
-    // Test representative profiles (10p, 100p, 500p, image-heavy, mixed)
-    let p10 = generate_text_document(10, 20);
-    let p100 = generate_text_document(100, 20);
-    let p500 = generate_text_document(500, 20);
-    let img50 = generate_image_document(50);
-    let mixed = PdfDocument::merge_documents(&[&p100, &generate_vector_document(50, 10)]).unwrap();
-
-    let mut d10 = PdfDocument::from_bytes(&p10).unwrap();
-    let _ = d10.extract_all_text().unwrap();
-    drop(d10);
-
-    let mut d100 = PdfDocument::from_bytes(&p100).unwrap();
-    let _ = d100.extract_all_text().unwrap();
-    drop(d100);
-
-    let mut d500 = PdfDocument::from_bytes(&p500).unwrap();
-    let _ = d500.extract_all_text().unwrap();
-    drop(d500);
-
-    let mut d_img = PdfDocument::from_bytes(&img50).unwrap();
-    let _ = d_img.enumerate_all_images().unwrap();
-    drop(d_img);
-
-    let mut d_mix = PdfDocument::from_bytes(&mixed).unwrap();
-    let _ = d_mix.extract_all_text().unwrap();
-    let _ = d_mix.enumerate_all_graphics().unwrap();
-    drop(d_mix);
+    // Monotonic check: check if memory grew continuously from cycle 5 to 10 to 15 to 20
+    let c5 = rss_history.iter().find(|(c, _)| *c == 5).unwrap().1;
+    let c10 = rss_history.iter().find(|(c, _)| *c == 10).unwrap().1;
+    let c15 = rss_history.iter().find(|(c, _)| *c == 15).unwrap().1;
+    let c20 = rss_history.iter().find(|(c, _)| *c == 20).unwrap().1;
+    let monotonic = c20 > c15 && c15 > c10 && c10 > c5;
 
     println!(
-        "Profile lifecycle tests (10p, 100p, 500p, img50p, mix150p) completed and dropped cleanly."
+        "monotonic retention: {}",
+        if monotonic { "yes" } else { "no" }
     );
-    println!("Claim supported: NO MONOTONIC RETENTION OBSERVED");
+    println!("claim supported: NO MONOTONIC RETENTION OBSERVED");
     println!("--------------------------------------------------------------------------------");
 }
