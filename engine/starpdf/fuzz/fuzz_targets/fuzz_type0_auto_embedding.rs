@@ -49,11 +49,11 @@ fuzz_target!(|data: &[u8]| {
         PdfObject::Dictionary(BTreeMap::from([
             ("Subtype".into(), PdfObject::Name("CIDFontType2".into())),
             ("BaseFont".into(), PdfObject::Name("FuzzCID".into())),
-            ("FontDescriptor".into(), PdfObject::Reference(descriptor_ref)),
             (
-                "CIDToGIDMap".into(),
-                PdfObject::Name("Identity".into()),
+                "FontDescriptor".into(),
+                PdfObject::Reference(descriptor_ref),
             ),
+            ("CIDToGIDMap".into(), PdfObject::Name("Identity".into())),
         ])),
     );
     document.store_mut().insert_cached(
@@ -61,10 +61,7 @@ fuzz_target!(|data: &[u8]| {
         PdfObject::Dictionary(BTreeMap::from([
             ("Subtype".into(), PdfObject::Name("Type0".into())),
             ("BaseFont".into(), PdfObject::Name("FuzzCID".into())),
-            (
-                "Encoding".into(),
-                PdfObject::Name("Identity-H".into()),
-            ),
+            ("Encoding".into(), PdfObject::Name("Identity-H".into())),
             (
                 "DescendantFonts".into(),
                 PdfObject::Array(vec![PdfObject::Reference(descendant_ref)]),

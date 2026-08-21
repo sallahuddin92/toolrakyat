@@ -30,6 +30,10 @@ import initWasm, {
   starpdf_remove_annotation,
   starpdf_replace_text,
   starpdf_get_text_editability,
+  starpdf_enumerate_images,
+  starpdf_replace_image,
+  starpdf_add_image,
+  starpdf_remove_image,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -184,6 +188,40 @@ self.onmessage = async (event) => {
       case "getTextEditability": {
         const span = starpdf_get_text_editability(req.handle, req.pageIndex, req.spanId);
         self.postMessage({ type: "getTextEditability", id: req.id, success: true, span });
+        break;
+      }
+      case "enumerateImages": {
+        const images = starpdf_enumerate_images(req.handle, req.pageIndex);
+        self.postMessage({ type: "enumerateImages", id: req.id, success: true, images });
+        break;
+      }
+      case "replaceImage": {
+        const result = starpdf_replace_image(
+          req.handle,
+          req.pageIndex,
+          req.imageId,
+          req.newImageBytes,
+          req.cloneIfShared ?? true
+        );
+        self.postMessage({ type: "replaceImage", id: req.id, success: true, result });
+        break;
+      }
+      case "addImage": {
+        const result = starpdf_add_image(
+          req.handle,
+          req.pageIndex,
+          req.imageBytes,
+          req.x,
+          req.y,
+          req.width,
+          req.height
+        );
+        self.postMessage({ type: "addImage", id: req.id, success: true, result });
+        break;
+      }
+      case "removeImage": {
+        const result = starpdf_remove_image(req.handle, req.pageIndex, req.imageId);
+        self.postMessage({ type: "removeImage", id: req.id, success: true, result });
         break;
       }
       case "exportIncremental": {

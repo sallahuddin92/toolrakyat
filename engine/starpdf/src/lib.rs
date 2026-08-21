@@ -43,6 +43,7 @@ pub mod error;
 pub mod filter;
 pub mod font;
 pub mod forms;
+pub mod image;
 pub mod io;
 pub mod mutation;
 pub mod page_ops;
@@ -70,6 +71,10 @@ pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorPara
 pub use font::{Font, PageResources, SimpleEncoding, UnicodeCMap};
 pub use forms::{
     AcroForm, AcroFormParser, ChoiceOption, FieldType, FieldValue, FormField, WidgetAnnotation,
+};
+pub use image::{
+    AddImageSpec, ImageEditor, ImageExtractor, ImageFormat, ImageXObjectInfo, JpegInfo,
+    RemoveImageSpec, ReplaceImageSpec,
 };
 pub use io::{ByteCursor, ByteSource};
 pub use mutation::{

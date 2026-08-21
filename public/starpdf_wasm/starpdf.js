@@ -16,6 +16,26 @@ export function starpdf_add_annotation(handle, page_index, annotation_val) {
 
 /**
  * @param {number} handle
+ * @param {number} page_index
+ * @param {Uint8Array} image_bytes
+ * @param {number} x
+ * @param {number} y
+ * @param {number} width
+ * @param {number} height
+ * @returns {any}
+ */
+export function starpdf_add_image(handle, page_index, image_bytes, x, y, width, height) {
+    const ptr0 = passArray8ToWasm0(image_bytes, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_add_image(handle, page_index, ptr0, len0, x, y, width, height);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {boolean}
  */
 export function starpdf_close(handle) {
@@ -71,6 +91,19 @@ export function starpdf_duplicate_page(handle, page_index, destination_index) {
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v1;
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @returns {any}
+ */
+export function starpdf_enumerate_images(handle, page_index) {
+    const ret = wasm.starpdf_enumerate_images(handle, page_index);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -359,6 +392,42 @@ export function starpdf_remove_annotation(handle, page_index, obj_num, obj_gen) 
         throw takeFromExternrefTable0(ret[1]);
     }
     return ret[0] !== 0;
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} image_id
+ * @returns {any}
+ */
+export function starpdf_remove_image(handle, page_index, image_id) {
+    const ptr0 = passStringToWasm0(image_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_remove_image(handle, page_index, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} image_id
+ * @param {Uint8Array} new_image_bytes
+ * @param {boolean} clone_if_shared
+ * @returns {any}
+ */
+export function starpdf_replace_image(handle, page_index, image_id, new_image_bytes, clone_if_shared) {
+    const ptr0 = passStringToWasm0(image_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(new_image_bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_replace_image(handle, page_index, ptr0, len0, ptr1, len1, clone_if_shared);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
 }
 
 /**

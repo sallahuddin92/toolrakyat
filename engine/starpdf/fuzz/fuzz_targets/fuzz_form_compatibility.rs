@@ -22,7 +22,11 @@ fuzz_target!(|data: &[u8]| {
         },
         FieldType::Checkbox => PdfChange::SetCheckbox {
             field_ref: field.object_ref,
-            widget_refs: field.widgets.iter().map(|widget| widget.object_ref).collect(),
+            widget_refs: field
+                .widgets
+                .iter()
+                .map(|widget| widget.object_ref)
+                .collect(),
             checked: true,
         },
         FieldType::Choice { .. } => {

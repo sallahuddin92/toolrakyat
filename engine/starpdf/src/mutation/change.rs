@@ -51,4 +51,12 @@ pub enum PdfChange {
         target: crate::mutation::text_edit::TextEditTarget,
         replacement: String,
     },
+    /// Replaces an existing Image XObject in-stream or with shared clone.
+    ReplaceImage {
+        spec: crate::image::ReplaceImageSpec,
+    },
+    /// Adds a new Image XObject to a page with content-stream draw operator.
+    AddImage { spec: crate::image::AddImageSpec },
+    /// Removes an Image XObject draw operation from a page.
+    RemoveImage { spec: crate::image::RemoveImageSpec },
 }

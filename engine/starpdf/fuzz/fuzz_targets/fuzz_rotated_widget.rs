@@ -12,8 +12,14 @@ fuzz_target!(|data: &[u8]| {
     }
     let number = |offset: usize| {
         f64::from_bits(u64::from_le_bytes([
-            data[offset], data[offset + 1], data[offset + 2], data[offset + 3],
-            data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
         ]))
     };
     let degrees = i64::from_le_bytes([
@@ -28,8 +34,5 @@ fuzz_target!(|data: &[u8]| {
         stream_length: data.len(),
         data: data.to_vec(),
     };
-    let _ = rotation.apply_to_stream(
-        [number(0), number(8), number(16), number(24)],
-        &mut stream,
-    );
+    let _ = rotation.apply_to_stream([number(0), number(8), number(16), number(24)], &mut stream);
 });
