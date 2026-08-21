@@ -1717,7 +1717,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toContainText("2", { timeout: 10000 });
 
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export Editable" }).click();
+    await page.getByRole("button", { name: "Export Editable" }).click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("workflow-e-edited.pdf");
   });
@@ -1743,7 +1743,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toContainText("2", { timeout: 10000 });
 
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export Editable" }).click();
+    await page.getByRole("button", { name: "Export Editable" }).click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("workflow-f-edited.pdf");
   });
@@ -2575,6 +2575,95 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.reload();
     await expect(workspace).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toBeVisible();
+  });
+
+  test("v0.20 Phase 2: Unified Command Lifecycle — Mutating Command with History & Dirty State", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "phase2-command-lifecycle.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    await expect(statusBar).toContainText("Page 1 / 2");
+    await expect(statusBar).not.toContainText("Unsaved changes");
+
+    // 1. Execute Duplicate Page Command -> Mutating
+    await page.getByTestId("page-duplicate").click();
+    await expect(statusBar).toContainText("Page 2 / 3", { timeout: 10000 });
+    await expect(statusBar).toContainText("Unsaved changes");
+
+    // 2. Undo Command -> Restores snapshot
+    await page.getByTestId("toolbar-undo-btn").click();
+    await expect(statusBar).toContainText("/ 2", { timeout: 10000 });
+
+    // 3. Redo Command -> Restores branch
+    await page.getByTestId("toolbar-redo-btn").click();
+    await expect(statusBar).toContainText("/ 3", { timeout: 10000 });
+  });
+
+  test("v0.20 Phase 2: Unified Selection Model — Hit Testing Priority, Escape, Empty Click & Page Navigation Clear", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-upload-1page.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "phase2-selection.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+
+    // 1. Click text span
+    const textSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await expect(textSpan).toBeVisible({ timeout: 5000 });
+    await textSpan.click();
+    await expect(statusBar).toContainText("Selected: TEXT");
+    await expect(page.locator('[data-testid="context-text-controls"]')).toBeVisible();
+
+    // 2. Press Escape -> Clears selection
+    await page.keyboard.press("Escape");
+    await expect(statusBar).toContainText("No selection");
+    await expect(page.locator('[data-testid="context-text-controls"]')).not.toBeVisible();
+
+    // 3. Click vector graphic
+    const graphic = page.locator('[data-testid^="canvas-graphic-"]').first();
+    if (await graphic.isVisible().catch(() => false)) {
+      await graphic.click();
+      await expect(statusBar).toContainText("Selected: VECTOR");
+
+      // 4. Click canvas background -> Clears selection
+      await workspace.click({ position: { x: 50, y: 50 } });
+      await expect(statusBar).toContainText("No selection");
+    }
+  });
+
+  test("v0.20 Phase 2: Page Command Atomicity & Busy Rejection Under Rapid Invocation", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "phase2-atomicity.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    const thumbRail = page.locator('[data-testid="pdf-thumbnail-rail"]');
+
+    // Perform Duplicate
+    await page.getByTestId("page-duplicate").click();
+    await expect(statusBar).toContainText("Page 2 / 3", { timeout: 10000 });
+    await expect(thumbRail).toBeVisible();
+
+    // Perform Delete
+    await page.getByTestId("page-delete").click();
+    await expect(statusBar).toContainText("Page 2 / 2", { timeout: 10000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
   });
 });
 

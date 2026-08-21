@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, RenderTask } from "@/lib/pdf/pdfjs-init";
 import { Loader2 } from "lucide-react";
 import { PdfInteractiveOverlay } from "./PdfInteractiveOverlay";
-import type { SelectedItem } from "./PdfContextualToolbar";
+import type { SmartPdfSelection } from "@/lib/pdf/selection";
 import type {
   StarPdfImageInfo,
   StarPdfTextSpan,
@@ -24,8 +24,8 @@ interface PdfPageCanvasProps {
   graphics?: StarPdfVectorGraphicInfo[];
   fields?: AcroFormField[];
   annotations?: PdfMarkupAnnotation[];
-  selectedItem?: SelectedItem | null;
-  onSelectItem?: (item: SelectedItem | null) => void;
+  selectedItem?: SmartPdfSelection;
+  onSelectItem?: (item: SmartPdfSelection) => void;
   className?: string;
   onPageRendered?: (pageNumber: number, width: number, height: number) => void;
 }

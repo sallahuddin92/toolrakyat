@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
 import type {
   StarPdfImageInfo,
   StarPdfTextSpan,
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
-import type { SelectedItem } from "./PdfContextualToolbar";
+import {
+  type SmartPdfSelection,
+  convertPdfRectToPixels,
+} from "@/lib/pdf/selection";
 import { cn } from "@/lib/utils";
 
 interface PdfInteractiveOverlayProps {
@@ -21,8 +23,8 @@ interface PdfInteractiveOverlayProps {
   graphics?: StarPdfVectorGraphicInfo[];
   fields?: AcroFormField[];
   annotations?: PdfMarkupAnnotation[];
-  selectedItem: SelectedItem | null;
-  onSelectItem: (item: SelectedItem | null) => void;
+  selectedItem: SmartPdfSelection;
+  onSelectItem: (item: SmartPdfSelection) => void;
 }
 
 export function PdfInteractiveOverlay({
@@ -39,41 +41,8 @@ export function PdfInteractiveOverlay({
   selectedItem,
   onSelectItem,
 }: PdfInteractiveOverlayProps) {
-  // Helper to convert PDF coordinate box to canvas CSS pixel box
-  const convertPdfRectToPixels = useMemo(() => {
-    return (x: number, y: number, width: number, height: number) => {
-      const rot = ((rotation % 360) + 360) % 360;
-      let left = 0;
-      let top = 0;
-      let w = width * scale;
-      let h = height * scale;
-
-      if (rot === 0) {
-        left = x * scale;
-        top = (pageHeight - (y + height)) * scale;
-      } else if (rot === 90) {
-        left = y * scale;
-        top = x * scale;
-        w = height * scale;
-        h = width * scale;
-      } else if (rot === 180) {
-        left = (pageWidth - (x + width)) * scale;
-        top = y * scale;
-      } else if (rot === 270) {
-        left = (pageHeight - (y + height)) * scale;
-        top = (pageWidth - (x + width)) * scale;
-        w = height * scale;
-        h = width * scale;
-      }
-
-      return {
-        left: Math.max(0, left),
-        top: Math.max(0, top),
-        width: Math.max(4, w),
-        height: Math.max(4, h),
-      };
-    };
-  }, [pageWidth, pageHeight, scale, rotation]);
+  const pageDims = { width: pageWidth, height: pageHeight, rotation };
+  const pageIdx = pageNumber - 1;
 
   return (
     <div
@@ -84,7 +53,8 @@ export function PdfInteractiveOverlay({
       {graphics.map((g) => {
         const isSelected = selectedItem?.type === "vector" && selectedItem.id === g.graphic_id;
         const [x, y, w, h] = g.bounds || [0, 0, 100, 100];
-        const rect = convertPdfRectToPixels(x, y, w, h);
+        const pdfRect = { x, y, width: w, height: h };
+        const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
         return (
           <div
@@ -94,7 +64,9 @@ export function PdfInteractiveOverlay({
               onSelectItem({
                 type: "vector",
                 id: g.graphic_id,
+                pageIndex: pageIdx,
                 data: g,
+                pdfRect,
                 bounds: rect,
               });
             }}
@@ -120,7 +92,8 @@ export function PdfInteractiveOverlay({
       {images.map((img) => {
         const isSelected = selectedItem?.type === "image" && selectedItem.id === img.image_id;
         const [x, y, w, h] = img.rect || [0, 0, img.width, img.height];
-        const rect = convertPdfRectToPixels(x, y, w || img.width, h || img.height);
+        const pdfRect = { x, y, width: w || img.width, height: h || img.height };
+        const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
         return (
           <div
@@ -130,7 +103,9 @@ export function PdfInteractiveOverlay({
               onSelectItem({
                 type: "image",
                 id: img.image_id,
+                pageIndex: pageIdx,
                 data: img,
+                pdfRect,
                 bounds: rect,
               });
             }}
@@ -155,7 +130,8 @@ export function PdfInteractiveOverlay({
       {/* 3. TEXT SPANS (Z-20) */}
       {textSpans.map((span) => {
         const isSelected = selectedItem?.type === "text" && selectedItem.id === span.span_id;
-        const rect = convertPdfRectToPixels(span.x, span.y, span.width, span.height);
+        const pdfRect = { x: span.x, y: span.y, width: span.width, height: span.height };
+        const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
         return (
           <div
@@ -165,7 +141,9 @@ export function PdfInteractiveOverlay({
               onSelectItem({
                 type: "text",
                 id: span.span_id,
+                pageIndex: pageIdx,
                 data: span,
+                pdfRect,
                 bounds: rect,
               });
             }}
@@ -196,7 +174,8 @@ export function PdfInteractiveOverlay({
       {annotations.map((annot) => {
         if (annot.pageIndex !== (pageNumber - 1)) return null;
         const isSelected = selectedItem?.type === "annotation" && selectedItem.id === annot.id;
-        const rect = convertPdfRectToPixels(annot.rect.x, annot.rect.y, annot.rect.width, annot.rect.height);
+        const pdfRect = { x: annot.rect.x, y: annot.rect.y, width: annot.rect.width, height: annot.rect.height };
+        const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
         return (
           <div
@@ -206,7 +185,9 @@ export function PdfInteractiveOverlay({
               onSelectItem({
                 type: "annotation",
                 id: annot.id,
+                pageIndex: pageIdx,
                 data: annot,
+                pdfRect,
                 bounds: rect,
               });
             }}
@@ -232,7 +213,8 @@ export function PdfInteractiveOverlay({
       {fields.map((field) => {
         if (!field.rect) return null;
         const isSelected = selectedItem?.type === "form" && selectedItem.id === field.name;
-        const rect = convertPdfRectToPixels(field.rect.x, field.rect.y, field.rect.width, field.rect.height);
+        const pdfRect = { x: field.rect.x, y: field.rect.y, width: field.rect.width, height: field.rect.height };
+        const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
         return (
           <div
@@ -242,7 +224,9 @@ export function PdfInteractiveOverlay({
               onSelectItem({
                 type: "form",
                 id: field.name,
+                pageIndex: pageIdx,
                 data: field,
+                pdfRect,
                 bounds: rect,
               });
             }}
