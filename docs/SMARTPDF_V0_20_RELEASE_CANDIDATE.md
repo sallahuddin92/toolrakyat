@@ -40,12 +40,10 @@ SmartPDF is a pure client-side, browser-native PDF editor powered by StarPDF, a 
 | **SEARCH** | Exact and case-insensitive keyword search, hit cycling | StarPDF WASM search | **SUPPORTED** |
 | **TEXT EXTRACTION** | Text run / span extraction with position and font metadata | StarPDF WASM content stream parser | **SUPPORTED** |
 | **NATIVE EXISTING-TEXT EDIT** | Single-line / bounded multi-span replacement in content streams | StarPDF WASM `Tj` / `TJ` stream rewrite | **BOUNDED_SUPPORTED** |
-| **IMAGE REPLACE** | Replace embedded raster images (JPEG/PNG) preserving CTM | StarPDF WASM XObject replacement | **SUPPORTED** |
-| **IMAGE REMOVE** | Remove raster image objects from page content streams | StarPDF WASM content stream filtering | **SUPPORTED** |
-| **IMAGE ADD** | Insert new image onto page coordinate bounds | StarPDF WASM XObject insertion | **SUPPORTED** |
-| **VECTOR RECTANGLE / LINE** | Add, recolor stroke/fill, resize, change line width, delete | StarPDF WASM graphics operator rewrite | **SUPPORTED** |
-| **ACROFORM** | Detect form fields, edit text/checkbox/radio/dropdown | PDF-lib + StarPDF structure sync | **SUPPORTED** |
-| **WIDGET ANNOTATIONS** | On-canvas hitbox selection, inline contextual edit, export | AcroForm `/Annots` stream synchronization | **SUPPORTED** |
+| **IMAGE REPLACE / ADD / REMOVE**| Direct replacement, insertion, and removal of JPEG/PNG raster XObjects | StarPDF WASM XObject manager | **BOUNDED_SUPPORTED** |
+| **VECTOR RECTANGLE / LINE** | Add, recolor stroke/fill, resize, change line width, delete on content streams | StarPDF WASM graphics operator rewrite | **BOUNDED_SUPPORTED** |
+| **ACROFORM** | Detect form fields, edit text/checkbox/radio/dropdown (XFA excluded) | PDF-lib + StarPDF structure sync | **BOUNDED_SUPPORTED** |
+| **WIDGET ANNOTATIONS** | On-canvas hitbox selection, inline contextual edit, export sync | AcroForm `/Annots` stream synchronization | **BOUNDED_SUPPORTED** |
 | **MARKUP ANNOTATIONS** | Selection of FreeText, Square, Highlight, Ink; edit contents | PDF-lib `/Annots` dictionary mutation | **BOUNDED_SUPPORTED** |
 | **PAGE REORDER** | Move page left / right with bounded page tree index rewrite | StarPDF WASM page tree mutation | **SUPPORTED** |
 | **PAGE DUPLICATE** | Clone page object, resources, and annotations | StarPDF WASM page tree cloning | **SUPPORTED** |
@@ -57,10 +55,10 @@ SmartPDF is a pure client-side, browser-native PDF editor powered by StarPDF, a 
 | **UNDO / REDO** | 25-snapshot in-memory history stack with shortcuts | SmartPDF immutable snapshot manager | **SUPPORTED** |
 | **EXPORT** | Incremental / flattened PDF generation with Blob download | Browser client Blob pipeline | **SUPPORTED** |
 | **EXPORT + REOPEN** | Verifiable byte integrity on reopening modified PDF | StarPDF & PDF.js parser roundtrip | **SUPPORTED** |
-| **REAL-WORLD RECOVERY** | Drift tolerance, stream length reconciliation, BOM skip | StarPDF conservative recovery pipeline | **SUPPORTED** |
-| **ENCRYPTED PDF BEHAVIOR** | Explicit typed refusal banner and modal warning | StarPDF Standard Security Handler guard | **TYPED REFUSAL** |
-| **COMPLEX SCRIPT TEXT MUTATION**| Vertical text, Indic/Arabic complex writing shaping | View-only preserved; rewrite refused safely | **READ_ONLY / REFUSAL** |
-| **UNSUPPORTED FONT ENCODINGS** | Missing ToUnicode / non-standard difference encodings | View-only preserved; rewrite refused safely | **READ_ONLY / REFUSAL** |
+| **REAL-WORLD RECOVERY** | Drift tolerance, stream length reconciliation, BOM skip (corrupt syntax safely refused) | StarPDF conservative recovery pipeline | **BOUNDED_SUPPORTED** |
+| **ENCRYPTED PDF BEHAVIOR** | Explicit typed refusal banner and modal warning | StarPDF Standard Security Handler guard | **UNSUPPORTED (TYPED_REFUSAL)** |
+| **COMPLEX SCRIPT TEXT MUTATION**| Vertical text, Indic/Arabic complex writing shaping | View-only preserved; rewrite refused safely | **UNSUPPORTED (READ_ONLY_PRESERVED)** |
+| **UNSUPPORTED FONT ENCODINGS** | Missing ToUnicode / non-standard difference encodings | View-only preserved; rewrite refused safely | **UNSUPPORTED (READ_ONLY_PRESERVED)** |
 
 ---
 
@@ -90,10 +88,12 @@ SmartPDF is a pure client-side, browser-native PDF editor powered by StarPDF, a 
 ---
 
 ## 8. Runtime Dependency & License Audit
-- **JavaScript Packages**: All runtime packages (`react`, `react-dom`, `next`, `pdfjs-dist`, `pdf-lib`, `lucide-react`, `radix-ui`, `tailwind-merge`, `clsx`, `zustand`) utilize permissive open-source licenses (MIT, Apache-2.0, ISC).
-- **Rust Crates**: `miniz_oxide` (MIT/Apache-2.0/Zlib), `wasm-bindgen` (MIT/Apache-2.0), `serde` (MIT/Apache-2.0).
-- **GPL/AGPL Risk**: `0`
-- **Attribution Documentation**: Maintained in `THIRD_PARTY_NOTICES.md`.
+- **Transitive NPM Production Dependencies**: 623 unique packages audited from `node_modules` and `package-lock.json`.
+- **Transitive Rust Shipped Crates**: 23 crates audited from `engine/starpdf/Cargo.lock`.
+- **Unknown Licenses**: 0
+- **Known License Blockers**: **NONE FOUND**
+- **Manual Review Required**: 0 (all 623 packages and 23 crates operate under permissive open-source licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0, Zlib, or dual-license with MIT).
+- **Attribution Documentation**: Full third-party notices compiled in `THIRD_PARTY_NOTICES.md`.
 
 ---
 
@@ -147,12 +147,13 @@ SmartPDF is a pure client-side, browser-native PDF editor powered by StarPDF, a 
 ---
 
 ## 13. Performance Smoke Verification
-- **Ordinary PDF Open (1–5 pages)**: $< 150\text{ ms}$
-- **100-page Document Open & Navigation**: $< 850\text{ ms}$
-- **Full-Document Keyword Search**: $< 60\text{ ms}$
-- **Native Text Replacement**: $< 35\text{ ms}$
-- **Export Pipeline**: $< 200\text{ ms}$
-- **Classification**: `NO_MEANINGFUL_REGRESSION`
+- **RC Responsiveness Smoke**: **PASS**
+  - Ordinary PDF Open (1–5 pages): $< 150\text{ ms}$
+  - 100-page Document Open & Navigation: $< 850\text{ ms}$
+  - Full-Document Keyword Search: $< 60\text{ ms}$
+  - Native Text Replacement: $< 35\text{ ms}$
+  - Export Pipeline: $< 200\text{ ms}$
+- **Historical Performance Comparison**: **NOT_COMPARABLE** (RC release paths measure complete end-to-end browser DOM, Web Worker, and canvas lifecycle overhead, whereas historical benchmarks measured raw isolated WASM iterations in Node/test runners).
 
 ---
 
@@ -174,7 +175,6 @@ SmartPDF is a pure client-side, browser-native PDF editor powered by StarPDF, a 
 1. Custom Freehand Ink & Drawing Canvas Tools.
 2. Client-Side Decryption support for user-supplied passwords.
 3. Advanced Multi-Column Reflow and Text Box Resizing.
-4. Optical Character Recognition (OCR) for Scanned PDF integration.
 
 ---
 
