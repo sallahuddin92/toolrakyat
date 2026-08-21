@@ -204,6 +204,28 @@ export interface StarPdfUpdateAnnotationInput {
 /**
  * Worker Protocol Request Messages
  */
+export interface StarPdfImageInfo {
+  image_id: string;
+  page_index: number;
+  stream_index: number;
+  instruction_index: number;
+  resource_name: string;
+  width: number;
+  height: number;
+  color_space: string;
+  bits_per_component: number;
+  filter?: string;
+  transform: [number, number, number, number, number, number];
+  rect: [number, number, number, number];
+  is_nested_form: boolean;
+  is_shared: boolean;
+}
+
+export interface StarPdfImageMutationResult {
+  success: boolean;
+  modified_object_count: number;
+}
+
 export type StarPdfWorkerRequest =
   | { type: "init"; id: string; wasmUrl?: string }
   | { type: "open"; id: string; buffer: ArrayBuffer }
@@ -212,28 +234,24 @@ export type StarPdfWorkerRequest =
   | { type: "pageCount"; id: string; handle: number }
   | { type: "extractPage"; id: string; handle: number; pageIndex: number }
   | { type: "extractAll"; id: string; handle: number }
-  | { type: "search"; id: string; handle: number; query: string; caseSensitive: boolean }
+  | { type: "search"; id: string; handle: number; query: string; caseSensitive?: boolean }
   | { type: "validate"; id: string; handle: number }
   | { type: "getFormFields"; id: string; handle: number }
   | { type: "getAnnotations"; id: string; handle: number; pageIndex: number }
-  | { type: "setTextField"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
-  | { type: "setCheckbox"; id: string; handle: number; objectNum: number; objectGen: number; checked: boolean }
-  | {
-      type: "setRadio";
-      id: string;
-      handle: number;
-      parentNum: number;
-      parentGen: number;
-      widgetNum: number;
-      widgetGen: number;
-      onState: string;
-    }
-  | { type: "setChoice"; id: string; handle: number; objectNum: number; objectGen: number; value: string }
-  | { type: "setChoiceValues"; id: string; handle: number; objectNum: number; objectGen: number; values: string[] }
-  | { type: "addAnnotation"; id: string; handle: number; pageIndex: number; input: StarPdfAddAnnotationInput }
-  | { type: "updateAnnotation"; id: string; handle: number; objectNum: number; objectGen: number; input: StarPdfUpdateAnnotationInput }
+  | { type: "setTextField"; id: string; handle: number; objNum: number; objGen: number; value: string }
+  | { type: "setCheckbox"; id: string; handle: number; objNum: number; objGen: number; checked: boolean }
+  | { type: "setRadio"; id: string; handle: number; parentNum: number; parentGen: number; widgetNum: number; widgetGen: number; onState: string }
+  | { type: "setChoice"; id: string; handle: number; objNum: number; objGen: number; value: string }
+  | { type: "setChoiceValues"; id: string; handle: number; objNum: number; objGen: number; values: string[] }
+  | { type: "addAnnotation"; id: string; handle: number; pageIndex: number; annotation: Record<string, unknown> }
+  | { type: "updateAnnotation"; id: string; handle: number; objNum: number; objGen: number; update: Record<string, unknown> }
+  | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objNum: number; objGen: number }
   | { type: "replaceText"; id: string; handle: number; pageIndex: number; spanId: string; newText: string }
   | { type: "getTextEditability"; id: string; handle: number; pageIndex: number; spanId: string }
+  | { type: "enumerateImages"; id: string; handle: number; pageIndex: number }
+  | { type: "replaceImage"; id: string; handle: number; pageIndex: number; imageId: string; newImageBytes: Uint8Array; cloneIfShared?: boolean }
+  | { type: "addImage"; id: string; handle: number; pageIndex: number; imageBytes: Uint8Array; x: number; y: number; width: number; height: number }
+  | { type: "removeImage"; id: string; handle: number; pageIndex: number; imageId: string }
   | { type: "exportIncremental"; id: string; handle: number }
   | { type: "deletePage"; id: string; handle: number; pageIndex: number }
   | { type: "movePage"; id: string; handle: number; fromIndex: number; toIndex: number }
@@ -273,6 +291,10 @@ export type StarPdfWorkerResponse =
   | { type: "removeAnnotation"; id: string; success: true }
   | { type: "replaceText"; id: string; success: true; result: StarPdfReplaceTextResult }
   | { type: "getTextEditability"; id: string; success: true; span: StarPdfTextSpan }
+  | { type: "enumerateImages"; id: string; success: true; images: StarPdfImageInfo[] }
+  | { type: "replaceImage"; id: string; success: true; result: StarPdfImageMutationResult }
+  | { type: "addImage"; id: string; success: true; result: StarPdfImageMutationResult }
+  | { type: "removeImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "deletePage"; id: string; success: true; bytes: Uint8Array }
   | { type: "movePage"; id: string; success: true; bytes: Uint8Array }

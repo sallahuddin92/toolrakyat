@@ -216,3 +216,16 @@ name = "fuzz_page_document_ops"
 path = "fuzz_targets/fuzz_page_document_ops.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_existing_text_mutation"
+path = "fuzz_targets/fuzz_existing_text_mutation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_image_operations"
+path = "fuzz_targets/fuzz_image_operations.rs"
+test = false
+doc = false
+

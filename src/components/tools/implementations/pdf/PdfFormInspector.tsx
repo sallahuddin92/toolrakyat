@@ -1,14 +1,27 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, useEffect, useRef } from "react";
 import { type AcroFormField } from "@/lib/pdf/pdf-types";
-import type { StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
+import type { StarPdfImageInfo, StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { RotateCcw, FileEdit, Type, CheckCircle2, AlertTriangle, XCircle, ArrowRight } from "lucide-react";
+import {
+  RotateCcw,
+  FileEdit,
+  Type,
+  ImageIcon,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  ArrowRight,
+  Upload,
+  Trash2,
+  RefreshCw,
+  Plus,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PdfFormInspectorProps {
@@ -19,6 +32,10 @@ interface PdfFormInspectorProps {
   isModified: boolean;
   textSpans?: StarPdfTextSpan[];
   onReplaceText?: (spanId: string, newText: string) => Promise<void>;
+  images?: StarPdfImageInfo[];
+  onReplaceImage?: (imageId: string, file: File) => Promise<void>;
+  onAddImage?: (file: File, x: number, y: number, width: number, height: number) => Promise<void>;
+  onRemoveImage?: (imageId: string) => Promise<void>;
   className?: string;
 }
 
@@ -30,15 +47,31 @@ export function PdfFormInspector({
   isModified,
   textSpans = [],
   onReplaceText,
+  images = [],
+  onReplaceImage,
+  onAddImage,
+  onRemoveImage,
   className = "",
 }: PdfFormInspectorProps) {
   const baseId = useId();
-  const [activeTab, setActiveTab] = useState<"fields" | "text">(() =>
+  const [activeTab, setActiveTab] = useState<"fields" | "text" | "images">(() =>
     fields.length > 0 ? "fields" : "text",
   );
+
+  useEffect(() => {
+    if (fields.length > 0) {
+      setActiveTab("fields");
+    }
+  }, [fields.length]);
+
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [replacementText, setReplacementText] = useState<string>("");
   const [isReplacing, setIsReplacing] = useState<boolean>(false);
+  const [isImageProcessing, setIsImageProcessing] = useState<boolean>(false);
+
+  const addImageInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [targetReplaceImageId, setTargetReplaceImageId] = useState<string | null>(null);
 
   const handleSelectSpan = (span: StarPdfTextSpan) => {
     setSelectedSpanId(span.span_id);
@@ -52,6 +85,49 @@ export function PdfFormInspector({
       await onReplaceText(selectedSpanId, replacementText);
     } finally {
       setIsReplacing(false);
+    }
+  };
+
+  const handleTriggerReplaceImage = (imageId: string) => {
+    setTargetReplaceImageId(imageId);
+    replaceImageInputRef.current?.click();
+  };
+
+  const handleReplaceImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !targetReplaceImageId || !onReplaceImage) return;
+
+    setIsImageProcessing(true);
+    try {
+      await onReplaceImage(targetReplaceImageId, file);
+    } finally {
+      setIsImageProcessing(false);
+      if (replaceImageInputRef.current) replaceImageInputRef.current.value = "";
+      setTargetReplaceImageId(null);
+    }
+  };
+
+  const handleAddImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onAddImage) return;
+
+    setIsImageProcessing(true);
+    try {
+      // Default insert at center-bottom: x=100, y=100, width=200, height=150
+      await onAddImage(file, 100, 100, 200, 150);
+    } finally {
+      setIsImageProcessing(false);
+      if (addImageInputRef.current) addImageInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveImageClick = async (imageId: string) => {
+    if (!onRemoveImage) return;
+    setIsImageProcessing(true);
+    try {
+      await onRemoveImage(imageId);
+    } finally {
+      setIsImageProcessing(false);
     }
   };
 
@@ -86,7 +162,7 @@ export function PdfFormInspector({
             type="button"
             onClick={() => setActiveTab("fields")}
             className={cn(
-              "flex-1 text-xs font-medium py-1.5 px-2 rounded-md transition-all flex items-center justify-center gap-1.5",
+              "flex-1 text-xs font-medium py-1.5 px-1.5 rounded-md transition-all flex items-center justify-center gap-1",
               activeTab === "fields"
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900",
@@ -99,7 +175,7 @@ export function PdfFormInspector({
             type="button"
             onClick={() => setActiveTab("text")}
             className={cn(
-              "flex-1 text-xs font-medium py-1.5 px-2 rounded-md transition-all flex items-center justify-center gap-1.5",
+              "flex-1 text-xs font-medium py-1.5 px-1.5 rounded-md transition-all flex items-center justify-center gap-1",
               activeTab === "text"
                 ? "bg-white text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900",
@@ -107,6 +183,19 @@ export function PdfFormInspector({
           >
             <Type className="size-3.5" />
             Text ({textSpans.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("images")}
+            className={cn(
+              "flex-1 text-xs font-medium py-1.5 px-1.5 rounded-md transition-all flex items-center justify-center gap-1",
+              activeTab === "images"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900",
+            )}
+          >
+            <ImageIcon className="size-3.5" />
+            Images ({images.length})
           </button>
         </div>
 
@@ -138,71 +227,66 @@ export function PdfFormInspector({
                         "p-2.5 rounded-lg border text-xs transition-all cursor-pointer",
                         isSelected
                           ? "border-sky-500 bg-sky-50/50 shadow-sm"
-                          : "border-slate-200/80 bg-slate-50/60 hover:border-slate-300",
+                          : "border-slate-200 bg-white hover:border-slate-300",
                       )}
                     >
-                      <div className="flex items-start justify-between gap-1 mb-1">
-                        <span className="font-mono text-[10px] text-slate-500 truncate max-w-[130px]" title={span.font_name}>
-                          {span.font_name} ({Math.round(span.font_size)}pt)
-                        </span>
+                      <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                        <div className="flex items-center gap-1 font-mono text-[10px] text-slate-500 truncate">
+                          <span>{span.span_id}</span>
+                          <span>•</span>
+                          <span>{span.font_name}</span>
+                        </div>
                         {isEditable ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 text-[9px] px-1.5 py-0 border-0 flex items-center gap-0.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] px-1 py-0 border-emerald-300 text-emerald-700 bg-emerald-50 flex items-center gap-0.5"
+                          >
                             <CheckCircle2 className="size-2.5" />
                             Editable
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-[9px] px-1.5 py-0 flex items-center gap-0.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] px-1 py-0 border-amber-300 text-amber-700 bg-amber-50 flex items-center gap-0.5"
+                            title={span.refusal_reason || span.editability_code}
+                          >
                             <AlertTriangle className="size-2.5" />
-                            {span.editability_code === "UNSUPPORTED_COMPLEX_SCRIPT"
-                              ? "Complex Script"
-                              : span.editability_code === "UNSUPPORTED_FONT_ENCODING"
-                              ? "Font Unmapped"
-                              : "Refused"}
+                            Refused
                           </Badge>
                         )}
                       </div>
 
-                      <p className="font-medium text-slate-800 text-xs break-words line-clamp-2">
-                        &ldquo;{span.text}&rdquo;
+                      <p className="text-slate-800 font-medium text-xs break-words line-clamp-2">
+                        {span.text || <span className="italic text-slate-400">(empty)</span>}
                       </p>
 
-                      {isSelected && isEditable && (
-                        <div className="mt-2.5 pt-2 border-t border-sky-200/60 space-y-2" onClick={(e) => e.stopPropagation()}>
-                          <Label className="text-[10px] font-semibold text-sky-900">
-                            Replacement Text:
+                      {isSelected && (
+                        <div className="mt-2.5 pt-2 border-t border-sky-200/60 space-y-2">
+                          <Label className="text-[10px] text-sky-900 font-medium block">
+                            Replace In-Stream Text:
                           </Label>
                           <Input
-                            type="text"
                             value={replacementText}
                             onChange={(e) => setReplacementText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") void handleApplyTextEdit();
-                            }}
-                            className="h-7 text-xs bg-white border-sky-300 focus:border-sky-500"
-                            placeholder="Enter new text..."
+                            className="h-7 text-xs bg-white border-sky-300 focus-visible:ring-sky-500"
+                            placeholder="Enter replacement..."
+                            disabled={!isEditable || isReplacing}
                           />
+                          {!isEditable && (
+                            <p className="text-[10px] text-amber-600 flex items-center gap-1">
+                              <XCircle className="size-3 shrink-0" />
+                              {span.refusal_reason || "Unsupported encoding or complex script."}
+                            </p>
+                          )}
                           <Button
-                            type="button"
                             size="sm"
-                            onClick={() => void handleApplyTextEdit()}
-                            disabled={isReplacing || replacementText === span.text}
-                            className="w-full h-7 text-xs bg-sky-600 hover:bg-sky-700 text-white gap-1"
+                            onClick={handleApplyTextEdit}
+                            disabled={!isEditable || isReplacing || replacementText === span.text}
+                            className="w-full h-7 text-xs bg-sky-600 hover:bg-sky-700 text-white flex items-center justify-center gap-1"
                           >
-                            {isReplacing ? "Replacing..." : "Apply Text Replacement"}
                             <ArrowRight className="size-3" />
+                            {isReplacing ? "Applying..." : "Apply Text Change"}
                           </Button>
-                        </div>
-                      )}
-
-                      {isSelected && !isEditable && (
-                        <div className="mt-2 pt-2 border-t border-amber-200/60 text-[10px] text-amber-900 bg-amber-50/80 p-1.5 rounded">
-                          <p className="font-semibold flex items-center gap-1">
-                            <XCircle className="size-3 text-amber-700" />
-                            Replacement Refused:
-                          </p>
-                          <p className="mt-0.5 text-amber-800 leading-snug">
-                            {span.refusal_reason || "This font program does not support safe bidirectional Unicode glyph re-encoding."}
-                          </p>
                         </div>
                       )}
                     </div>
@@ -211,163 +295,233 @@ export function PdfFormInspector({
               </div>
             )}
           </div>
-        ) : fields.length === 0 ? (
-          <div className="space-y-4 text-center my-12">
-            <div className="size-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-              <FileEdit className="size-5" />
+        ) : activeTab === "images" ? (
+          /* Image Objects List & Bounded Editor */
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <span className="text-xs font-semibold text-slate-800">
+                Page Images ({images.length})
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => addImageInputRef.current?.click()}
+                disabled={isImageProcessing}
+                className="h-6 text-[11px] px-2 border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-1"
+              >
+                <Plus className="size-3" />
+                Add Image
+              </Button>
             </div>
-            <div className="space-y-1">
-              <h4 className="text-xs font-semibold text-slate-800">No AcroForm Fields</h4>
-              <p className="text-[11px] text-slate-500 max-w-[200px] mx-auto leading-relaxed">
-                Use the &ldquo;Text&rdquo; tab to inspect and replace native content-stream text.
-              </p>
-            </div>
+
+            {/* Hidden File Inputs */}
+            <input
+              type="file"
+              ref={addImageInputRef}
+              onChange={handleAddImageFileChange}
+              accept="image/jpeg,image/png"
+              className="hidden"
+            />
+            <input
+              type="file"
+              ref={replaceImageInputRef}
+              onChange={handleReplaceImageFileChange}
+              accept="image/jpeg,image/png"
+              className="hidden"
+            />
+
+            {images.length === 0 ? (
+              <div className="text-center py-8 space-y-2 border border-dashed border-slate-200 rounded-lg p-4">
+                <ImageIcon className="size-8 text-slate-300 mx-auto" />
+                <p className="text-xs text-slate-400 italic">No image objects detected on this page.</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addImageInputRef.current?.click()}
+                  disabled={isImageProcessing}
+                  className="h-7 text-xs border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100"
+                >
+                  <Upload className="size-3 mr-1" />
+                  Insert Image Here
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2.5 pr-1 max-h-[480px] overflow-y-auto">
+                {images.map((img) => {
+                  const widthPt = Math.round(img.rect[2] - img.rect[0]);
+                  const heightPt = Math.round(img.rect[3] - img.rect[1]);
+
+                  return (
+                    <div
+                      key={img.image_id}
+                      className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-medium text-[11px] text-slate-800">
+                          /{img.resource_name}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {img.is_shared && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-300 text-amber-700 bg-amber-50">
+                              Shared
+                            </Badge>
+                          )}
+                          {img.is_nested_form && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 border-indigo-300 text-indigo-700 bg-indigo-50">
+                              Form XObject
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-100">
+                        <div>
+                          <span className="text-slate-400">Pixels:</span> {img.width} × {img.height}
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Color:</span> {img.color_space}
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Size:</span> {widthPt} × {heightPt} pt
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Filter:</span> {img.filter || "Raw"}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleTriggerReplaceImage(img.image_id)}
+                          disabled={isImageProcessing || img.is_nested_form}
+                          className="flex-1 h-7 text-xs border-slate-200 hover:bg-slate-100 flex items-center justify-center gap-1"
+                        >
+                          <RefreshCw className="size-3" />
+                          Replace
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRemoveImageClick(img.image_id)}
+                          disabled={isImageProcessing || img.is_nested_form}
+                          className="h-7 text-xs border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 flex items-center justify-center px-2"
+                          title="Remove image from page"
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           /* Form Fields List */
-          <div className="space-y-4 pr-1">
-            {fields.map((field, index) => {
-              const inputId = `${baseId}-${field.name}-${index}`;
-            const currentValue = fieldValues[field.name] ?? field.value;
+          <div className="space-y-4">
+            {fields.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-6">
+                No interactive form fields found in this PDF.
+              </p>
+            ) : (
+              fields.map((field) => {
+                const inputId = `${baseId}-${field.name}`;
+                const val = fieldValues[field.name];
 
-            return (
-              <div
-                key={field.name}
-                className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200/80 transition-all hover:border-slate-300"
-              >
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor={inputId}
-                    className="text-xs font-medium text-slate-800 truncate max-w-[180px]"
-                    title={field.name}
-                  >
-                    {field.name}
-                    {field.isRequired && <span className="text-red-500 ml-0.5">*</span>}
-                  </Label>
-                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-600">
-                    {field.type}
-                  </span>
-                </div>
+                return (
+                  <div key={field.name} className="space-y-1.5 p-2.5 rounded-lg border border-slate-100 bg-slate-50/50">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor={inputId} className="text-xs font-medium text-slate-700 truncate max-w-[180px]">
+                        {field.name}
+                      </Label>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 capitalize">
+                        {field.type}
+                      </Badge>
+                    </div>
 
-                {/* Text Field */}
-                {field.type === "text" && (
-                  <Input
-                    id={inputId}
-                    type="text"
-                    value={typeof currentValue === "string" ? currentValue : ""}
-                    onChange={(e) => onFieldValueChange(field.name, e.target.value)}
-                    disabled={field.isReadOnly}
-                    className="h-8 text-xs bg-white"
-                    placeholder="Enter text..."
-                  />
-                )}
+                    {field.type === "text" && (
+                      <Input
+                        id={inputId}
+                        value={typeof val === "string" ? val : ""}
+                        onChange={(e) => onFieldValueChange(field.name, e.target.value)}
+                        className="h-8 text-xs bg-white"
+                        placeholder="Enter text..."
+                      />
+                    )}
 
-                {/* Checkbox Field */}
-                {field.type === "checkbox" && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <Checkbox
-                      id={inputId}
-                      checked={Boolean(currentValue)}
-                      onCheckedChange={(checked) => onFieldValueChange(field.name, Boolean(checked))}
-                      disabled={field.isReadOnly}
-                    />
-                    <label htmlFor={inputId} className="text-xs text-slate-600 cursor-pointer select-none">
-                      {Boolean(currentValue) ? "Checked" : "Unchecked"}
-                    </label>
-                  </div>
-                )}
+                    {field.type === "checkbox" && (
+                      <div className="flex items-center space-x-2 pt-1">
+                        <Checkbox
+                          id={inputId}
+                          checked={Boolean(val)}
+                          onCheckedChange={(checked) => onFieldValueChange(field.name, Boolean(checked))}
+                        />
+                        <label htmlFor={inputId} className="text-xs text-slate-600 cursor-pointer">
+                          {Boolean(val) ? "Checked" : "Unchecked"}
+                        </label>
+                      </div>
+                    )}
 
-                {/* Radio Group Field */}
-                {field.type === "radio" && field.options && (
-                  <div className="space-y-1 pt-1">
-                    {field.options.map((opt) => {
-                      const radioId = `${inputId}-${opt}`;
-                      const isSelected = currentValue === opt;
-                      return (
-                        <div key={opt} className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            id={radioId}
-                            name={field.name}
-                            value={opt}
-                            checked={isSelected}
-                            onChange={() => onFieldValueChange(field.name, opt)}
-                            disabled={field.isReadOnly}
-                            className="size-3.5 text-sky-600 focus:ring-sky-500 border-slate-300"
-                          />
-                          <label htmlFor={radioId} className="text-xs text-slate-600 cursor-pointer select-none">
+                    {field.type === "radio" && field.options && (
+                      <div className="space-y-1 pt-1">
+                        {field.options.map((opt) => (
+                          <div key={opt} className="flex items-center space-x-2">
+                            <input
+                              type="radio"
+                              id={`${inputId}-${opt}`}
+                              name={field.name}
+                              value={opt}
+                              checked={val === opt}
+                              onChange={() => onFieldValueChange(field.name, opt)}
+                              className="size-3.5 text-sky-600 focus:ring-sky-500"
+                            />
+                            <label htmlFor={`${inputId}-${opt}`} className="text-xs text-slate-600 cursor-pointer">
+                              {opt}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {field.type === "dropdown" && field.options && (
+                      <select
+                        id={inputId}
+                        value={typeof val === "string" ? val : ""}
+                        onChange={(e) => onFieldValueChange(field.name, e.target.value)}
+                        className="w-full h-8 text-xs rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      >
+                        <option value="">Select option...</option>
+                        {field.options.map((opt) => (
+                          <option key={opt} value={opt}>
                             {opt}
-                          </label>
-                        </div>
-                      );
-                    })}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
-                )}
-
-                {/* Dropdown Field */}
-                {field.type === "dropdown" && field.options && (
-                  <select
-                    id={inputId}
-                    value={typeof currentValue === "string" ? currentValue : ""}
-                    onChange={(e) => onFieldValueChange(field.name, e.target.value)}
-                    disabled={field.isReadOnly}
-                    className="w-full h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  >
-                    <option value="">(Select an option)</option>
-                    {field.options.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* Option List Field */}
-                {field.type === "optionList" && field.options && (
-                  <select
-                    id={inputId}
-                    multiple
-                    value={Array.isArray(currentValue) ? currentValue : []}
-                    onChange={(e) => {
-                      const selected = Array.from(e.target.selectedOptions, (o) => o.value);
-                      onFieldValueChange(field.name, selected);
-                    }}
-                    disabled={field.isReadOnly}
-                    className="w-full h-20 rounded-md border border-slate-200 bg-white p-1 text-xs text-slate-800 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  >
-                    {field.options.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* Unsupported Field */}
-                {field.type === "unsupported" && (
-                  <p className="text-[11px] text-slate-400 italic">Unsupported widget type</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                );
+              })
+            )}
+          </div>
         )}
       </div>
 
-      {/* Footer Reset Control */}
-      <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onResetForm}
-          disabled={!isModified}
-          className="text-xs text-slate-600 gap-1.5 w-full"
-        >
-          <RotateCcw className="size-3.5" />
-          Reset Form to Original
-        </Button>
-      </div>
+      {/* Footer Reset Action */}
+      {fields.length > 0 && activeTab === "fields" && (
+        <div className="pt-3 border-t border-slate-100">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onResetForm}
+            disabled={!isModified}
+            className="w-full text-xs text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5"
+          >
+            <RotateCcw className="size-3.5" />
+            Reset to Original Values
+          </Button>
+        </div>
+      )}
     </aside>
   );
 }

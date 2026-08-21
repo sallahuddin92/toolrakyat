@@ -3,6 +3,8 @@ import type {
   StarPdfAnnotation,
   StarPdfDocumentInfo,
   StarPdfFormField,
+  StarPdfImageInfo,
+  StarPdfImageMutationResult,
   StarPdfPageText,
   StarPdfReplaceTextResult,
   StarPdfSearchOptions,
@@ -39,6 +41,10 @@ import initWasm, {
   starpdf_remove_annotation,
   starpdf_replace_text,
   starpdf_get_text_editability,
+  starpdf_enumerate_images,
+  starpdf_replace_image,
+  starpdf_add_image,
+  starpdf_remove_image,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -49,7 +55,7 @@ import initWasm, {
   starpdf_update_annotation,
   starpdf_validate,
   starpdf_version,
-} from "./starpdf-wasm/starpdf";
+} from "./starpdf-wasm/starpdf.js";
 
 let wasmInitialized: Promise<void> | null = null;
 
@@ -310,6 +316,66 @@ export class StarPdfDocumentHandle {
       pageIndex,
       spanId
     ) as StarPdfTextSpan;
+  }
+
+  async enumerateImages(pageIndex: number): Promise<StarPdfImageInfo[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_enumerate_images(
+      this._handle,
+      pageIndex
+    ) as StarPdfImageInfo[];
+  }
+
+  async replaceImage(
+    pageIndex: number,
+    imageId: string,
+    newImageBytes: Uint8Array,
+    cloneIfShared = true
+  ): Promise<StarPdfImageMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_replace_image(
+      this._handle,
+      pageIndex,
+      imageId,
+      newImageBytes,
+      cloneIfShared
+    ) as StarPdfImageMutationResult;
+  }
+
+  async addImage(
+    pageIndex: number,
+    imageBytes: Uint8Array,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): Promise<StarPdfImageMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_add_image(
+      this._handle,
+      pageIndex,
+      imageBytes,
+      x,
+      y,
+      width,
+      height
+    ) as StarPdfImageMutationResult;
+  }
+
+  async removeImage(
+    pageIndex: number,
+    imageId: string
+  ): Promise<StarPdfImageMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_remove_image(
+      this._handle,
+      pageIndex,
+      imageId
+    ) as StarPdfImageMutationResult;
   }
 
   async exportIncremental(): Promise<Uint8Array> {

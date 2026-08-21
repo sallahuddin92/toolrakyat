@@ -190,6 +190,32 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                         last_layout_result = Some(layout);
                     }
                 }
+                PdfChange::ReplaceImage { spec } => {
+                    let plan = crate::image::ImageEditor::replace_image(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
+                PdfChange::AddImage { spec } => {
+                    let plan = crate::image::ImageEditor::add_image(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
+                PdfChange::RemoveImage { spec } => {
+                    let plan =
+                        crate::image::ImageEditor::remove_image(self.store, &self.page_refs, spec)?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
             }
 
             if modified_objects.len() > MAX_GENERATED_OBJECTS {

@@ -190,3 +190,56 @@ pub struct WasmUpdateAnnotationInput {
     pub quad_points: Option<Vec<f64>>,
     pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
 }
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmImageInfo {
+    pub image_id: String,
+    pub page_index: usize,
+    pub stream_index: usize,
+    pub instruction_index: usize,
+    pub resource_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub color_space: String,
+    pub bits_per_component: u32,
+    pub filter: Option<String>,
+    pub transform: [f64; 6],
+    pub rect: [f64; 4],
+    pub is_nested_form: bool,
+    pub is_shared: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmReplaceImageInput {
+    pub page_index: usize,
+    pub image_id: String,
+    pub new_image_bytes: Vec<u8>,
+    pub clone_if_shared: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmAddImageInput {
+    pub page_index: usize,
+    pub image_bytes: Vec<u8>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmRemoveImageInput {
+    pub page_index: usize,
+    pub image_id: String,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmImageMutationResult {
+    pub success: bool,
+    pub modified_object_count: usize,
+}

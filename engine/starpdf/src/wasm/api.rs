@@ -16,8 +16,9 @@ use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField,
-    WasmPageText, WasmReplaceTextResult, WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo,
-    WasmTextSpan, WasmUpdateAnnotationInput, WasmWidget,
+    WasmImageInfo, WasmImageMutationResult, WasmPageText, WasmReplaceTextResult,
+    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
+    WasmUpdateAnnotationInput, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -845,4 +846,133 @@ pub fn starpdf_close(handle: u32) -> Result<bool, JsValue> {
 #[wasm_bindgen]
 pub fn starpdf_create_minimal_pdf(text: &str) -> Result<Vec<u8>, JsValue> {
     MinimalWriter::create_minimal_pdf(text).map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_enumerate_images(handle: u32, page_index: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let images = doc.enumerate_images(page_index as usize)?;
+            let dtos: Vec<WasmImageInfo> = images
+                .into_iter()
+                .map(|img| WasmImageInfo {
+                    image_id: img.image_id,
+                    page_index: img.page_index,
+                    stream_index: img.stream_index,
+                    instruction_index: img.instruction_index,
+                    resource_name: img.resource_name,
+                    width: img.width,
+                    height: img.height,
+                    color_space: img.color_space,
+                    bits_per_component: img.bits_per_component,
+                    filter: img.filter,
+                    transform: img.transform,
+                    rect: img.rect,
+                    is_nested_form: img.is_nested_form,
+                    is_shared: img.is_shared,
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&dtos)
+                .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_replace_image(
+    handle: u32,
+    page_index: u32,
+    image_id: &str,
+    new_image_bytes: &[u8],
+    clone_if_shared: bool,
+) -> Result<JsValue, JsValue> {
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let spec = crate::image::ReplaceImageSpec {
+                page_index: page_index as usize,
+                image_id: image_id.to_string(),
+                new_image_bytes: new_image_bytes.to_vec(),
+                format: crate::image::ImageFormat::AutoDetect,
+                clone_if_shared,
+            };
+            let plan = doc.replace_image(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmImageMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_add_image(
+    handle: u32,
+    page_index: u32,
+    image_bytes: &[u8],
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<JsValue, JsValue> {
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let spec = crate::image::AddImageSpec {
+                page_index: page_index as usize,
+                image_bytes: image_bytes.to_vec(),
+                format: crate::image::ImageFormat::AutoDetect,
+                x,
+                y,
+                width,
+                height,
+            };
+            let plan = doc.add_image(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmImageMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_remove_image(
+    handle: u32,
+    page_index: u32,
+    image_id: &str,
+) -> Result<JsValue, JsValue> {
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let spec = crate::image::RemoveImageSpec {
+                page_index: page_index as usize,
+                image_id: image_id.to_string(),
+            };
+            let plan = doc.remove_image(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmImageMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
 }

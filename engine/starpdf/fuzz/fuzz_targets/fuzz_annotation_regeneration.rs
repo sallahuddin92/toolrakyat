@@ -3,11 +3,22 @@ use libfuzzer_sys::fuzz_target;
 use starpdf::annotation::{AnnotationGenerator, AnnotationSpec, LineEndingStyle};
 
 fuzz_target!(|data: &[u8]| {
-    if data.len() < 8 { return; }
-    let points = [f64::from(data[0]), f64::from(data[1]), f64::from(data[2]) + 1.0, f64::from(data[3]) + 1.0];
+    if data.len() < 8 {
+        return;
+    }
+    let points = [
+        f64::from(data[0]),
+        f64::from(data[1]),
+        f64::from(data[2]) + 1.0,
+        f64::from(data[3]) + 1.0,
+    ];
     let ending = match data[4] % 6 {
-        0 => LineEndingStyle::None, 1 => LineEndingStyle::Square, 2 => LineEndingStyle::Circle,
-        3 => LineEndingStyle::Diamond, 4 => LineEndingStyle::OpenArrow, _ => LineEndingStyle::ClosedArrow,
+        0 => LineEndingStyle::None,
+        1 => LineEndingStyle::Square,
+        2 => LineEndingStyle::Circle,
+        3 => LineEndingStyle::Diamond,
+        4 => LineEndingStyle::OpenArrow,
+        _ => LineEndingStyle::ClosedArrow,
     };
     let specs = [
         AnnotationSpec::Line {

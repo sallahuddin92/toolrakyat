@@ -1464,6 +1464,275 @@ ET
         );
     }
 
+    // --- Image & Graphics Object Benchmarks (v0.14) ---
+    let img_jpeg_1 = make_bench_jpeg(0x10, 0x20, 0x30);
+    let img_jpeg_2 = make_bench_jpeg(0xFF, 0x88, 0x00);
+    let bench_image_pdf = make_bench_pdf_with_image(&img_jpeg_1);
+
+    // 64. Image Discovery / Enumeration
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let iterations = 10_000;
+        let start = Instant::now();
+        let mut count = 0;
+        for _ in 0..iterations {
+            let images = doc.enumerate_images(0).unwrap();
+            count += images.len();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "64. Image Discovery/Enum:     {:>8} ns/op  ({:.2?} for {} scans, {} found)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations,
+            count
+        );
+    }
+
+    // 65. Replace JPEG Image
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let images = doc.enumerate_images(0).unwrap();
+        let target_id = images[0].image_id.clone();
+        let spec = starpdf::image::ReplaceImageSpec {
+            page_index: 0,
+            image_id: target_id,
+            new_image_bytes: img_jpeg_2.clone(),
+            format: starpdf::image::ImageFormat::Jpeg,
+            clone_if_shared: false,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.replace_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "65. Replace JPEG Image:       {:>8} ns/op  ({:.2?} for {} replaces)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 66. Replace Flate Image
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let images = doc.enumerate_images(0).unwrap();
+        let target_id = images[0].image_id.clone();
+        let raw_pixels = vec![128u8; 48];
+        let spec = starpdf::image::ReplaceImageSpec {
+            page_index: 0,
+            image_id: target_id,
+            new_image_bytes: raw_pixels,
+            format: starpdf::image::ImageFormat::Flate {
+                color_space: "DeviceRGB".to_string(),
+                width: 4,
+                height: 4,
+                bits_per_component: 8,
+            },
+            clone_if_shared: false,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.replace_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "66. Replace Flate Image:      {:>8} ns/op  ({:.2?} for {} replaces)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 67. Add Image Object
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let spec = starpdf::image::AddImageSpec {
+            page_index: 0,
+            image_bytes: img_jpeg_2.clone(),
+            format: starpdf::image::ImageFormat::Jpeg,
+            x: 150.0,
+            y: 250.0,
+            width: 100.0,
+            height: 100.0,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.add_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "67. Add Image Object:         {:>8} ns/op  ({:.2?} for {} adds)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 68. Remove Image Object
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let images = doc.enumerate_images(0).unwrap();
+        let target_id = images[0].image_id.clone();
+        let spec = starpdf::image::RemoveImageSpec {
+            page_index: 0,
+            image_id: target_id,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.remove_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "68. Remove Image Object:      {:>8} ns/op  ({:.2?} for {} removes)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 69. Shared-XObject Clone Isolation
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let dup_plan = starpdf::page_ops::PageOperationPlan {
+            edits: vec![starpdf::page_ops::PageEdit::DuplicatePage {
+                index: 0,
+                insert_at: 1,
+            }],
+        };
+        let multi_bytes = doc
+            .apply_page_operations(
+                &dup_plan,
+                &starpdf::page_ops::PageOperationLimits::default(),
+            )
+            .unwrap();
+        let mut doc2 = PdfDocument::from_bytes(&multi_bytes).unwrap();
+        let images = doc2.enumerate_images(0).unwrap();
+        let target_id = images[0].image_id.clone();
+
+        let spec = starpdf::image::ReplaceImageSpec {
+            page_index: 0,
+            image_id: target_id,
+            new_image_bytes: img_jpeg_2.clone(),
+            format: starpdf::image::ImageFormat::Jpeg,
+            clone_if_shared: true,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc2.replace_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "69. Shared XObject Clone:     {:>8} ns/op  ({:.2?} for {} clones)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 70. Content Stream Rebuild
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let images = doc.enumerate_images(0).unwrap();
+        let spec = starpdf::image::RemoveImageSpec {
+            page_index: 0,
+            image_id: images[0].image_id.clone(),
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.remove_image(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "70. Content Stream Rebuild:   {:>8} ns/op  ({:.2?} for {} rebuilds)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 71. Image Export & Reopen Cycle
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_image_pdf).unwrap();
+        let spec = starpdf::image::AddImageSpec {
+            page_index: 0,
+            image_bytes: img_jpeg_2.clone(),
+            format: starpdf::image::ImageFormat::Jpeg,
+            x: 100.0,
+            y: 100.0,
+            width: 50.0,
+            height: 50.0,
+        };
+        let plan = doc.add_image(&spec).unwrap();
+
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let exported = doc.export_incremental(&plan).unwrap();
+            let mut reopened = PdfDocument::from_bytes(&exported).unwrap();
+            let images = reopened.enumerate_images(0).unwrap();
+            std::hint::black_box(images);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "71. Image Export & Reopen:    {:>8} ns/op  ({:.2?} for {} cycles)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 72. 10 Sequential Image Operations
+    {
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut cur_pdf = bench_image_pdf.clone();
+            for op_idx in 0..10 {
+                let mut doc = PdfDocument::from_bytes(&cur_pdf).unwrap();
+                let plan = doc
+                    .add_image(&starpdf::image::AddImageSpec {
+                        page_index: 0,
+                        image_bytes: img_jpeg_2.clone(),
+                        format: starpdf::image::ImageFormat::Jpeg,
+                        x: (op_idx * 10) as f64,
+                        y: (op_idx * 10) as f64,
+                        width: 40.0,
+                        height: 40.0,
+                    })
+                    .unwrap();
+                cur_pdf = doc.export_incremental(&plan).unwrap();
+            }
+            std::hint::black_box(cur_pdf);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "72. 10 Sequential Image Ops:  {:>8} ns/op  ({:.2?} for {} sets)",
+            elapsed.as_nanos() / (iterations * 10) as u128,
+            elapsed,
+            iterations
+        );
+    }
+
     println!("================================================================");
 }
 
@@ -1612,4 +1881,61 @@ fn configure_embedded_benchmark_field(
     doc.store_mut()
         .insert_cached(field_ref, PdfObject::Dictionary(field));
     field_ref
+}
+
+fn make_bench_jpeg(r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut data = vec![
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0x00, 0x01, 0x01, 0x00, 0x00,
+        0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00,
+    ];
+    data.extend(std::iter::repeat_n(16, 64));
+    data.extend_from_slice(&[
+        0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x02, 0x00, 0x02, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11,
+        0x00, 0x03, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01, 0x01,
+        0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+        0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02,
+        0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, r, g, b, 0x7F, 0xFF, 0xD9,
+    ]);
+    data
+}
+
+fn make_bench_pdf_with_image(jpeg_bytes: &[u8]) -> Vec<u8> {
+    let img_len = jpeg_bytes.len();
+    let content_stream = b"q\n100 0 0 100 50 600 cm\n/Im1 Do\nQ\n";
+    let content_len = content_stream.len();
+
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+
+    let o1_offset = pdf.len();
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let o2_offset = pdf.len();
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let o3_offset = pdf.len();
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>\nendobj\n");
+
+    let o4_offset = pdf.len();
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {content_len} >>\nstream\n").as_bytes());
+    pdf.extend_from_slice(content_stream);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    let o5_offset = pdf.len();
+    pdf.extend_from_slice(format!("5 0 obj\n<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {img_len} >>\nstream\n").as_bytes());
+    pdf.extend_from_slice(jpeg_bytes);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+    pdf.extend_from_slice(format!("{o1_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o2_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o3_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o4_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o5_offset:010} 00000 n \n").as_bytes());
+
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
+    );
+    pdf
 }

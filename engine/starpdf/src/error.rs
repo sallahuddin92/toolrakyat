@@ -37,6 +37,12 @@ pub enum PdfError {
     UnsupportedLayout(String),
     TargetTextNotFound(String),
     TextEditRefused(String),
+    UnsupportedImageFormat(String),
+    ImageNotFound(String),
+    NestedFormXObjectRefusal(String),
+    Serialization(String),
+    Compression(String),
+    InvalidObject(String),
     InvalidOperation(String),
 }
 
@@ -94,6 +100,14 @@ impl fmt::Display for PdfError {
             Self::UnsupportedLayout(msg) => write!(f, "UNSUPPORTED_LAYOUT: {msg}"),
             Self::TargetTextNotFound(msg) => write!(f, "TARGET_TEXT_NOT_FOUND: {msg}"),
             Self::TextEditRefused(msg) => write!(f, "TEXT_EDIT_REFUSED: {msg}"),
+            Self::UnsupportedImageFormat(msg) => write!(f, "UNSUPPORTED_IMAGE_FORMAT: {msg}"),
+            Self::ImageNotFound(msg) => write!(f, "IMAGE_NOT_FOUND: {msg}"),
+            Self::NestedFormXObjectRefusal(msg) => {
+                write!(f, "NESTED_FORM_XOBJECT_REFUSAL: {msg}")
+            }
+            Self::Serialization(msg) => write!(f, "SERIALIZATION_ERROR: {msg}"),
+            Self::Compression(msg) => write!(f, "COMPRESSION_ERROR: {msg}"),
+            Self::InvalidObject(msg) => write!(f, "INVALID_OBJECT: {msg}"),
             Self::InvalidOperation(msg) => write!(f, "Invalid PDF operation: {msg}"),
         }
     }

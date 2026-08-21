@@ -357,6 +357,45 @@ impl<'a> PdfDocument<'a> {
         self.replace_text(page_index, &target, replacement)
     }
 
+    /// Discovers all Image XObjects on a specific page.
+    pub fn enumerate_images(
+        &mut self,
+        page_index: usize,
+    ) -> PdfResult<Vec<crate::image::ImageXObjectInfo>> {
+        let mut extractor = crate::image::ImageExtractor::new(self)?;
+        extractor.extract_page_images(page_index)
+    }
+
+    /// Discovers all Image XObjects across the entire document.
+    pub fn enumerate_all_images(&mut self) -> PdfResult<Vec<crate::image::ImageXObjectInfo>> {
+        let mut extractor = crate::image::ImageExtractor::new(self)?;
+        extractor.extract_all_images()
+    }
+
+    /// Replaces an existing Image XObject's content stream and dictionary.
+    pub fn replace_image(
+        &mut self,
+        spec: &crate::image::ReplaceImageSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::ReplaceImage { spec: spec.clone() }])
+    }
+
+    /// Adds a new Image XObject to a page with content-stream draw operator.
+    pub fn add_image(
+        &mut self,
+        spec: &crate::image::AddImageSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::AddImage { spec: spec.clone() }])
+    }
+
+    /// Removes an Image XObject draw operation from a page.
+    pub fn remove_image(
+        &mut self,
+        spec: &crate::image::RemoveImageSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::RemoveImage { spec: spec.clone() }])
+    }
+
     /// Applies an ordered, atomic page-operation plan. Intermediate outputs remain private and
     /// are returned only after the complete plan reopens successfully.
     pub fn apply_page_operations(

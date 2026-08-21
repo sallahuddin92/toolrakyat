@@ -19,7 +19,7 @@ import {
   mergeStarPdfDocuments,
   type StarPdfPageOperation,
 } from "@/lib/pdf/starpdf-page-worker-client";
-import type { StarPdfSearchResult, StarPdfSecurityInfo, StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
+import type { StarPdfImageInfo, StarPdfSearchResult, StarPdfSecurityInfo, StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -41,6 +41,7 @@ export function SmartPdfEditor() {
   const [scale, setScale] = useState<number>(1.0);
   const [fieldValues, setFieldValues] = useState<Record<string, string | boolean | string[]>>({});
   const [pageTextSpans, setPageTextSpans] = useState<StarPdfTextSpan[]>([]);
+  const [pageImages, setPageImages] = useState<StarPdfImageInfo[]>([]);
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
   const [isPageProcessing, setIsPageProcessing] = useState<boolean>(false);
@@ -248,7 +249,7 @@ export function SmartPdfEditor() {
     setCurrentPage(searchResults[prevIdx].page_index + 1);
   }, [searchResults, activeSearchIndex]);
 
-  // Synchronize text spans on page change
+  // Synchronize text spans and images on page change
   useEffect(() => {
     let cancelled = false;
     if (!starPdfDoc) return;
@@ -263,6 +264,19 @@ export function SmartPdfEditor() {
         console.warn("Failed to extract page text:", err);
         if (!cancelled) setPageTextSpans([]);
       });
+
+    void starPdfDoc
+      .enumerateImages(currentPage - 1)
+      .then((images) => {
+        if (!cancelled) {
+          setPageImages(images || []);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to enumerate page images:", err);
+        if (!cancelled) setPageImages([]);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -298,6 +312,112 @@ export function SmartPdfEditor() {
         toast.success(`Text updated (${result.layout_result}). Native content stream modified.`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to replace text.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleReplaceImage = useCallback(
+    async (imageId: string, file: File) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        await starPdfDoc.replaceImage(currentPage - 1, imageId, bytes, true);
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const images = await starPdfDoc.enumerateImages(currentPage - 1);
+        setPageImages(images || []);
+
+        toast.success("Image replaced successfully.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to replace image.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleAddImage = useCallback(
+    async (file: File, x: number, y: number, width: number, height: number) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        await starPdfDoc.addImage(currentPage - 1, bytes, x, y, width, height);
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const images = await starPdfDoc.enumerateImages(currentPage - 1);
+        setPageImages(images || []);
+
+        toast.success("Image added to page successfully.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to add image.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleRemoveImage = useCallback(
+    async (imageId: string) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        await starPdfDoc.removeImage(currentPage - 1, imageId);
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const images = await starPdfDoc.enumerateImages(currentPage - 1);
+        setPageImages(images || []);
+
+        toast.success("Image removed from page.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to remove image.";
         toast.error(msg);
       }
     },
@@ -614,7 +734,7 @@ export function SmartPdfEditor() {
           </div>
         </main>
 
-        {/* Right Form Fields & Text Inspector */}
+        {/* Right Form Fields, Text & Image Inspector */}
         <PdfFormInspector
           fields={inspectionResult.fields}
           fieldValues={fieldValues}
@@ -623,6 +743,10 @@ export function SmartPdfEditor() {
           isModified={isModified}
           textSpans={pageTextSpans}
           onReplaceText={handleReplaceExistingText}
+          images={pageImages}
+          onReplaceImage={handleReplaceImage}
+          onAddImage={handleAddImage}
+          onRemoveImage={handleRemoveImage}
           className="hidden lg:flex"
         />
       </div>
