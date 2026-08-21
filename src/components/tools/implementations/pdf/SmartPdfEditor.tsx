@@ -55,6 +55,7 @@ export function SmartPdfEditor() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [fieldValues, setFieldValues] = useState<Record<string, string | boolean | string[]>>({});
+  const [annotationValues, setAnnotationValues] = useState<Record<string, string>>({});
   const [pageTextSpans, setPageTextSpans] = useState<StarPdfTextSpan[]>([]);
   const [pageImages, setPageImages] = useState<StarPdfImageInfo[]>([]);
   const [pageGraphics, setPageGraphics] = useState<StarPdfVectorGraphicInfo[]>([]);
@@ -165,6 +166,11 @@ export function SmartPdfEditor() {
           initialValues[field.name] = field.value;
         }
 
+        const initialAnnotationValues: Record<string, string> = {};
+        for (const annot of inspected.annotations || []) {
+          initialAnnotationValues[annot.id] = annot.contents;
+        }
+
         setSourceBytes(bytes);
         setFilename(docFilename);
         setInspectionResult(inspected);
@@ -174,6 +180,7 @@ export function SmartPdfEditor() {
         setCurrentPage(validPage);
         setScale(1.0);
         setFieldValues(initialValues);
+        setAnnotationValues(initialAnnotationValues);
         setSelectedPages(new Set([validPage]));
         setSearchQuery("");
         setSearchResults([]);
@@ -732,6 +739,20 @@ export function SmartPdfEditor() {
     [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
+  const handleAnnotationChange = useCallback(
+    (annotId: string, value: string) => {
+      setAnnotationValues((prev) => ({
+        ...prev,
+        [annotId]: value,
+      }));
+      setIsModified(true);
+      if (sourceBytes) {
+        pushHistorySnapshot(sourceBytes, "Edit annotation");
+      }
+    },
+    [sourceBytes, pushHistorySnapshot],
+  );
+
   const handleExport = useCallback(
     async (mode: ExportMode) => {
       if (!sourceBytes || !inspectionResult) return;
@@ -744,6 +765,7 @@ export function SmartPdfEditor() {
           fieldValues,
           mode,
           inspectionResult.metadata.pageCount,
+          annotationValues,
         );
 
         // Create browser download
@@ -760,8 +782,8 @@ export function SmartPdfEditor() {
         setIsModified(false);
         toast.success(
           mode === "editable"
-            ? `Exported "${result.filename}" with interactive form fields.`
-            : `Exported "${result.filename}" with flattened form content.`,
+            ? `Exported "${result.filename}" with interactive form fields and annotations.`
+            : `Exported "${result.filename}" with flattened content.`,
         );
       } catch (err: unknown) {
         const friendly = formatPdfErrorMessage(err);
@@ -770,7 +792,7 @@ export function SmartPdfEditor() {
         setIsExporting(false);
       }
     },
-    [sourceBytes, filename, fieldValues, inspectionResult],
+    [sourceBytes, filename, fieldValues, annotationValues, inspectionResult],
   );
 
   const downloadPdf = useCallback((bytes: Uint8Array, outputFilename: string) => {
@@ -1026,6 +1048,7 @@ export function SmartPdfEditor() {
         onMerge={() => mergeInputRef.current?.click()}
       />
 
+      {/* Hidden File Input for Add PDF / Merge Workflow */}
       <input
         ref={mergeInputRef}
         type="file"
@@ -1074,6 +1097,12 @@ export function SmartPdfEditor() {
                 ? fieldValues[(selectedItem.data as AcroFormField).name]
                 : undefined
             }
+            onAnnotationChange={handleAnnotationChange}
+            annotationValue={
+              selectedItem?.type === "annotation"
+                ? annotationValues[selectedItem.id]
+                : undefined
+            }
           />
 
           <div className="my-auto transition-transform duration-75">
@@ -1088,13 +1117,14 @@ export function SmartPdfEditor() {
               images={pageImages}
               graphics={pageGraphics}
               fields={inspectionResult.fields}
+              annotations={inspectionResult.annotations}
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
             />
           </div>
         </main>
 
-        {/* Right Form Fields, Text & Image Inspector */}
+        {/* Right Form Fields, Text, Image & Annotation Inspector */}
         <PdfFormInspector
           fields={inspectionResult.fields}
           fieldValues={fieldValues}
@@ -1112,6 +1142,9 @@ export function SmartPdfEditor() {
           onAddRectangle={handleAddRectangle}
           onAddLine={handleAddLine}
           onDeleteGraphic={handleDeleteGraphic}
+          annotations={inspectionResult.annotations}
+          annotationValues={annotationValues}
+          onAnnotationChange={handleAnnotationChange}
           className="hidden lg:flex"
         />
       </div>

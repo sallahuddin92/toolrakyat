@@ -37,10 +37,20 @@ export interface PdfPageInfo {
   rotation: number;
 }
 
+export interface PdfMarkupAnnotation {
+  id: string;
+  subtype: string; // e.g. FreeText, Highlight, Underline, StrikeOut, Square, Circle, Ink, Line, Link
+  contents: string;
+  rect: { x: number; y: number; width: number; height: number };
+  pageIndex: number;
+  author?: string;
+}
+
 export interface DocumentInspectionResult {
   metadata: PdfDocumentMetadata;
   pages: PdfPageInfo[];
   fields: AcroFormField[];
+  annotations: PdfMarkupAnnotation[];
 }
 
 export type ExportMode = "editable" | "flattened";

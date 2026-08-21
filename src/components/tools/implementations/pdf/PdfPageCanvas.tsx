@@ -10,7 +10,7 @@ import type {
   StarPdfTextSpan,
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
-import type { AcroFormField } from "@/lib/pdf/pdf-types";
+import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 
 interface PdfPageCanvasProps {
   pdfDocument: PDFDocumentProxy | null;
@@ -23,6 +23,7 @@ interface PdfPageCanvasProps {
   images?: StarPdfImageInfo[];
   graphics?: StarPdfVectorGraphicInfo[];
   fields?: AcroFormField[];
+  annotations?: PdfMarkupAnnotation[];
   selectedItem?: SelectedItem | null;
   onSelectItem?: (item: SelectedItem | null) => void;
   className?: string;
@@ -40,6 +41,7 @@ export function PdfPageCanvas({
   images = [],
   graphics = [],
   fields = [],
+  annotations = [],
   selectedItem = null,
   onSelectItem,
   className = "",
@@ -139,6 +141,8 @@ export function PdfPageCanvas({
           images={images}
           graphics={graphics}
           fields={fields}
+          annotations={annotations}
+          pageNumber={pageNumber}
           selectedItem={selectedItem}
           onSelectItem={onSelectItem}
         />

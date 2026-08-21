@@ -6,19 +6,21 @@ import type {
   StarPdfTextSpan,
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
-import type { AcroFormField } from "@/lib/pdf/pdf-types";
+import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { SelectedItem } from "./PdfContextualToolbar";
 import { cn } from "@/lib/utils";
 
 interface PdfInteractiveOverlayProps {
   pageWidth: number;
   pageHeight: number;
+  pageNumber?: number;
   scale: number;
   rotation?: number;
   textSpans?: StarPdfTextSpan[];
   images?: StarPdfImageInfo[];
   graphics?: StarPdfVectorGraphicInfo[];
   fields?: AcroFormField[];
+  annotations?: PdfMarkupAnnotation[];
   selectedItem: SelectedItem | null;
   onSelectItem: (item: SelectedItem | null) => void;
 }
@@ -26,12 +28,14 @@ interface PdfInteractiveOverlayProps {
 export function PdfInteractiveOverlay({
   pageWidth,
   pageHeight,
+  pageNumber = 1,
   scale,
   rotation = 0,
   textSpans = [],
   images = [],
   graphics = [],
   fields = [],
+  annotations = [],
   selectedItem,
   onSelectItem,
 }: PdfInteractiveOverlayProps) {
@@ -221,6 +225,42 @@ export function PdfInteractiveOverlay({
             )}
             title={`Form field / annotation (${field.type}): ${field.name}${field.isReadOnly ? " (Read-only)" : ""}`}
             data-testid={`canvas-field-${field.name}`}
+          />
+        );
+      })}
+
+      {/* 5. MARKUP ANNOTATIONS (FreeText, Square, Circle, Highlight, Ink, etc.) */}
+      {annotations.map((annot) => {
+        if (annot.pageIndex !== (pageNumber - 1)) return null;
+        const isSelected = selectedItem?.type === "annotation" && selectedItem.id === annot.id;
+        const rect = convertPdfRectToPixels(annot.rect.x, annot.rect.y, annot.rect.width, annot.rect.height);
+
+        return (
+          <div
+            key={annot.id}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectItem({
+                type: "annotation",
+                id: annot.id,
+                data: annot,
+                bounds: rect,
+              });
+            }}
+            style={{
+              left: `${rect.left}px`,
+              top: `${rect.top}px`,
+              width: `${rect.width}px`,
+              height: `${rect.height}px`,
+            }}
+            className={cn(
+              "absolute pointer-events-auto cursor-pointer rounded-xs transition-colors",
+              isSelected
+                ? "ring-2 ring-purple-500 bg-purple-400/20 shadow-xs z-20"
+                : "hover:bg-purple-400/10 hover:ring-1 hover:ring-purple-300/60 z-10",
+            )}
+            title={`Markup annotation (${annot.subtype}): ${annot.contents || annot.subtype}`}
+            data-testid={`canvas-annotation-${annot.id}`}
           />
         );
       })}
