@@ -104,7 +104,7 @@ export function PdfToolbar({
             variant="ghost"
             size="icon"
             onClick={onToggleThumbnails}
-            className="size-8 text-slate-600 rounded-lg shrink-0 hidden md:inline-flex"
+            className="size-8 text-slate-600 rounded-lg shrink-0 flex items-center justify-center"
             title={isThumbnailsOpen ? "Hide Page Thumbnails" : "Show Page Thumbnails"}
             aria-label={isThumbnailsOpen ? "Hide page thumbnails" : "Show page thumbnails"}
             data-testid="toolbar-toggle-thumbnails-btn"
@@ -388,7 +388,7 @@ export function PdfToolbar({
             variant="ghost"
             size="icon"
             onClick={onToggleInspector}
-            className="size-8 text-slate-600 rounded-lg shrink-0 hidden lg:inline-flex"
+            className="size-8 text-slate-600 rounded-lg shrink-0 flex items-center justify-center"
             title={isInspectorOpen ? "Hide Inspector Panel" : "Show Inspector Panel"}
             aria-label={isInspectorOpen ? "Hide inspector panel" : "Show inspector panel"}
             data-testid="toolbar-toggle-inspector-btn"

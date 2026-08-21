@@ -2254,7 +2254,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     }
   });
 
-  test("v0.20 RC Blocker Fix: Page Delete Never Leaves Editor Stuck or Canvas Blurred", async ({
+  test("v0.20 RC Blocker Fix: Page Delete UI State Invariant (First, Middle, Last with Thumbnail Verification)", async ({
     page,
   }) => {
     // Load a multipage document (2 pages)
@@ -2265,53 +2265,78 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
-    // Initial page count: 2
-    await expect(page.getByText("1 / 2")).toBeVisible({ timeout: 5000 });
-
-    // Duplicate twice to have 4 pages
+    // Initial page count: 2 -> Duplicate to create 3 pages
     await page.getByTestId("page-duplicate").click();
     await expect(workspace).toContainText("3", { timeout: 10000 });
 
-    await page.getByTestId("page-duplicate").click();
-    await expect(workspace).toContainText("4", { timeout: 10000 });
+    const thumbRail = page.locator('[data-testid="pdf-thumbnail-rail"]');
+    await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 3" })).toBeVisible();
 
-    // 1. Delete Middle Page
-    await page.getByTestId("page-delete").click();
-
-    // Verify loading spinner is absent, blur overlay is gone, and page count is 3
-    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(workspace).toContainText("3", { timeout: 5000 });
-    await expect(page.locator("canvas").first()).toBeVisible();
-
-    // 2. Delete Last Page (navigate to last page, then delete -> clamps to previous page)
-    const nextBtn = page.locator('button[title="Next Page"]');
-    while (await nextBtn.isEnabled()) {
-      await nextBtn.click();
-      await page.waitForTimeout(100);
-    }
-
-    await page.getByTestId("page-delete").click();
-    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
-    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(workspace).toContainText("2", { timeout: 5000 });
-    await expect(page.locator("canvas").first()).toBeVisible();
-
-    // 3. Delete First Page (navigate to page 1, delete -> stays on page 1 of 1)
+    // 1. DELETE FIRST PAGE (Page 1 of 3 -> becomes 2 pages, active page is 1)
     const prevBtn = page.locator('button[title="Previous Page"]');
     while (await prevBtn.isEnabled()) {
       await prevBtn.click();
       await page.waitForTimeout(100);
     }
+    await expect(page.getByText("1 / 3")).toBeVisible({ timeout: 5000 });
+
+    await page.getByTestId("page-delete").click();
+
+    // Verify loading spinner absent, blur overlay gone, page count is 2
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("1 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
+
+    // Verify Thumbnail Rail remains OPEN and shows 2 thumbnails
+    await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 3" })).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+
+    // 2. DELETE MIDDLE PAGE (Duplicate to have 3 pages again, go to page 2, delete)
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Page 3" })).toBeVisible();
+
+    // Navigate to page 2
+    await page.getByRole("button", { name: "Page 2" }).click();
+    await expect(page.getByText("2 / 3")).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 5000 });
-    await expect(page.locator("canvas").first()).toBeVisible();
+    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
-    // Deleting the single remaining page should be disabled
-    await expect(page.getByTestId("page-delete")).toBeDisabled();
+    // Verify Thumbnail Rail remains OPEN and shows 2 thumbnails
+    await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 3" })).not.toBeVisible();
+
+    // 3. DELETE LAST PAGE (Duplicate to have 3 pages, go to page 3, delete -> clamps to 2)
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+    await page.getByRole("button", { name: "Page 3" }).click();
+    await expect(page.getByText("3 / 3")).toBeVisible({ timeout: 5000 });
+
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
+
+    // Verify Thumbnail Rail remains OPEN, shows 2 thumbnails, active page is 2
+    await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 3" })).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toHaveAttribute("aria-current", "page");
 
     // Export and verify file downloads cleanly
     const downloadPromise = page.waitForEvent("download");
@@ -2320,7 +2345,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(download.suggestedFilename()).toBe("multipage-delete-test-edited.pdf");
   });
 
-  test("v0.20 Workspace UX: Collapsible Panels and Thumbnail Navigation", async ({
+  test("v0.20 Workspace UX: Collapsible Panels, Invariants, and Multipage Operations", async ({
     page,
   }) => {
     const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
@@ -2330,34 +2355,125 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
-    // Thumbnail rail is visible by default
     const thumbRail = page.locator('[data-testid="pdf-thumbnail-rail"]');
     await expect(thumbRail).toBeVisible();
 
-    // Toggle thumbnail rail off
+    // 1. Manually COLLAPSE Thumbnail Rail
     await page.locator('[data-testid="toolbar-toggle-thumbnails-btn"]').click();
     await expect(thumbRail).not.toBeVisible();
 
-    // Toggle thumbnail rail back on
+    // 2. Perform page operations while rail is collapsed -> rail must REMAIN collapsed
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+    await expect(thumbRail).not.toBeVisible();
+
+    await page.getByTestId("page-insert-blank").click();
+    await expect(workspace).toContainText("4", { timeout: 10000 });
+    await expect(thumbRail).not.toBeVisible();
+
+    await page.getByTestId("page-move-left").click();
+    await expect(page.getByText("Page moved left.")).toBeVisible({ timeout: 5000 });
+    await expect(thumbRail).not.toBeVisible();
+
+    await page.getByTestId("page-delete").click();
+    await expect(workspace).toContainText("3", { timeout: 10000 });
+    await expect(thumbRail).not.toBeVisible();
+
+    // 3. Manually REOPEN Thumbnail Rail -> displays updated 3 thumbnails
     await page.locator('[data-testid="toolbar-toggle-thumbnails-btn"]').click();
     await expect(thumbRail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 1" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 2" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Page 3" })).toBeVisible();
 
-    // Toggle Inspector off
+    // 4. Manually COLLAPSE Inspector -> perform operation -> inspector remains collapsed
     const inspectorToggle = page.locator('[data-testid="toolbar-toggle-inspector-btn"]');
     await expect(inspectorToggle).toBeVisible();
     await inspectorToggle.click();
     await expect(page.getByRole("button", { name: "Forms (0)" })).not.toBeVisible();
 
-    // Toggle Inspector back on
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("4", { timeout: 10000 });
+    await expect(page.getByRole("button", { name: "Forms (0)" })).not.toBeVisible();
+
+    // 5. Reopen Inspector -> visible
     await inspectorToggle.click();
     await expect(page.getByRole("button", { name: "Forms (0)" })).toBeVisible();
 
-    // Click thumbnail for page 2 to navigate
-    await page.getByRole("button", { name: "Page 2" }).click();
-    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+    // Click thumbnail for page 3 to navigate
+    await page.getByRole("button", { name: "Page 3" }).click();
+    await expect(page.getByText("3 / 4")).toBeVisible({ timeout: 5000 });
 
     // Verify local processing badge is present
     await expect(page.locator('[data-testid="privacy-local-badge"]')).toBeVisible();
+  });
+
+  test("v0.20 Real 14-Page PDF: Complete Page Mutation Lifecycle & Navigation Stability", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/14-page-real.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "14-page-real.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const thumbRail = page.locator('[data-testid="pdf-thumbnail-rail"]');
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(14);
+
+    // 1. DELETE FIRST PAGE (Page 1 of 14 -> 13 pages, current 1, rail visible with 13 thumbs)
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("1 / 13")).toBeVisible({ timeout: 5000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(13);
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
+
+    // 2. DELETE MIDDLE PAGE (Page 7 of 13 -> 12 pages, current 7, rail visible with 12 thumbs)
+    await page.getByRole("button", { name: "Page 7" }).click();
+    await expect(page.getByText("7 / 13")).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("7 / 12")).toBeVisible({ timeout: 5000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(12);
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
+
+    // 3. DELETE LAST PAGE (Page 12 of 12 -> 11 pages, current 11, rail visible with 11 thumbs)
+    await page.getByRole("button", { name: "Page 12" }).click();
+    await expect(page.getByText("12 / 12")).toBeVisible({ timeout: 5000 });
+    await page.getByTestId("page-delete").click();
+    await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("11 / 11")).toBeVisible({ timeout: 5000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(11);
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
+
+    // 4. REORDER, DUPLICATE, INSERT BLANK
+    await page.getByTestId("page-move-left").click();
+    await expect(page.getByText("Page moved left.")).toBeVisible({ timeout: 5000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(11);
+
+    await page.getByTestId("page-duplicate").click();
+    await expect(page.getByText("11 / 12")).toBeVisible({ timeout: 10000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(12);
+
+    await page.getByTestId("page-insert-blank").click();
+    await expect(page.getByText("12 / 13")).toBeVisible({ timeout: 10000 });
+    await expect(thumbRail).toBeVisible();
+    await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(13);
+
+    // 5. EXPORT AND REOPEN
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("14-page-real-edited.pdf");
   });
 });
 
