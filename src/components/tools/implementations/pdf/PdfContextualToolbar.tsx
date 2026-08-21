@@ -325,6 +325,7 @@ export function PdfContextualToolbar({
 
   return (
     <div
+      onClick={(e) => e.stopPropagation()}
       className="absolute top-3 left-1/2 -translate-x-1/2 z-30 max-w-2xl w-[92%] sm:w-auto bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl p-2.5 flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-150"
       data-testid="pdf-contextual-toolbar"
       role="region"
@@ -376,6 +377,32 @@ export function PdfContextualToolbar({
         const field = selection.data as AcroFormField;
         const currentVal = formFieldValue ?? field.value;
 
+        if (field.isReadOnly) {
+          return (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal" data-testid="context-form-readonly">
+                <Lock className="size-3 text-slate-400" /> Read-Only Field
+              </Badge>
+              <span className="truncate max-w-[200px]" title={field.name}>
+                {field.name}
+              </span>
+            </div>
+          );
+        }
+
+        if (field.type === "unsupported") {
+          return (
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal" data-testid="context-form-unsupported">
+                <Lock className="size-3 text-slate-400" /> Unsupported Field
+              </Badge>
+              <span className="truncate max-w-[200px]" title={field.name}>
+                {field.name}
+              </span>
+            </div>
+          );
+        }
+
         if (field.type === "checkbox") {
           const checked = Boolean(currentVal);
           return (
@@ -385,6 +412,7 @@ export function PdfContextualToolbar({
                 checked={checked}
                 onChange={(e) => onFormFieldChange(field.name, e.target.checked)}
                 className="size-4 accent-sky-600 rounded"
+                data-testid="context-form-checkbox"
               />
               <span>{checked ? "Checked" : "Unchecked"}</span>
             </label>
@@ -397,6 +425,7 @@ export function PdfContextualToolbar({
               value={String(currentVal)}
               onChange={(e) => onFormFieldChange(field.name, e.target.value)}
               className="h-8 text-xs rounded border border-slate-300 bg-white px-2 text-slate-700"
+              data-testid="context-form-select"
             >
               {field.options?.map((opt) => (
                 <option key={opt} value={opt}>
@@ -414,6 +443,8 @@ export function PdfContextualToolbar({
             onChange={(e) => onFormFieldChange(field.name, e.target.value)}
             className="h-8 text-xs w-48 sm:w-64 bg-white"
             placeholder="Field value..."
+            data-testid="context-form-input"
+            autoFocus
           />
         );
       })()}

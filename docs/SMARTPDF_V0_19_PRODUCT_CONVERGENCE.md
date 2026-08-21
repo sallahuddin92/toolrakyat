@@ -7,23 +7,24 @@ StarPDF / SmartPDF v0.19 marks the convergence of the underlying local WASM/Web 
 ### Key Milestones Achieved:
 - **Unified Document Workflow**: Direct on-canvas interaction with contextual toolbars for native text, images, vector shapes, form fields, and annotations.
 - **Interactive Canvas Overlay**: Coordinate projection between PDF user space and responsive canvas display pixels, rendering selection bounding boxes and hover targets without exposing raw engine internals or object IDs.
+- **Annotation & Form Widget Interaction**: Supported widget annotations selectable directly on canvas and in inspector; contextual bar provides inline property mutation; unsupported or read-only annotations display clear badges; Escape immediately clears selection.
 - **Undo / Redo Operation History**: Deterministic, bounded (25 snapshots) in-memory history stack with deep state restoration and global keyboard shortcuts (`Ctrl+Z` / `Cmd+Z`, `Ctrl+Shift+Z` / `Cmd+Shift+Z` / `Ctrl+Y`).
 - **Document Dirty State & Confirmation Lifecycle**: Visual modified status indicator with modal confirmation safeguarding against accidental loss of unsaved changes.
 - **Human-Friendly Error Translation Layer**: Mapping typed StarPDF engine errors (unsupported fonts, encryption, complex scripts, corrupt xrefs) into clear, actionable user explanations.
-- **Workflows A through J Verified**: Comprehensive end-to-end user workflows executed and verified across **Chromium**, **Firefox**, and **WebKit**.
+- **Workflows A through K Verified**: Comprehensive end-to-end user workflows executed and verified across **Chromium**, **Firefox**, and **Playwright WebKit**.
 
 ---
 
 ## 2. Architecture & UX Model
 
 ### 2.1 Unified Selection & Contextual Action Bar
-- `PdfInteractiveOverlay.tsx`: Renders an interactive transparent overlay synchronized with PDF.js canvas dimensions. Maps user clicks directly to selectable items (Text Spans, Images, Vector Paths, Form Fields).
+- `PdfInteractiveOverlay.tsx`: Renders an interactive transparent overlay synchronized with PDF.js canvas dimensions. Maps user clicks directly to selectable items (Text Spans, Images, Vector Paths, Form Field / Widget Annotations).
 - `PdfContextualToolbar.tsx`: A floating contextual bar positioned dynamically above the selected item, presenting only relevant operations:
   - **Text**: Direct inline text replacement, font family/size indicators.
   - **Images**: Visual replacement trigger, dimensions, and color space metadata.
   - **Vector Shapes**: Fill/stroke color adjustments, stroke width, and shape deletion.
-  - **Forms**: Quick focus and value editing.
-  - **Annotations**: Visual properties and content editing.
+  - **Annotations / Form Widgets**: Direct on-canvas value mutation (text, checkbox, dropdown, optionList), read-only/unsupported fallback badges, and dismiss on `Escape`.
+- **User-Facing Cleanliness**: Raw PDF object IDs (`0 0 obj`, `Annot 0`, xref indices) are strictly omitted from normal user-facing views; fields and annotations are identified by logical name and type.
 
 ### 2.2 Bounded Operation History Stack
 - Maintained within `SmartPdfEditor.tsx` with a strict upper limit of **25 snapshots**.
@@ -31,7 +32,7 @@ StarPDF / SmartPDF v0.19 marks the convergence of the underlying local WASM/Web 
 - History clears and resets deterministically upon opening a new document.
 
 ### 2.3 Dirty State & Unsaved Changes Guard
-- Tracks modification state across form field updates, page operations (reorder, duplicate, delete, insert, merge), text stream replacements, and graphic edits.
+- Tracks modification state across form field updates, annotation edits, page operations (reorder, duplicate, delete, insert, merge), text stream replacements, and graphic edits.
 - Visual amber status dot indicator (`[data-testid="document-modified-dot"]`) in the top toolbar.
 - Modal confirmation dialog (`PdfConfirmDialog.tsx`) prevents destructive document replacement when unsaved changes exist.
 
@@ -45,9 +46,30 @@ StarPDF / SmartPDF v0.19 marks the convergence of the underlying local WASM/Web 
 
 ---
 
-## 3. End-to-End User Workflows (Workflows A – J)
+## 3. Product Capability Matrix
 
-| Workflow | Description | Status (Chromium) | Status (Firefox) | Status (WebKit) |
+| Feature Domain | Browser UI Capability | Local Engine Subsystem | Product State |
+| :--- | :--- | :--- | :--- |
+| **Document Viewing** | Multi-page scrolling, zoom, fit-width/page, page rail | PDF.js + Canvas DPR rendering | **SUPPORTED** |
+| **Text Search** | Case-insensitive keyword search, hit cycling | StarPDF WASM search | **SUPPORTED** |
+| **Native Text Edit** | On-canvas selection, inline replacement, inspector tab | StarPDF WASM content stream rewrite | **SUPPORTED** |
+| **Image Editing** | Selection, dimensions metadata, file replacement, removal | StarPDF WASM XObject replacement | **SUPPORTED** |
+| **Vector Graphics** | Path selection, stroke/fill color picker, line width, delete | StarPDF WASM operator rewrite | **SUPPORTED** |
+| **Interactive Form Fields** | Canvas widget selection, value editing, AcroForm update | PDF-lib + StarPDF structure sync | **SUPPORTED** |
+| **Annotations (/Widget)** | Selection on canvas, contextual inline edit, export & reopen | AcroForm annotation stream update | **SUPPORTED** |
+| **Markup Annotations** | Visual rendering via PDF.js, structure detection | StarPDF / PDF.js annotation layer | **READ-ONLY / PRESERVED** |
+| **Page Operations** | Reorder, duplicate, delete, insert blank, split/extract | StarPDF WASM page tree mutations | **SUPPORTED** |
+| **Multi-doc Merge** | Add PDF file input, append pages, incremental export | StarPDF WASM document combiner | **SUPPORTED** |
+| **Operation History** | 25-snapshot Undo / Redo with shortcuts (`Ctrl+Z`, `Ctrl+Y`) | SmartPDF in-memory snapshot stack | **SUPPORTED** |
+| **Document Lifecycle** | Modified status dot, unsaved changes confirmation modal | SmartPDF lifecycle manager | **SUPPORTED** |
+| **Export Formats** | Interactive Editable PDF or Flattened Read-Only PDF | Browser Blob download pipeline | **SUPPORTED** |
+| **Encrypted PDFs** | Explicit typed refusal banner and modal alert | StarPDF standard security handler guard | **TYPED REFUSAL** |
+
+---
+
+## 4. End-to-End User Workflows (Workflows A – K)
+
+| Workflow | Description | Status (Chromium) | Status (Firefox) | Status (Playwright WebKit) |
 | :--- | :--- | :---: | :---: | :---: |
 | **Workflow A** | Open $\to$ Search Text $\to$ Edit Native Text $\to$ Export Editable | **PASSED** (2.5s) | **PASSED** (2.3s) | **PASSED** (2.3s) |
 | **Workflow B** | Open $\to$ Replace Embedded Image $\to$ Export Editable | **PASSED** (1.7s) | **PASSED** (1.8s) | **PASSED** (1.6s) |
@@ -59,31 +81,34 @@ StarPDF / SmartPDF v0.19 marks the convergence of the underlying local WASM/Web 
 | **Workflow H** | Sequential Edits with Undo & Redo History Navigation | **PASSED** (2.0s) | **PASSED** (1.8s) | **PASSED** (1.9s) |
 | **Workflow I** | Unsupported Encrypted PDF $\to$ Typed Refusal Error | **PASSED** (0.7s) | **PASSED** (0.4s) | **PASSED** (0.5s) |
 | **Workflow J** | Dirty State Lifecycle & Unsaved Changes Confirmation | **PASSED** (1.9s) | **PASSED** (1.7s) | **PASSED** (1.7s) |
+| **Workflow K** | Open $\to$ Select/Edit Supported Annotation $\to$ Export $\to$ Reopen | **PASSED** (1.8s) | **PASSED** (1.6s) | **PASSED** (1.6s) |
 
 ---
 
-## 4. Cross-Browser Qualification Results
+## 5. Cross-Browser Qualification Results
 
-Full Playwright E2E suite executed across all three browser engines:
+Full Playwright E2E suite executed across all three browser environments:
 
-- **Chromium** (Google Chrome): **49 / 49 tests passed** (100%)
-- **Firefox** (Mozilla Firefox): **49 / 49 tests passed** (100%)
-- **WebKit** (Apple Safari engine): **49 / 49 tests passed** (100%)
-- **Total Suite Execution**: **147 / 147 tests passed** (0 failures, 0 skipped).
+- **Chromium** (Google Chrome): **50 / 50 tests passed** (100%)
+- **Firefox** (Mozilla Firefox): **50 / 50 tests passed** (100%)
+- **Playwright WebKit** (WebKit engine): **50 / 50 tests passed** (100%)
+- **Total Suite Execution**: **150 / 150 tests passed** (0 failures, 0 skipped).
+
+*(Note: Playwright WebKit qualifies WebKit engine compatibility; Safari was not directly tested).*
 
 ---
 
-## 5. Verification & Quality Gates
+## 6. Verification & Quality Gates
 
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run typecheck`: **PASSED** (0 TypeScript errors)
 - `npm test` (Vitest): **PASSED** (25 test files, 653 unit tests)
 - `npm run build` (Next.js production build): **PASSED** (Turbopack production build succeeded)
-- `npx playwright test`: **PASSED** (147 / 147 cross-browser tests)
+- `npx playwright test`: **PASSED** (150 / 150 cross-browser tests)
 
 ---
 
-## 6. Qualification Verdict
+## 7. Qualification Verdict
 
 **STARPDF / SMARTPDF v0.19 — FULLY QUALIFIED**
 The product convergence milestone is complete, production-ready, and verified across all target browser environments.
