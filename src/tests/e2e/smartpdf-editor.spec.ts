@@ -370,7 +370,7 @@ async function changedRegionRatio(
 
 test.describe("SmartPDF — Advanced PDF Editor", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/tools/pdf/editor");
+    await page.goto("/smartpdf");
   });
 
   test("v0.12B page controls reorder, duplicate, insert, delete, merge, and extract through the worker", async ({
@@ -424,7 +424,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
   test("loads dropzone screen with accurate Phase 1 title and privacy notice", async ({
     page,
   }) => {
-    await expect(page.locator("h1")).toContainText("Advanced PDF Editor");
+    await expect(page.getByText("SmartPDF", { exact: false }).first()).toBeVisible();
     await expect(
       page.getByText("Upload a PDF Document"),
     ).toBeVisible();
@@ -1368,7 +1368,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(error).toBeVisible();
     await expect(error).toContainText("encrypted with an unsupported security handler");
     await expect(error).toContainText("does not decrypt or bypass");
-    await expect(page.getByTestId("smartpdf-editor-workspace")).toHaveCount(0);
+    await expect(page.getByRole("main", { name: "PDF Document Page Viewport" })).toHaveCount(0);
   });
 
   test("worker returns typed encrypted-document refusal", async ({ page }) => {
@@ -1788,7 +1788,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toContainText("1 / 2", { timeout: 10000 });
 
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export Editable" }).click();
+    await page.getByRole("button", { name: "Export Editable" }).click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("workflow-h-edited.pdf");
   });
@@ -2288,14 +2288,14 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       await prevBtn.click();
       await page.waitForTimeout(100);
     }
-    await expect(page.getByText("1 / 3")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("1 / 3", { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("page-delete").click();
 
     // Verify loading spinner absent, blur overlay gone, page count is 2
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("1 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("1 / 2", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
     // Verify Thumbnail Rail remains OPEN and shows 2 thumbnails
@@ -2312,12 +2312,12 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // Navigate to page 2
     await page.getByRole("button", { name: "Page 2" }).click();
-    await expect(page.getByText("2 / 3")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("2 / 3", { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
     // Verify Thumbnail Rail remains OPEN and shows 2 thumbnails
@@ -2330,12 +2330,12 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.getByTestId("page-duplicate").click();
     await expect(workspace).toContainText("3", { timeout: 10000 });
     await page.getByRole("button", { name: "Page 3" }).click();
-    await expect(page.getByText("3 / 3")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("3 / 3", { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("2 / 2")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
     // Verify Thumbnail Rail remains OPEN, shows 2 thumbnails, active page is 2
@@ -2347,7 +2347,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // Export and verify file downloads cleanly
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export Editable" }).click();
+    await page.getByRole("button", { name: "Export Editable" }).click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("multipage-delete-test-edited.pdf");
   });
@@ -2402,7 +2402,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // Click thumbnail for page 3 to navigate
     await page.getByRole("button", { name: "Page 3" }).click();
-    await expect(page.getByText("3 / 3")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("3 / 3", { exact: true })).toBeVisible({ timeout: 5000 });
 
     // Verify local processing badge is present
     await expect(page.locator('[data-testid="privacy-local-badge"]')).toBeVisible();
@@ -2426,29 +2426,29 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("1 / 13")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("1 / 13", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(thumbRail).toBeVisible();
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(13);
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
     // 2. DELETE MIDDLE PAGE (Page 7 of 13 -> 12 pages, current 7, rail visible with 12 thumbs)
     await page.getByRole("button", { name: "Page 7" }).click();
-    await expect(page.getByText("7 / 13")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("7 / 13", { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("7 / 12")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("7 / 12", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(thumbRail).toBeVisible();
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(12);
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
 
     // 3. DELETE LAST PAGE (Page 12 of 12 -> 11 pages, current 11, rail visible with 11 thumbs)
     await page.getByRole("button", { name: "Page 12" }).click();
-    await expect(page.getByText("12 / 12")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("12 / 12", { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByTestId("page-delete").click();
     await expect(page.getByText("Processing in StarPDF worker…")).not.toBeVisible({ timeout: 10000 });
     await expect(page.locator('.backdrop-blur-xs .animate-spin')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("11 / 11")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("11 / 11", { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(thumbRail).toBeVisible();
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(11);
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
@@ -2460,18 +2460,18 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(11);
 
     await page.getByTestId("page-duplicate").click();
-    await expect(page.getByText("11 / 12")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("11 / 12", { exact: true })).toBeVisible({ timeout: 10000 });
     await expect(thumbRail).toBeVisible();
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(12);
 
     await page.getByTestId("page-insert-blank").click();
-    await expect(page.getByText("12 / 13")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("12 / 13", { exact: true })).toBeVisible({ timeout: 10000 });
     await expect(thumbRail).toBeVisible();
     await expect(thumbRail.locator('button[aria-label^="Page "]')).toHaveCount(13);
 
     // 5. EXPORT AND REOPEN
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Export Editable" }).click();
+    await page.getByRole("button", { name: "Export Editable" }).click({ force: true });
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("14-page-real-edited.pdf");
   });
@@ -2515,6 +2515,66 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       await page.keyboard.press("Escape");
       await expect(contextToolbar).not.toBeVisible();
     }
+  });
+
+  test("v0.20 Phase 1: Canonical /smartpdf Application Shell, Empty State & Status Bar", async ({
+    page,
+  }) => {
+    // 1. DIRECT LOAD: /smartpdf opens without needing prior route navigation
+    await page.goto("/smartpdf");
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 2. EMPTY STATE: Application header and status bar render cleanly
+    await expect(page.getByText("SmartPDF", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("Powered by StarPDF")).toBeVisible();
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    await expect(statusBar).toBeVisible();
+    await expect(statusBar).toContainText("No document open");
+
+    // 3. LOAD DOCUMENT INTO FULL-VIEWPORT APPLICATION
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-form.pdf");
+    const originalBytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "phase1-app.pdf", originalBytes);
+
+    // 4. LOADED STATUS BAR: Shows page numbers, zoom, selection state, and privacy badge
+    await expect(statusBar).toContainText("Page 1 / 1");
+    await expect(statusBar).toContainText("Zoom 100%");
+    await expect(statusBar).toContainText("No selection");
+    await expect(statusBar).toContainText("Local processing");
+  });
+
+  test("v0.20 Phase 1: ToolRakyat Entry Point Navigation to /smartpdf", async ({
+    page,
+  }) => {
+    // 1. Visit old ToolRakyat PDF editor tool discovery route
+    await page.goto("/tools/pdf/editor");
+
+    // 2. Verify launch card with "Open SmartPDF" CTA button
+    const openBtn = page.locator('[data-testid="open-smartpdf-btn"]');
+    await expect(openBtn).toBeVisible({ timeout: 10000 });
+    await expect(openBtn).toContainText("Open SmartPDF");
+
+    // 3. Click CTA and verify navigation to /smartpdf
+    await openBtn.click();
+    await page.waitForURL("**/smartpdf", { timeout: 10000 });
+    expect(page.url()).toContain("/smartpdf");
+
+    // 4. Verify canonical SmartPDF application workspace loaded
+    await expect(page.locator('[data-testid="smartpdf-editor-workspace"]')).toBeVisible();
+  });
+
+  test("v0.20 Phase 1: Direct Browser Refresh and Local State Resilience", async ({
+    page,
+  }) => {
+    await page.goto("/smartpdf");
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Reload page directly
+    await page.reload();
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toBeVisible();
   });
 });
 

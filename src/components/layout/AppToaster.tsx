@@ -6,7 +6,7 @@ export function AppToaster() {
   // Central place for toast rendering. SmartPDF UI relies on react-hot-toast.
   return (
     <Toaster
-      position="top-right"
+      position="bottom-right"
       toastOptions={{
         duration: 4000,
         style: {

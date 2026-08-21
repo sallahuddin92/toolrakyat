@@ -1,9 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/button";
 
 export function SiteHeader() {
+  const pathname = usePathname();
+  if (pathname?.startsWith("/smartpdf")) {
+    return null;
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
       <Container className="flex h-16 items-center justify-between">

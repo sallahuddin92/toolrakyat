@@ -1,9 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { Container } from "@/components/layout/Container";
 import { Separator } from "@/components/ui/separator";
 
 export function SiteFooter() {
+  const pathname = usePathname();
+  if (pathname?.startsWith("/smartpdf")) {
+    return null;
+  }
+
   return (
     <footer className="border-t bg-background">
       <Container className="py-10">
