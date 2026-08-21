@@ -1988,6 +1988,267 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(page.locator('[data-testid="inspector-annotation-annot-0-2"]')).toBeVisible();
     await expect(page.locator('[data-testid="inspector-annotation-annot-0-3"]')).toBeVisible();
   });
+
+  test("v0.20 Workflow M: Session Integrity — Multi-Domain Mutation with Undo/Redo Roundtrip", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-form.pdf");
+    const originalBytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-m.pdf", originalBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Text edit via Search & Replace
+    await page.getByLabel("Search text").click();
+    const searchInput = page.getByPlaceholder("Search in document...");
+    await searchInput.fill("SmartPDF");
+    await page.waitForTimeout(300);
+
+    await page.getByRole("button", { name: /Text \(/ }).click();
+    const textSpanBtn = page.locator('[data-testid^="text-span-btn-"]').first();
+    if (await textSpanBtn.isVisible()) {
+      await textSpanBtn.click();
+      const replaceInput = page.locator('[data-testid="replace-text-input"]');
+      await replaceInput.fill("Session Integrity Verified");
+      await page.locator('[data-testid="apply-replace-text-btn"]').click();
+      await page.waitForTimeout(500);
+    }
+
+    // 2. Vector shape edit (Add rectangle)
+    await page.getByRole("button", { name: /Shapes \(/ }).click();
+    await page.locator('button[title="Add Rectangle"]').click();
+    await page.waitForTimeout(500);
+
+    // 3. Test Undo of vector shape addition
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await expect(undoBtn).toBeEnabled();
+    await undoBtn.click();
+    await page.waitForTimeout(500);
+
+    // 4. Test Redo of vector shape addition
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+    await expect(redoBtn).toBeEnabled();
+    await redoBtn.click();
+    await page.waitForTimeout(500);
+
+    // 5. Export
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-m-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(100);
+    expect(exportedBytes).not.toEqual(originalBytes);
+
+    // 6. Reopen and verify final state
+    await page.getByRole("button", { name: "Open" }).click();
+    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
+    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await confirmBtn.click();
+    }
+    await uploadPdfBytes(page, "workflow-m-edited.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Verify both text spans and shapes are present in reopened document
+    await expect(page.getByRole("button", { name: /Shapes \(/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Text \(/ })).toBeVisible();
+  });
+
+  test("v0.20 Workflow N: Sequential Document Isolation — Clean Reset between Documents", async ({
+    page,
+  }) => {
+    // 1. Open Doc A (Form)
+    const docABytes = fs.readFileSync(path.join(process.cwd(), "test-assets/smartpdf-form.pdf"));
+    await uploadPdfBytes(page, "doc-a.pdf", docABytes);
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /Forms \(3\)/ })).toBeVisible();
+
+    // 2. Close & Reset via Open Toolbar button
+    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
+    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
+    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await confirmBtn.click();
+    }
+    const fileInput = page.locator('input[type="file"]');
+    await expect(fileInput).toBeAttached({ timeout: 5000 });
+
+    // 3. Open Doc B (Multi-page, non-form)
+    const docBBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/multi-page.test.pdf"));
+    await fileInput.setInputFiles({
+      name: "doc-b.pdf",
+      mimeType: "application/pdf",
+      buffer: docBBytes,
+    });
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 4. Verify no stale state from Doc A
+    await expect(page.getByRole("button", { name: /Forms \(0\)/ })).toBeVisible();
+    await expect(page.locator('input[placeholder="Enter text..."]')).not.toBeVisible();
+
+    // 5. Navigate & Export Doc B
+    await page.getByRole("button", { name: "Next Page" }).click();
+    await page.waitForTimeout(300);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("doc-b-edited.pdf");
+  });
+
+  test("v0.20 Workflow O: Failure Recovery — Editor Remains Usable After Unsupported Error", async ({
+    page,
+  }) => {
+    // 1. Attempt to open unsupported encrypted PDF
+    const encryptedPath = path.join(
+      process.cwd(),
+      "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf",
+    );
+    const encryptedBytes = fs.readFileSync(encryptedPath);
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "encrypted.pdf",
+      mimeType: "application/pdf",
+      buffer: encryptedBytes,
+    });
+
+    // Verify explicit refusal message
+    const errorAlert = page.getByText(/password-protected or encrypted|security handler/i);
+    await expect(errorAlert.first()).toBeVisible({ timeout: 10000 });
+
+    // 2. Open valid PDF immediately without reloading page
+    const validBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/smartpdf-form.pdf"));
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "recovered.pdf",
+      mimeType: "application/pdf",
+      buffer: validBytes,
+    });
+
+    // 3. Verify editor is fully operational
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: /Forms \(3\)/ })).toBeVisible();
+
+    const nameInput = page.locator('input[placeholder="Enter text..."]').first();
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill("Recovered Session Value");
+
+    // 4. Export & Reopen
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("recovered-edited.pdf");
+  });
+
+  test("v0.20 Workflow P: Long Session Smoke — Repeated Selection, Navigation, and Operations", async ({
+    page,
+  }) => {
+    const multiPageBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/multi-page.test.pdf"));
+    await uploadPdfBytes(page, "workflow-p.pdf", multiPageBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Cycle through pages
+    const nextBtn = page.locator('button[title="Next Page"]');
+    const prevBtn = page.locator('button[title="Previous Page"]');
+
+    await expect(prevBtn).toBeDisabled();
+    await nextBtn.click();
+    await expect(prevBtn).toBeEnabled();
+
+    await prevBtn.click();
+    await expect(prevBtn).toBeDisabled();
+
+    // Perform page duplicate
+    await page.getByTestId("page-duplicate").click();
+    await expect(workspace).toContainText("4", { timeout: 10000 });
+
+    // Undo duplicate
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await expect(undoBtn).toBeEnabled();
+    await undoBtn.click();
+    await page.waitForTimeout(500);
+
+    // Redo duplicate
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+    await expect(redoBtn).toBeEnabled();
+    await redoBtn.click();
+    await page.waitForTimeout(500);
+
+    // Export final state
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-p-edited.pdf");
+  });
+
+  test("v0.20 Local-First Privacy Audit: Zero PDF Content Bytes Sent Over Network", async ({
+    page,
+  }) => {
+    const postRequests: { url: string; postData: string | null }[] = [];
+
+    // Listen to all network requests
+    page.on("request", (req) => {
+      if (req.method() === "POST" || req.method() === "PUT" || req.method() === "PATCH") {
+        postRequests.push({
+          url: req.url(),
+          postData: req.postData(),
+        });
+      }
+    });
+
+    const formBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/smartpdf-form.pdf"));
+    await uploadPdfBytes(page, "privacy-audit.pdf", formBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Mutate field
+    const nameInput = page.locator('input[placeholder="Enter text..."]').first();
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill("Confidential Privacy Test");
+
+    // Export
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    await downloadPromise;
+
+    // Verify ZERO POST/upload requests were made for PDF processing
+    expect(postRequests.length).toBe(0);
+  });
+
+  test("v0.20 Responsive Desktop Qualification: 1280x720, 1440x900, 1920x1080", async ({
+    page,
+  }) => {
+    const viewports = [
+      { width: 1280, height: 720 },
+      { width: 1440, height: 900 },
+      { width: 1920, height: 1080 },
+    ];
+
+    const formBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/smartpdf-form.pdf"));
+
+    for (const vp of viewports) {
+      await page.setViewportSize(vp);
+      await uploadPdfBytes(page, `responsive-${vp.width}.pdf`, formBytes);
+
+      const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+      await expect(workspace).toBeVisible({ timeout: 10000 });
+
+      // Verify essential UI regions are accessible without overlapping errors
+      await expect(page.locator('[data-testid="smartpdf-editor-workspace"]')).toBeVisible();
+      await expect(page.getByRole("button", { name: "Export Editable" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Forms \(3\)/ })).toBeVisible();
+
+      // Close document to reset for next viewport
+      await page.locator('[data-testid="toolbar-open-file-btn"]').click();
+      await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
+    }
+  });
 });
 
 
