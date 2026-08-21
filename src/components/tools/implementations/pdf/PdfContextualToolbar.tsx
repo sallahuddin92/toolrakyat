@@ -22,18 +22,13 @@ import type {
   StarPdfUpdateVectorGraphicInput,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
+import type { SmartPdfSelection, SelectionType } from "@/lib/pdf/selection";
 
-export type SelectionType = "text" | "image" | "vector" | "form" | "annotation";
-
-export interface SelectedItem {
-  type: SelectionType;
-  id: string;
-  data: StarPdfTextSpan | StarPdfImageInfo | StarPdfVectorGraphicInfo | AcroFormField | PdfMarkupAnnotation;
-  bounds?: { left: number; top: number; width: number; height: number };
-}
+export type { SelectionType };
+export type SelectedItem = NonNullable<SmartPdfSelection>;
 
 interface PdfContextualToolbarProps {
-  selection: SelectedItem | null;
+  selection: SmartPdfSelection;
   onDeselect: () => void;
   onReplaceText: (spanId: string, newText: string) => Promise<void>;
   onReplaceImage: (imageId: string, file: File) => Promise<void>;
@@ -60,7 +55,7 @@ function TextControls({
 
   if (!span.is_editable) {
     return (
-      <div className="flex items-center gap-2 text-xs text-slate-600">
+      <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="context-text-controls">
         <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal">
           <Lock className="size-3 text-slate-400" /> Read-Only
         </Badge>
@@ -82,7 +77,7 @@ function TextControls({
   };
 
   return (
-    <div className="flex items-center gap-2 min-w-0">
+    <div className="flex items-center gap-2 min-w-0" data-testid="context-text-controls">
       <Input
         type="text"
         value={editText}

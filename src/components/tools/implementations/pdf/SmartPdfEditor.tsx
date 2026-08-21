@@ -4,21 +4,11 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { getPdfjsLib, type PDFDocumentProxy } from "@/lib/pdf/pdfjs-init";
 import toast from "react-hot-toast";
 
-import {
-  inspectPdfDocument,
-  exportPdfDocument,
-} from "@/lib/pdf/pdf-engine";
+import { inspectPdfDocument } from "@/lib/pdf/pdf-engine";
 import {
   type DocumentInspectionResult,
-  type ExportMode,
-  type AcroFormField,
 } from "@/lib/pdf/pdf-types";
 import { StarPdfClient, type StarPdfDocumentHandle } from "@/lib/pdf/starpdf-client";
-import {
-  runStarPdfPageOperation,
-  mergeStarPdfDocuments,
-  type StarPdfPageOperation,
-} from "@/lib/pdf/starpdf-page-worker-client";
 import type {
   StarPdfImageInfo,
   StarPdfSearchResult,
@@ -30,19 +20,45 @@ import type {
 import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
 import { ShieldCheck } from "lucide-react";
 
+import {
+  type SmartPdfSelection,
+  resolveSelectionAfterMutation,
+} from "@/lib/pdf/selection";
+import {
+  type SmartPdfCommand,
+  type SmartPdfCommandContext,
+  type CommandExecutionState,
+  type SmartPdfHistoryState,
+  createInitialHistoryState,
+  pushHistorySnapshot,
+  canUndo,
+  canRedo,
+  undoHistory,
+  redoHistory,
+  ReplaceTextCommand,
+  ReplaceImageCommand,
+  RemoveImageCommand,
+  UpdateVectorCommand,
+  DeleteVectorCommand,
+  SetFormFieldValueCommand,
+  UpdateAnnotationCommand,
+  MovePageCommand,
+  DuplicatePageCommand,
+  DeletePageCommand,
+  InsertBlankPageCommand,
+  ExtractPagesCommand,
+  MergeDocumentsCommand,
+  ExportDocumentCommand,
+} from "@/lib/pdf/commands";
+
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
 import { PdfThumbnailRail } from "./PdfThumbnailRail";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfDocumentInfo } from "./PdfDocumentInfo";
 import { PdfPageOperations } from "./PdfPageOperations";
-import { PdfContextualToolbar, type SelectedItem } from "./PdfContextualToolbar";
+import { PdfContextualToolbar } from "./PdfContextualToolbar";
 import { PdfConfirmDialog } from "./PdfConfirmDialog";
-
-interface HistoryEntry {
-  bytes: Uint8Array;
-  description: string;
-}
 
 export function SmartPdfEditor() {
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
@@ -61,18 +77,23 @@ export function SmartPdfEditor() {
   const [pageGraphics, setPageGraphics] = useState<StarPdfVectorGraphicInfo[]>([]);
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
-  const [isPageProcessing, setIsPageProcessing] = useState<boolean>(false);
 
-  // Selection state on canvas
-  const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
+  // Unified selection state on canvas
+  const [selectedItem, setSelectedItem] = useState<SmartPdfSelection>(null);
 
-  // Operation history stack (bounded to 25 snapshots)
-  const historyRef = useRef<HistoryEntry[]>([]);
-  const historyIndexRef = useRef<number>(-1);
-  const [historyLength, setHistoryLength] = useState<number>(0);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  // Command Execution State (IDLE vs RUNNING)
+  const [commandState, setCommandState] = useState<CommandExecutionState>({ status: "IDLE" });
 
-  // Unsaved changes confirmation
+  // Centralized Bounded 25-Snapshot Transaction History
+  const [historyState, setHistoryState] = useState<SmartPdfHistoryState>(() =>
+    createInitialHistoryState(new Uint8Array(0)),
+  );
+  const historyStateRef = useRef<SmartPdfHistoryState>(historyState);
+  useEffect(() => {
+    historyStateRef.current = historyState;
+  }, [historyState]);
+
+  // Unsaved changes confirmation dialog
   const [showConfirmOpenModal, setShowConfirmOpenModal] = useState<boolean>(false);
 
   // Layout Panel Visibility (Desktop Workspace)
@@ -85,7 +106,6 @@ export function SmartPdfEditor() {
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>("Loading document...");
-  const [isExporting, setIsExporting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
 
@@ -122,21 +142,14 @@ export function SmartPdfEditor() {
     };
   }, [cleanupProxy]);
 
-  const pushHistorySnapshot = useCallback((newBytes: Uint8Array, description: string) => {
-    const currentIdx = historyIndexRef.current;
-    const sliced = historyRef.current.slice(0, currentIdx + 1);
-    sliced.push({ bytes: newBytes, description });
-    if (sliced.length > 25) sliced.shift();
-    historyRef.current = sliced;
-    const nextIdx = sliced.length - 1;
-    historyIndexRef.current = nextIdx;
-    setHistoryLength(sliced.length);
-    setHistoryIndex(nextIdx);
-    setIsModified(true);
-  }, []);
-
   const loadDocument = useCallback(
-    async (bytes: Uint8Array, docFilename: string, docSize: number, initialPage = 1, isHistoryRestore = false) => {
+    async (
+      bytes: Uint8Array,
+      docFilename: string,
+      docSize: number,
+      initialPage = 1,
+      isHistoryRestore = false,
+    ) => {
       setIsLoading(true);
       setError(null);
       setSecurityInfo(null);
@@ -212,12 +225,12 @@ export function SmartPdfEditor() {
 
         if (!isHistoryRestore) {
           setIsModified(false);
-          historyRef.current = [{ bytes, description: "Initial document" }];
-          historyIndexRef.current = 0;
-          setHistoryLength(1);
-          setHistoryIndex(0);
+          const initialHistory = createInitialHistoryState(bytes, "Initial document");
+          setHistoryState(initialHistory);
           if (inspected.fields.length > 0) {
-            toast.success(`Loaded "${docFilename}" with ${inspected.fields.length} interactive form field(s).`);
+            toast.success(
+              `Loaded "${docFilename}" with ${inspected.fields.length} interactive form field(s).`,
+            );
           } else {
             toast.success(`Loaded "${docFilename}" (${inspected.metadata.pageCount} pages).`);
           }
@@ -233,28 +246,182 @@ export function SmartPdfEditor() {
     [cleanupProxy],
   );
 
+  /**
+   * Centralized Command Execution Lifecycle
+   * Coordinates validation, busy state, execution, atomic document refresh,
+   * bounded history, dirty state, selection resolution, error translation, and user feedback.
+   */
+  const isBusyRef = useRef(false);
+  useEffect(() => {
+    isBusyRef.current = commandState.status === "RUNNING";
+  }, [commandState.status]);
+
+  const executeCommand = useCallback(
+    async (command: SmartPdfCommand): Promise<void> => {
+      // If currently running a previous operation, wait up to 2.5s for it to settle
+      let waitCount = 0;
+      while (isBusyRef.current && waitCount < 50) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        waitCount++;
+      }
+
+      if (isBusyRef.current) {
+        console.warn(`Command "${command.label}" rejected: executor is currently busy.`);
+        return;
+      }
+
+      setCommandState({
+        status: "RUNNING",
+        commandId: command.id,
+        label: command.label,
+      });
+
+      const context: SmartPdfCommandContext = {
+        sourceBytes,
+        filename,
+        currentPage,
+        pageCount: inspectionResult?.metadata.pageCount || 1,
+        selection: selectedItem,
+        starPdfDoc,
+        fieldValues,
+        annotationValues,
+        inspectionResult,
+      };
+
+      try {
+        const result = await command.execute(context);
+
+        // 1. Handle browser file download if returned
+        if (result.download) {
+          const blob = new Blob([result.download.bytes as unknown as BlobPart], {
+            type: "application/pdf",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = result.download.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+
+        // 2. Handle document byte mutations
+        if (result.bytes) {
+          const targetPage = result.nextPage !== undefined ? result.nextPage : currentPage;
+          await loadDocument(
+            result.bytes,
+            filename,
+            result.bytes.byteLength,
+            targetPage,
+            true, // isHistoryRestore flag prevents resetting history
+          );
+
+          if (command.isMutating) {
+            setHistoryState((prev) => pushHistorySnapshot(prev, result.bytes!, command.label));
+            setIsModified(true);
+          }
+        } else {
+          // Non-byte mutating state updates (e.g. form fields, annotations)
+          if (result.fieldValues) {
+            setFieldValues(result.fieldValues);
+            if (command.isMutating && sourceBytes) {
+              setHistoryState((prev) =>
+                pushHistorySnapshot(prev, sourceBytes, command.label),
+              );
+              setIsModified(true);
+            }
+          }
+          if (result.annotationValues) {
+            setAnnotationValues(result.annotationValues);
+            if (command.isMutating && sourceBytes) {
+              setHistoryState((prev) =>
+                pushHistorySnapshot(prev, sourceBytes, command.label),
+              );
+              setIsModified(true);
+            }
+          }
+          if (result.nextPage !== undefined) {
+            setCurrentPage(result.nextPage);
+          }
+        }
+
+        // 3. Selection resolution / cleanup
+        if (result.clearSelection) {
+          setSelectedItem(null);
+        } else if (result.nextSelection !== undefined) {
+          setSelectedItem(result.nextSelection);
+        } else if (command.isMutating) {
+          const targetPageIndex = (result.nextPage || currentPage) - 1;
+          setSelectedItem((prev) =>
+            resolveSelectionAfterMutation(
+              prev,
+              targetPageIndex,
+              pageTextSpans,
+              pageImages,
+              pageGraphics,
+              inspectionResult?.fields || [],
+              inspectionResult?.annotations || [],
+            ),
+          );
+        }
+
+        // 4. Concise user feedback
+        if (result.message) {
+          toast.success(result.message);
+        }
+      } catch (err: unknown) {
+        const friendly = formatPdfErrorMessage(err);
+        toast.error(friendly.userMessage);
+      } finally {
+        setCommandState({ status: "IDLE" });
+      }
+    },
+    [
+      annotationValues,
+      commandState.status,
+      currentPage,
+      fieldValues,
+      filename,
+      inspectionResult,
+      loadDocument,
+      pageGraphics,
+      pageImages,
+      pageTextSpans,
+      selectedItem,
+      sourceBytes,
+      starPdfDoc,
+    ],
+  );
+
   const handleUndo = useCallback(async () => {
-    const currentIdx = historyIndexRef.current;
-    if (currentIdx > 0) {
-      const prevIdx = currentIdx - 1;
-      const targetEntry = historyRef.current[prevIdx];
-      historyIndexRef.current = prevIdx;
-      setHistoryIndex(prevIdx);
-      await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
-      toast.success(`Undo: ${historyRef.current[currentIdx].description}`);
-    }
+    const undone = undoHistory(historyStateRef.current);
+    if (!undone) return;
+
+    setHistoryState(undone.nextState);
+    await loadDocument(
+      undone.entry.bytes,
+      filename,
+      undone.entry.bytes.byteLength,
+      currentPage,
+      true,
+    );
+    toast.success(`Undo: ${historyStateRef.current.snapshots[historyStateRef.current.currentIndex].description}`);
   }, [currentPage, filename, loadDocument]);
 
   const handleRedo = useCallback(async () => {
-    const currentIdx = historyIndexRef.current;
-    if (currentIdx < historyRef.current.length - 1) {
-      const nextIdx = currentIdx + 1;
-      const targetEntry = historyRef.current[nextIdx];
-      historyIndexRef.current = nextIdx;
-      setHistoryIndex(nextIdx);
-      await loadDocument(targetEntry.bytes, filename, targetEntry.bytes.byteLength, currentPage, true);
-      toast.success(`Redo: ${targetEntry.description}`);
-    }
+    const redone = redoHistory(historyStateRef.current);
+    if (!redone) return;
+
+    setHistoryState(redone.nextState);
+    await loadDocument(
+      redone.entry.bytes,
+      filename,
+      redone.entry.bytes.byteLength,
+      currentPage,
+      true,
+    );
+    toast.success(`Redo: ${redone.entry.description}`);
   }, [currentPage, filename, loadDocument]);
 
   // Global keyboard shortcuts
@@ -278,30 +445,6 @@ export function SmartPdfEditor() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleUndo, handleRedo]);
-
-  const handleFieldValueChange = useCallback(
-    (name: string, value: string | boolean | string[]) => {
-      setFieldValues((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-      setIsModified(true);
-    },
-    [],
-  );
-
-  const _handleResetForm = useCallback(() => {
-    if (!inspectionResult) return;
-    const originalValues: Record<string, string | boolean | string[]> = {};
-    for (const field of inspectionResult.fields) {
-      originalValues[field.name] = Array.isArray(field.originalValue)
-        ? [...field.originalValue]
-        : field.originalValue;
-    }
-    setFieldValues(originalValues);
-    setIsModified(false);
-    toast.success("Form values restored to original document state.");
-  }, [inspectionResult]);
 
   const handleZoomIn = useCallback(() => {
     setScale((prev) => Math.min(Math.round((prev + 0.15) * 100) / 100, 4.0));
@@ -413,500 +556,14 @@ export function SmartPdfEditor() {
     };
   }, [starPdfDoc, currentPage, sourceBytes]);
 
-  const handleReplaceExistingText = useCallback(
-    async (spanId: string, newText: string) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        const result = await starPdfDoc.replaceText(currentPage - 1, spanId, newText);
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, `Edit text "${newText}"`);
-
-        const pageText = await starPdfDoc.extractPageText(currentPage - 1);
-        setPageTextSpans(pageText.spans || []);
-
-        toast.success(`Text updated (${result.layout_result}). Native content stream modified.`);
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const handleReplaceImage = useCallback(
-    async (imageId: string, file: File) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        await starPdfDoc.replaceImage(currentPage - 1, imageId, bytes, true);
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Replace image");
-
-        const images = await starPdfDoc.enumerateImages(currentPage - 1);
-        setPageImages(images || []);
-
-        toast.success("Image replaced successfully.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const _handleAddImage = useCallback(
-    async (file: File, x: number, y: number, width: number, height: number) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        await starPdfDoc.addImage(currentPage - 1, bytes, x, y, width, height);
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Add image");
-
-        const images = await starPdfDoc.enumerateImages(currentPage - 1);
-        setPageImages(images || []);
-
-        toast.success("Image added to page successfully.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const handleRemoveImage = useCallback(
-    async (imageId: string) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        await starPdfDoc.removeImage(currentPage - 1, imageId);
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Remove image");
+  const handlePageNavigation = useCallback((newPage: number) => {
+    setCurrentPage((prev) => {
+      if (prev !== newPage) {
         setSelectedItem(null);
-
-        const images = await starPdfDoc.enumerateImages(currentPage - 1);
-        setPageImages(images || []);
-
-        toast.success("Image removed from page.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
       }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const handleUpdateGraphic = useCallback(
-    async (input: StarPdfUpdateVectorGraphicInput) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        await starPdfDoc.updateGraphic(input);
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Update vector shape");
-
-        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
-        setPageGraphics(graphics || []);
-
-        toast.success("Vector shape updated successfully.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const _handleAddRectangle = useCallback(
-    async (
-      x: number,
-      y: number,
-      width: number,
-      height: number,
-      strokeColorHex?: string,
-      fillColorHex?: string,
-      lineWidth = 1.5,
-    ) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        const hexToRgb = (hex: string): [number, number, number] => {
-          const clean = hex.replace("#", "");
-          if (clean.length === 6) {
-            return [
-              parseInt(clean.substring(0, 2), 16) / 255,
-              parseInt(clean.substring(2, 4), 16) / 255,
-              parseInt(clean.substring(4, 6), 16) / 255,
-            ];
-          }
-          return [0, 0, 0];
-        };
-
-        const strokeRgb = strokeColorHex ? hexToRgb(strokeColorHex) : undefined;
-        const fillRgb = fillColorHex ? hexToRgb(fillColorHex) : undefined;
-
-        await starPdfDoc.addRectangle({
-          page_index: currentPage - 1,
-          x,
-          y,
-          width,
-          height,
-          stroke_color_rgb: strokeRgb,
-          fill_color_rgb: fillRgb,
-          line_width: lineWidth,
-          is_stroked: Boolean(strokeRgb),
-          is_filled: Boolean(fillRgb),
-        });
-
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Add rectangle");
-
-        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
-        setPageGraphics(graphics || []);
-
-        toast.success("Rectangle added successfully.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const _handleAddLine = useCallback(
-    async (
-      x1: number,
-      y1: number,
-      x2: number,
-      y2: number,
-      strokeColorHex = "#000000",
-      lineWidth = 2.0,
-    ) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        const hexToRgb = (hex: string): [number, number, number] => {
-          const clean = hex.replace("#", "");
-          if (clean.length === 6) {
-            return [
-              parseInt(clean.substring(0, 2), 16) / 255,
-              parseInt(clean.substring(2, 4), 16) / 255,
-              parseInt(clean.substring(4, 6), 16) / 255,
-            ];
-          }
-          return [0, 0, 0];
-        };
-
-        const strokeRgb = hexToRgb(strokeColorHex);
-
-        await starPdfDoc.addLine({
-          page_index: currentPage - 1,
-          x1,
-          y1,
-          x2,
-          y2,
-          stroke_color_rgb: strokeRgb,
-          line_width: lineWidth,
-        });
-
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Add line");
-
-        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
-        setPageGraphics(graphics || []);
-
-        toast.success("Line added successfully.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const handleDeleteGraphic = useCallback(
-    async (graphicId: string) => {
-      if (!starPdfDoc || !sourceBytes) return;
-      try {
-        await starPdfDoc.deleteGraphic({
-          page_index: currentPage - 1,
-          graphic_id: graphicId,
-          clone_if_shared: true,
-        });
-        const updatedBytes = await starPdfDoc.exportIncremental();
-
-        const pdfjsLib = await getPdfjsLib();
-        const loadingTask = pdfjsLib.getDocument({
-          data: updatedBytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
-          cMapPacked: true,
-        });
-        const proxy = await loadingTask.promise;
-
-        if (pdfProxy) {
-          void pdfProxy.destroy();
-        }
-        setPdfProxy(proxy);
-        setSourceBytes(updatedBytes);
-        pushHistorySnapshot(updatedBytes, "Delete shape");
-        setSelectedItem(null);
-
-        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
-        setPageGraphics(graphics || []);
-
-        toast.success("Vector shape removed from page.");
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      }
-    },
-    [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
-  );
-
-  const handleAnnotationChange = useCallback(
-    (annotId: string, value: string) => {
-      setAnnotationValues((prev) => ({
-        ...prev,
-        [annotId]: value,
-      }));
-      setIsModified(true);
-      if (sourceBytes) {
-        pushHistorySnapshot(sourceBytes, "Edit annotation");
-      }
-    },
-    [sourceBytes, pushHistorySnapshot],
-  );
-
-  const handleExport = useCallback(
-    async (mode: ExportMode) => {
-      if (!sourceBytes || !inspectionResult) return;
-      setIsExporting(true);
-
-      try {
-        const result = await exportPdfDocument(
-          sourceBytes,
-          filename,
-          fieldValues,
-          mode,
-          inspectionResult.metadata.pageCount,
-          annotationValues,
-        );
-
-        // Create browser download
-        const blob = new Blob([new Uint8Array(result.pdfBytes)], { type: "application/pdf" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = result.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        setIsModified(false);
-        toast.success(
-          mode === "editable"
-            ? `Exported "${result.filename}" with interactive form fields and annotations.`
-            : `Exported "${result.filename}" with flattened content.`,
-        );
-      } catch (err: unknown) {
-        const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
-      } finally {
-        setIsExporting(false);
-      }
-    },
-    [sourceBytes, filename, fieldValues, annotationValues, inspectionResult],
-  );
-
-  const downloadPdf = useCallback((bytes: Uint8Array, outputFilename: string) => {
-    const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = outputFilename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+      return newPage;
+    });
   }, []);
-
-  const applyPageOperation = useCallback(
-    async (operation: StarPdfPageOperation, nextPage: number, successMessage: string) => {
-      if (!sourceBytes || isPageProcessing) return;
-      if (isModified && Object.keys(fieldValues).length > 0) {
-        toast.error("Export or reset pending form edits before changing pages.");
-        return;
-      }
-      setIsPageProcessing(true);
-      try {
-        const output = await runStarPdfPageOperation(sourceBytes, operation);
-        await loadDocument(output, filename, output.byteLength, nextPage, true);
-        pushHistorySnapshot(output, successMessage);
-        toast.success(successMessage);
-      } catch (operationError) {
-        const friendly = formatPdfErrorMessage(operationError);
-        setError(friendly.userMessage);
-        toast.error(friendly.userMessage);
-      } finally {
-        setIsPageProcessing(false);
-      }
-    },
-    [fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
-  );
-
-  const handleExtractPages = useCallback(async () => {
-    if (!sourceBytes || isPageProcessing || selectedPages.size === 0) return;
-    if (isModified && Object.keys(fieldValues).length > 0) {
-      toast.error("Export or reset pending form edits before extracting pages.");
-      return;
-    }
-    setIsPageProcessing(true);
-    try {
-      const pageIndices = Array.from(selectedPages)
-        .sort((left, right) => left - right)
-        .map((pageNumber) => pageNumber - 1);
-      const output = await runStarPdfPageOperation(sourceBytes, {
-        type: "extractPages",
-        pageIndices,
-      });
-      const baseName = filename.replace(/\.pdf$/i, "");
-      downloadPdf(output, `${baseName}-extracted.pdf`);
-      toast.success(`Extracted ${pageIndices.length} page(s) as a standalone PDF.`);
-    } catch (operationError) {
-      const friendly = formatPdfErrorMessage(operationError);
-      setError(friendly.userMessage);
-      toast.error(friendly.userMessage);
-    } finally {
-      setIsPageProcessing(false);
-    }
-  }, [downloadPdf, fieldValues, filename, isModified, isPageProcessing, selectedPages, sourceBytes]);
-
-  const handleMergeFiles = useCallback(
-    async (files: FileList | null) => {
-      if (!sourceBytes || !files?.length || isPageProcessing) return;
-      if (isModified && Object.keys(fieldValues).length > 0) {
-        toast.error("Export or reset pending form edits before adding another PDF.");
-        return;
-      }
-      setIsPageProcessing(true);
-      try {
-        const additions = await Promise.all(
-          Array.from(files).map(async (file) => new Uint8Array(await file.arrayBuffer())),
-        );
-        const output = await mergeStarPdfDocuments([sourceBytes, ...additions]);
-        cleanupProxy();
-        await loadDocument(output, filename, output.byteLength, 1, true);
-        pushHistorySnapshot(output, `Merged ${additions.length} PDF(s)`);
-        toast.success(`Added and merged ${additions.length} PDF document(s).`);
-      } catch (operationError) {
-        const friendly = formatPdfErrorMessage(operationError);
-        setError(friendly.userMessage);
-        toast.error(friendly.userMessage);
-      } finally {
-        if (mergeInputRef.current) mergeInputRef.current.value = "";
-        setIsPageProcessing(false);
-      }
-    },
-    [cleanupProxy, fieldValues, filename, isModified, isPageProcessing, loadDocument, pushHistorySnapshot, sourceBytes],
-  );
 
   const handleTogglePageSelection = useCallback((pageNumber: number) => {
     setSelectedPages((previous) => {
@@ -923,6 +580,7 @@ export function SmartPdfEditor() {
     setFilename("");
     setInspectionResult(null);
     setFieldValues({});
+    setAnnotationValues({});
     setIsModified(false);
     setSelectedPages(new Set([1]));
     setError(null);
@@ -931,10 +589,7 @@ export function SmartPdfEditor() {
     setScale(1.0);
     setSearchQuery("");
     setSearchResults([]);
-    historyRef.current = [];
-    historyIndexRef.current = -1;
-    setHistoryLength(0);
-    setHistoryIndex(-1);
+    setHistoryState(createInitialHistoryState(new Uint8Array(0)));
     setSelectedItem(null);
   }, [cleanupProxy]);
 
@@ -1003,11 +658,7 @@ export function SmartPdfEditor() {
     );
   }
 
-  const currentPageInfo = inspectionResult.pages[currentPage - 1] || {
-    width: 612,
-    height: 792,
-    rotation: 0,
-  };
+  const isBusy = commandState.status === "RUNNING";
 
   return (
     <div
@@ -1033,10 +684,10 @@ export function SmartPdfEditor() {
         currentPage={currentPage}
         pageCount={inspectionResult.metadata.pageCount}
         scale={scale}
-        isExporting={isExporting}
+        isExporting={isBusy && commandState.commandId === "document.export"}
         isModified={isModified}
-        canUndo={historyIndex > 0}
-        canRedo={historyIndex < historyLength - 1}
+        canUndo={canUndo(historyState)}
+        canRedo={canRedo(historyState)}
         onUndo={() => void handleUndo()}
         onRedo={() => void handleRedo()}
         searchQuery={searchQuery}
@@ -1045,12 +696,14 @@ export function SmartPdfEditor() {
         onSearchChange={(q) => void handleSearchChange(q)}
         onNextSearchResult={handleNextSearchResult}
         onPrevSearchResult={handlePrevSearchResult}
-        onPageChange={setCurrentPage}
+        onPageChange={handlePageNavigation}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onFitWidth={handleFitWidth}
         onFitPage={handleFitPage}
-        onExport={handleExport}
+        onExport={async (mode) => {
+          await executeCommand(new ExportDocumentCommand(mode));
+        }}
         onShowInfo={() => setShowInfoModal(true)}
         onOpenNewFile={handleOpenNewFileClick}
         onMergeClick={() => mergeInputRef.current?.click()}
@@ -1063,91 +716,77 @@ export function SmartPdfEditor() {
         currentPage={currentPage}
         pageCount={inspectionResult.metadata.pageCount}
         selectedCount={selectedPages.size}
-        isProcessing={isPageProcessing}
+        isProcessing={isBusy}
         onDelete={() => {
           if (inspectionResult.metadata.pageCount <= 1) {
             toast.error("Cannot delete the only page in a document.");
             return;
           }
-          const targetNextPage =
-            currentPage >= inspectionResult.metadata.pageCount
-              ? Math.max(1, inspectionResult.metadata.pageCount - 1)
-              : currentPage;
-
-          void applyPageOperation(
-            { type: "deletePage", pageIndex: currentPage - 1 },
-            targetNextPage,
-            "Page deleted.",
+          void executeCommand(new DeletePageCommand(currentPage - 1));
+        }}
+        onMoveLeft={() => {
+          if (currentPage <= 1) return;
+          void executeCommand(new MovePageCommand(currentPage - 1, currentPage - 2));
+        }}
+        onMoveRight={() => {
+          if (currentPage >= inspectionResult.metadata.pageCount) return;
+          void executeCommand(new MovePageCommand(currentPage - 1, currentPage));
+        }}
+        onDuplicate={() => {
+          void executeCommand(new DuplicatePageCommand(currentPage - 1));
+        }}
+        onInsertBlank={() => {
+          const currentPageInfo = inspectionResult.pages[currentPage - 1] || {
+            width: 612,
+            height: 792,
+            rotation: 0,
+          };
+          void executeCommand(
+            new InsertBlankPageCommand(
+              currentPage, // insert after current page
+              currentPageInfo.width,
+              currentPageInfo.height,
+              currentPageInfo.rotation as 0 | 90 | 180 | 270,
+            ),
           );
         }}
-        onMoveLeft={() =>
-          void applyPageOperation(
-            { type: "movePage", fromIndex: currentPage - 1, toIndex: currentPage - 2 },
-            currentPage - 1,
-            "Page moved left.",
-          )
-        }
-        onMoveRight={() =>
-          void applyPageOperation(
-            { type: "movePage", fromIndex: currentPage - 1, toIndex: currentPage },
-            currentPage + 1,
-            "Page moved right.",
-          )
-        }
-        onDuplicate={() =>
-          void applyPageOperation(
-            {
-              type: "duplicatePage",
-              pageIndex: currentPage - 1,
-              destinationIndex: currentPage,
-            },
-            currentPage + 1,
-            "Page duplicated.",
-          )
-        }
-        onInsertBlank={() =>
-          void applyPageOperation(
-            {
-              type: "insertBlankPage",
-              pageIndex: currentPage,
-              width: currentPageInfo.width,
-              height: currentPageInfo.height,
-              rotation: 0,
-            },
-            currentPage + 1,
-            "Blank page inserted.",
-          )
-        }
-        onExtract={() => void handleExtractPages()}
+        onExtract={() => {
+          void executeCommand(new ExtractPagesCommand(Array.from(selectedPages)));
+        }}
         onMerge={() => mergeInputRef.current?.click()}
       />
 
-      {/* Hidden File Input for Add PDF / Merge Workflow */}
+      {/* Hidden File Input for Adding/Merging PDFs */}
       <input
         ref={mergeInputRef}
         type="file"
-        accept="application/pdf,.pdf"
+        accept="application/pdf"
         multiple
         className="hidden"
         aria-label="Add PDF documents"
-        onChange={(event) => void handleMergeFiles(event.target.files)}
+        onChange={async (e) => {
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            const additions = await Promise.all(
+              Array.from(files).map(async (file) => new Uint8Array(await file.arrayBuffer())),
+            );
+            void executeCommand(new MergeDocumentsCommand(additions));
+          }
+          if (mergeInputRef.current) mergeInputRef.current.value = "";
+        }}
       />
 
-      {/* Main Workspace: Thumbnails + Viewport Canvas */}
-      <div className="flex-1 flex overflow-hidden relative min-h-0">
-        {/* Left Thumbnail Rail */}
+      {/* Main Workspace Body */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left Collapsible Thumbnail Rail */}
         {isThumbnailsOpen && (
           <PdfThumbnailRail
             pdfDocument={pdfProxy}
             pageCount={inspectionResult.metadata.pageCount}
             currentPage={currentPage}
-            onPageSelect={(p) => {
-              setCurrentPage(p);
-              setSelectedItem(null);
-            }}
             selectedPages={selectedPages}
+            onPageSelect={handlePageNavigation}
             onToggleSelection={handleTogglePageSelection}
-            className="flex"
           />
         )}
 
@@ -1158,37 +797,49 @@ export function SmartPdfEditor() {
           aria-label="PDF Document Page Viewport"
           onClick={() => setSelectedItem(null)}
         >
-          {/* Contextual Action Bar */}
-          <PdfContextualToolbar
-            selection={selectedItem}
-            onDeselect={() => setSelectedItem(null)}
-            onReplaceText={handleReplaceExistingText}
-            onReplaceImage={handleReplaceImage}
-            onRemoveImage={handleRemoveImage}
-            onUpdateGraphic={handleUpdateGraphic}
-            onDeleteGraphic={handleDeleteGraphic}
-            onFormFieldChange={handleFieldValueChange}
-            formFieldValue={
-              selectedItem?.type === "form"
-                ? fieldValues[(selectedItem.data as AcroFormField).name]
-                : undefined
-            }
-            onAnnotationChange={handleAnnotationChange}
-            annotationValue={
-              selectedItem?.type === "annotation"
-                ? annotationValues[selectedItem.id]
-                : undefined
-            }
-          />
+          {/* Floating Contextual Object Action Bar */}
+          {selectedItem && (
+            <PdfContextualToolbar
+              selection={selectedItem}
+              onDeselect={() => setSelectedItem(null)}
+              onReplaceText={async (spanId, newText) => {
+                await executeCommand(new ReplaceTextCommand(spanId, newText));
+              }}
+              onReplaceImage={async (imageId, file) => {
+                await executeCommand(new ReplaceImageCommand(imageId, file));
+              }}
+              onRemoveImage={async (imageId) => {
+                await executeCommand(new RemoveImageCommand(imageId));
+              }}
+              onUpdateGraphic={async (input: StarPdfUpdateVectorGraphicInput) => {
+                await executeCommand(new UpdateVectorCommand(input));
+              }}
+              onDeleteGraphic={async (graphicId) => {
+                await executeCommand(new DeleteVectorCommand(graphicId));
+              }}
+              onFormFieldChange={(fieldName, value) => {
+                void executeCommand(new SetFormFieldValueCommand(fieldName, value));
+              }}
+              formFieldValue={
+                selectedItem.type === "form" ? fieldValues[selectedItem.id] : undefined
+              }
+              onAnnotationChange={(annotId, value) => {
+                void executeCommand(new UpdateAnnotationCommand(annotId, value));
+              }}
+              annotationValue={
+                selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
+              }
+            />
+          )}
 
           <div className="my-auto transition-transform duration-75">
             <PdfPageCanvas
               pdfDocument={pdfProxy}
               pageNumber={currentPage}
               scale={scale}
-              rotation={currentPageInfo.rotation}
-              pageWidth={currentPageInfo.width}
-              pageHeight={currentPageInfo.height}
+              rotation={inspectionResult.pages[currentPage - 1]?.rotation || 0}
+              pageWidth={inspectionResult.pages[currentPage - 1]?.width || 612}
+              pageHeight={inspectionResult.pages[currentPage - 1]?.height || 792}
               textSpans={pageTextSpans}
               images={pageImages}
               graphics={pageGraphics}
@@ -1201,7 +852,7 @@ export function SmartPdfEditor() {
         </main>
       </div>
 
-      {/* Bottom Status Bar */}
+      {/* Bottom Application Status Bar */}
       <footer
         className="h-8 border-t border-slate-200 bg-white px-4 flex items-center justify-between text-xs text-slate-500 shrink-0 select-none"
         data-testid="smartpdf-status-bar"
@@ -1214,6 +865,12 @@ export function SmartPdfEditor() {
             <>
               <span className="text-slate-300">•</span>
               <span className="text-amber-600 font-medium">Unsaved changes</span>
+            </>
+          )}
+          {isBusy && (
+            <>
+              <span className="text-slate-300">•</span>
+              <span className="text-amber-600 font-medium animate-pulse">{commandState.label}…</span>
             </>
           )}
         </div>
@@ -1240,18 +897,14 @@ export function SmartPdfEditor() {
         onClose={() => setShowInfoModal(false)}
       />
 
-      {/* Unsaved Changes Confirmation Dialog */}
+      {/* Confirm Open New File Modal */}
       <PdfConfirmDialog
         isOpen={showConfirmOpenModal}
-        title="Discard unsaved changes?"
-        description="You have unsaved edits in this document. Opening another PDF will discard these modifications."
-        confirmLabel="Discard & Open"
-        cancelLabel="Keep Editing"
-        isDestructive={true}
-        onConfirm={() => {
-          setShowConfirmOpenModal(false);
-          performOpenNewFile();
-        }}
+        title="Unsaved Changes"
+        description="You have unsaved changes in the current document. Opening a new file will discard these changes. Are you sure you want to proceed?"
+        confirmLabel="Discard & Open New"
+        cancelLabel="Cancel"
+        onConfirm={performOpenNewFile}
         onCancel={() => setShowConfirmOpenModal(false)}
       />
     </div>
