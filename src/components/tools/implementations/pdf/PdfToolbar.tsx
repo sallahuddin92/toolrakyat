@@ -16,6 +16,9 @@ import {
   Loader2,
   Check,
   Search,
+  Undo2,
+  Redo2,
+  FilePlus2,
 } from "lucide-react";
 import { type ExportMode } from "@/lib/pdf/pdf-types";
 
@@ -25,6 +28,11 @@ interface PdfToolbarProps {
   pageCount: number;
   scale: number;
   isExporting: boolean;
+  isModified?: boolean;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
   searchQuery?: string;
   searchResultCount?: number;
   activeSearchIndex?: number;
@@ -39,6 +47,7 @@ interface PdfToolbarProps {
   onExport: (mode: ExportMode) => Promise<void>;
   onShowInfo: () => void;
   onOpenNewFile: () => void;
+  onMergeClick?: () => void;
 }
 
 export function PdfToolbar({
@@ -47,6 +56,11 @@ export function PdfToolbar({
   pageCount,
   scale,
   isExporting,
+  isModified = false,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
   searchQuery = "",
   searchResultCount = 0,
   activeSearchIndex = 0,
@@ -61,15 +75,16 @@ export function PdfToolbar({
   onExport,
   onShowInfo,
   onOpenNewFile,
+  onMergeClick,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
   const zoomPercentage = Math.round(scale * 100);
 
   return (
-    <header className="h-14 border-b border-slate-200 bg-white px-4 flex items-center justify-between gap-3 shrink-0 select-none">
-      {/* Left: Filename & File Switcher */}
-      <div className="flex items-center gap-2 min-w-0 max-w-[280px] sm:max-w-xs">
+    <header className="h-14 border-b border-slate-200 bg-white px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-3 shrink-0 select-none">
+      {/* Left: Open / Filename / Modified badge / Undo / Redo */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
         <Button
           type="button"
           variant="ghost"
@@ -77,15 +92,72 @@ export function PdfToolbar({
           onClick={onOpenNewFile}
           className="text-xs text-slate-600 gap-1.5 h-8 rounded-lg shrink-0"
           title="Open another PDF document"
+          data-testid="toolbar-open-file-btn"
         >
           <FolderOpen className="size-3.5" />
           <span className="hidden sm:inline">Open</span>
         </Button>
+
+        {onMergeClick && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onMergeClick}
+            className="text-xs text-slate-600 gap-1 h-8 rounded-lg shrink-0 hidden lg:inline-flex"
+            title="Add and merge another PDF"
+            data-testid="toolbar-merge-btn"
+          >
+            <FilePlus2 className="size-3.5 text-slate-500" />
+            <span>Add PDF</span>
+          </Button>
+        )}
+
+        <span className="text-slate-300 hidden sm:inline">|</span>
+
+        {/* History Undo / Redo */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onUndo}
+            disabled={!canUndo}
+            className="size-7 text-slate-600 disabled:text-slate-300 rounded-md shrink-0"
+            title="Undo (Ctrl+Z / Cmd+Z)"
+            aria-label="Undo"
+            data-testid="toolbar-undo-btn"
+          >
+            <Undo2 className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRedo}
+            disabled={!canRedo}
+            className="size-7 text-slate-600 disabled:text-slate-300 rounded-md shrink-0"
+            title="Redo (Ctrl+Shift+Z / Cmd+Shift+Z)"
+            aria-label="Redo"
+            data-testid="toolbar-redo-btn"
+          >
+            <Redo2 className="size-3.5" />
+          </Button>
+        </div>
+
         <span className="text-slate-300">|</span>
+
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-semibold text-slate-800 truncate" title={filename}>
+          <span className="text-xs font-semibold text-slate-800 truncate max-w-[80px] sm:max-w-[120px] lg:max-w-[160px]" title={filename}>
             {filename}
           </span>
+          {isModified && (
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0"
+              title="Document has unsaved modifications"
+              data-testid="document-modified-dot"
+            />
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -93,6 +165,7 @@ export function PdfToolbar({
             onClick={onShowInfo}
             className="size-6 text-slate-400 hover:text-slate-600 rounded-md shrink-0"
             title="Document Properties"
+            aria-label="Document properties"
           >
             <Info className="size-3.5" />
           </Button>
@@ -100,9 +173,9 @@ export function PdfToolbar({
       </div>
 
       {/* Center: Page Navigation, Zoom Controls & Search */}
-      <div className="flex items-center gap-1 sm:gap-3">
+      <div className="flex items-center gap-1 sm:gap-2.5">
         {/* Page Nav */}
-        <div className="flex items-center gap-1 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
+        <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-50 p-0.5 rounded-lg border border-slate-200">
           <Button
             type="button"
             variant="ghost"
@@ -116,7 +189,7 @@ export function PdfToolbar({
             <ChevronLeft className="size-3.5" />
           </Button>
 
-          <span className="text-xs text-slate-700 font-medium px-1.5 tabular-nums">
+          <span className="text-xs text-slate-700 font-medium px-1 sm:px-1.5 tabular-nums">
             {currentPage} / {pageCount}
           </span>
 
@@ -204,11 +277,12 @@ export function PdfToolbar({
                   placeholder="Search in document..."
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
-                  className="bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none w-28 sm:w-36 h-6"
+                  className="bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none w-24 sm:w-36 h-6"
                   autoFocus
+                  data-testid="search-query-input"
                 />
                 {searchResultCount > 0 && (
-                  <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap pl-1">
+                  <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap pl-1" data-testid="search-results-count">
                     {activeSearchIndex + 1}/{searchResultCount}
                   </span>
                 )}
@@ -221,6 +295,7 @@ export function PdfToolbar({
                       onClick={onPrevSearchResult}
                       className="size-5 rounded text-slate-500"
                       title="Previous hit"
+                      aria-label="Previous hit"
                     >
                       <ChevronLeft className="size-3" />
                     </Button>
@@ -231,6 +306,7 @@ export function PdfToolbar({
                       onClick={onNextSearchResult}
                       className="size-5 rounded text-slate-500"
                       title="Next hit"
+                      aria-label="Next hit"
                     >
                       <ChevronRight className="size-3" />
                     </Button>
@@ -243,6 +319,7 @@ export function PdfToolbar({
                     onSearchChange("");
                   }}
                   className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                  aria-label="Close search"
                 >
                   ✕
                 </button>
@@ -256,6 +333,7 @@ export function PdfToolbar({
                 className="size-8 text-slate-500 hover:text-slate-900 rounded-lg"
                 title="Search text (StarPDF WASM)"
                 aria-label="Search text"
+                data-testid="toolbar-search-toggle-btn"
               >
                 <Search className="size-3.5" />
               </Button>
@@ -272,6 +350,7 @@ export function PdfToolbar({
             onClick={() => void onExport("editable")}
             disabled={isExporting}
             className="h-8 rounded-l-xl rounded-r-none bg-sky-600 hover:bg-sky-700 text-white text-xs px-3 font-medium border-r border-sky-500 gap-1.5"
+            data-testid="export-button"
           >
             {isExporting ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -287,6 +366,7 @@ export function PdfToolbar({
             className="h-8 px-1.5 rounded-l-none rounded-r-xl bg-sky-600 hover:bg-sky-700 text-white"
             title="More export options"
             aria-label="More export options"
+            data-testid="export-menu-toggle"
           >
             <ChevronDown className="size-3.5" />
           </Button>
@@ -304,6 +384,7 @@ export function PdfToolbar({
                   void onExport("editable");
                 }}
                 className="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex flex-col gap-0.5 text-slate-800"
+                data-testid="export-editable-option"
               >
                 <span className="font-semibold flex items-center justify-between">
                   Export Editable PDF
@@ -323,6 +404,7 @@ export function PdfToolbar({
                   void onExport("flattened");
                 }}
                 className="w-full text-left px-3 py-2.5 hover:bg-slate-50 flex flex-col gap-0.5 text-slate-800"
+                data-testid="export-flattened-option"
               >
                 <span className="font-semibold">Export Flattened PDF</span>
                 <span className="text-[11px] text-slate-500">

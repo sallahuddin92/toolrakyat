@@ -1,0 +1,113 @@
+/**
+ * Human-friendly error translation for StarPDF operations.
+ * Maps typed engine error codes and conditions to clear, actionable user messages.
+ */
+
+export interface FriendlyErrorResult {
+  userMessage: string;
+  technicalDetails?: string;
+  isUnsupported: boolean;
+  canRetry: boolean;
+}
+
+export function formatPdfErrorMessage(error: unknown): FriendlyErrorResult {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+
+  // 1. Encryption & Security
+  if (
+    rawMessage.includes("encrypted") ||
+    rawMessage.includes("STANDARD_SECURITY_DETECTED") ||
+    rawMessage.includes("PUBLIC_KEY_SECURITY_DETECTED") ||
+    rawMessage.includes("security-handler")
+  ) {
+    return {
+      userMessage:
+        "This PDF is encrypted with an unsupported security handler or password. StarPDF does not decrypt or bypass document security.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 2. Font / Encoding limitations
+  if (
+    rawMessage.includes("UNSUPPORTED_FONT_ENCODING") ||
+    rawMessage.includes("unsupported font encoding") ||
+    rawMessage.includes("ToUnicode")
+  ) {
+    return {
+      userMessage:
+        "That text uses a specialized font encoding that StarPDF cannot safely rewrite without risking layout distortion.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 3. Complex Script / Vertical Writing
+  if (
+    rawMessage.includes("UNSUPPORTED_COMPLEX_SCRIPT") ||
+    rawMessage.includes("UNSUPPORTED_VERTICAL_WRITING")
+  ) {
+    return {
+      userMessage:
+        "This text uses complex script shaping or vertical writing layout, which is currently read-only.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 4. Shared or ambiguous objects
+  if (
+    rawMessage.includes("shared") ||
+    rawMessage.includes("ambiguous shared content") ||
+    rawMessage.includes("Shared XObject")
+  ) {
+    return {
+      userMessage:
+        "This object is shared across multiple pages or content streams in a structure that cannot be isolated safely.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 5. Page Geometry / MediaBox
+  if (
+    rawMessage.includes("MediaBox") ||
+    rawMessage.includes("geometry") ||
+    rawMessage.includes("no direct or inherited")
+  ) {
+    return {
+      userMessage:
+        "Page dimensions or geometry are missing or invalid in this document.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 6. Malformed Syntax
+  if (
+    rawMessage.includes("InvalidSyntax") ||
+    rawMessage.includes("malformed") ||
+    rawMessage.includes("corrupt")
+  ) {
+    return {
+      userMessage:
+        "The PDF contains malformed syntax that cannot be safely reconstructed.",
+      technicalDetails: rawMessage,
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // Generic fallback
+  return {
+    userMessage: rawMessage || "An unexpected error occurred while processing the PDF.",
+    technicalDetails: rawMessage,
+    isUnsupported: false,
+    canRetry: true,
+  };
+}

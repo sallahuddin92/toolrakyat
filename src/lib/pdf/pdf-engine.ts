@@ -155,44 +155,57 @@ export async function updateAcroFormFields(
   }
 
   try {
-    const form = doc.getForm();
-    for (const [name, val] of Object.entries(fieldValues)) {
-      try {
-        const field = form.getFieldMaybe(name);
-        if (!field) continue;
-
-        if (field instanceof PDFTextField && typeof val === "string") {
-          field.setText(val);
-        } else if (field instanceof PDFCheckBox && typeof val === "boolean") {
-          if (val) {
-            field.check();
-          } else {
-            field.uncheck();
-          }
-        } else if (field instanceof PDFRadioGroup && typeof val === "string") {
-          if (val && field.getOptions().includes(val)) {
-            field.select(val);
-          } else if (!val) {
-            field.clear();
-          }
-        } else if (field instanceof PDFDropdown && typeof val === "string") {
-          if (val && field.getOptions().includes(val)) {
-            field.select(val);
-          }
-        } else if (field instanceof PDFOptionList && Array.isArray(val)) {
-          for (const item of val) {
-            if (field.getOptions().includes(item)) {
-              field.select(item);
-            }
-          }
-        }
-      } catch (fieldError) {
-        console.warn(`Failed to update field "${name}":`, fieldError);
-      }
+    let form = null;
+    try {
+      form = doc.getForm();
+    } catch {
+      // Document has no AcroForm dictionary; exporting non-form PDF
+      form = null;
     }
 
-    if (mode === "flattened") {
-      form.flatten();
+    if (form) {
+      for (const [name, val] of Object.entries(fieldValues)) {
+        try {
+          const field = form.getFieldMaybe(name);
+          if (!field) continue;
+
+          if (field instanceof PDFTextField && typeof val === "string") {
+            field.setText(val);
+          } else if (field instanceof PDFCheckBox && typeof val === "boolean") {
+            if (val) {
+              field.check();
+            } else {
+              field.uncheck();
+            }
+          } else if (field instanceof PDFRadioGroup && typeof val === "string") {
+            if (val && field.getOptions().includes(val)) {
+              field.select(val);
+            } else if (!val) {
+              field.clear();
+            }
+          } else if (field instanceof PDFDropdown && typeof val === "string") {
+            if (val && field.getOptions().includes(val)) {
+              field.select(val);
+            }
+          } else if (field instanceof PDFOptionList && Array.isArray(val)) {
+            for (const item of val) {
+              if (field.getOptions().includes(item)) {
+                field.select(item);
+              }
+            }
+          }
+        } catch (fieldError) {
+          console.warn(`Failed to update field "${name}":`, fieldError);
+        }
+      }
+
+      if (mode === "flattened") {
+        try {
+          form.flatten();
+        } catch (flattenErr) {
+          console.warn("Form flatten warning:", flattenErr);
+        }
+      }
     }
 
     return await doc.save();

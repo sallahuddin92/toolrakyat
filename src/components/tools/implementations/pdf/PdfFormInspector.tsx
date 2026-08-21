@@ -503,6 +503,7 @@ export function PdfFormInspector({
                     <div
                       key={span.span_id}
                       onClick={() => handleSelectSpan(span)}
+                      data-testid={`text-span-btn-${span.span_id}`}
                       className={cn(
                         "p-2.5 rounded-lg border text-left cursor-pointer transition-all space-y-2",
                         isSelected
@@ -543,12 +544,14 @@ export function PdfFormInspector({
                               onChange={(e) => setReplacementText(e.target.value)}
                               className="h-8 text-xs bg-white"
                               placeholder="New text..."
+                              data-testid="replace-text-input"
                             />
                             <Button
                               size="sm"
                               onClick={handleApplyTextEdit}
                               disabled={isReplacing || replacementText === span.text}
                               className="h-8 text-xs bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-1"
+                              data-testid="apply-replace-text-btn"
                             >
                               <ArrowRight className="size-3" />
                               Apply
@@ -697,6 +700,8 @@ export function PdfFormInspector({
                     {field.type === "text" && (
                       <Input
                         id={inputId}
+                        name={field.name}
+                        data-testid={`form-field-${field.name}`}
                         value={typeof val === "string" ? val : ""}
                         onChange={(e) => onFieldValueChange(field.name, e.target.value)}
                         className="h-8 text-xs bg-white"
