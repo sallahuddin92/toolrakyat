@@ -1094,33 +1094,35 @@ fn test_qualification_reconciled_memory_suite() {
         (p500_after_close as isize - p500_base_rss as isize) / 1024
     );
 
-    // 4. 20-Cycle repeated mutation memory tracking
-    println!("\n--- 20 REPEATED OPEN -> EDIT -> SAVE -> CLOSE CYCLES ---");
+    // 4. 200-Cycle repeated mutation memory tracking
+    println!("\n--- 200 REPEATED OPEN -> EDIT -> SAVE -> CLOSE CYCLES ---");
     let doc_50_bytes = generate_text_document(50, 10);
-    let mut current_bytes = doc_50_bytes;
     let cycle0_rss = get_process_rss();
     let mut rss_history = vec![(0, cycle0_rss)];
     let mut max_rss = cycle0_rss;
 
-    for cycle in 1..=20 {
-        let next_bytes = {
-            let mut doc = PdfDocument::from_bytes(&current_bytes).unwrap();
+    let target_checkpoints = [1, 5, 10, 20, 40, 60, 80, 100, 125, 150, 175, 200];
+
+    for cycle in 1..=200 {
+        let exported_bytes = {
+            let mut doc = PdfDocument::from_bytes(&doc_50_bytes).unwrap();
             let page_text = doc.extract_page_text(0).unwrap();
             let target = TextEditTarget::from_span(&page_text.spans[0]);
             let plan = doc
                 .replace_text(0, &target, &format!("CYCLE_{cycle}_MUTATION"))
                 .unwrap();
-            doc.export_incremental(&plan).unwrap()
+            let out = doc.export_incremental(&plan).unwrap();
+            std::hint::black_box(out)
         };
-        current_bytes = next_bytes;
+        std::hint::black_box(exported_bytes);
 
-        let next_bytes2 = {
-            let mut doc2 = PdfDocument::from_bytes(&current_bytes).unwrap();
+        let exported_bytes2 = {
+            let mut doc2 = PdfDocument::from_bytes(&doc_50_bytes).unwrap();
             let add_rect = AddVectorGraphicSpec {
                 page_index: 0,
                 geometry: VectorGeometry::Rectangle {
-                    x: (cycle * 10) as f64,
-                    y: (cycle * 10) as f64,
+                    x: ((cycle % 20) * 10) as f64,
+                    y: ((cycle % 20) * 10) as f64,
                     width: 50.0,
                     height: 30.0,
                 },
@@ -1131,18 +1133,19 @@ fn test_qualification_reconciled_memory_suite() {
                 is_filled: false,
             };
             let plan2 = doc2.add_graphic(&add_rect).unwrap();
-            doc2.export_incremental(&plan2).unwrap()
+            let out2 = doc2.export_incremental(&plan2).unwrap();
+            std::hint::black_box(out2)
         };
-        current_bytes = next_bytes2;
+        std::hint::black_box(exported_bytes2);
 
         let cur_rss = get_process_rss();
         if cur_rss > max_rss {
             max_rss = cur_rss;
         }
-        if cycle == 1 || cycle == 5 || cycle == 10 || cycle == 15 || cycle == 20 {
+        if target_checkpoints.contains(&cycle) {
             rss_history.push((cycle, cur_rss));
             println!(
-                "  cycle{:02}: {:.2} MB ({} bytes)",
+                "  cycle{:03}: {:.2} MB ({} bytes)",
                 cycle,
                 cur_rss as f64 / 1_048_576.0,
                 cur_rss
@@ -1151,39 +1154,77 @@ fn test_qualification_reconciled_memory_suite() {
     }
 
     let final_rss = get_process_rss();
-    let retained_delta = final_rss as isize - cycle0_rss as isize;
+    let total_delta = final_rss as isize - cycle0_rss as isize;
+    let peak_delta = max_rss as isize - cycle0_rss as isize;
+
+    println!("\n--- RSS CHECKPOINTS ---");
     println!(
         "cycle0: {:.2} MB ({} bytes)",
         cycle0_rss as f64 / 1_048_576.0,
         cycle0_rss
     );
+    for &(c, rss) in &rss_history[1..] {
+        println!(
+            "cycle{}: {:.2} MB ({} bytes)",
+            c,
+            rss as f64 / 1_048_576.0,
+            rss
+        );
+    }
     println!(
         "peak: {:.2} MB ({} bytes)",
         max_rss as f64 / 1_048_576.0,
         max_rss
     );
+
+    let get_rss = |target_c: usize| -> usize {
+        rss_history
+            .iter()
+            .find(|(c, _)| *c == target_c)
+            .map(|(_, rss)| *rss)
+            .unwrap_or(0)
+    };
+
+    let r0 = get_rss(0);
+    let r20 = get_rss(20);
+    let r40 = get_rss(40);
+    let r100 = get_rss(100);
+    let r150 = get_rss(150);
+    let r200 = get_rss(200);
+
+    let slope_0_20 = (r20 as f64 - r0 as f64) / 20.0;
+    let slope_20_40 = (r40 as f64 - r20 as f64) / 20.0;
+    let slope_40_100 = (r100 as f64 - r40 as f64) / 60.0;
+    let slope_100_150 = (r150 as f64 - r100 as f64) / 50.0;
+    let slope_150_200 = (r200 as f64 - r150 as f64) / 50.0;
+
+    println!("\n--- GROWTH SLOPES ---");
+    println!("0->20: {:.1} bytes/cycle", slope_0_20);
+    println!("20->40: {:.1} bytes/cycle", slope_20_40);
+    println!("40->100: {:.1} bytes/cycle", slope_40_100);
+    println!("100->150: {:.1} bytes/cycle", slope_100_150);
+    println!("150->200: {:.1} bytes/cycle", slope_150_200);
     println!(
-        "final: {:.2} MB ({} bytes)",
-        final_rss as f64 / 1_048_576.0,
-        final_rss
+        "final RSS - cycle0 RSS: {:+} KB ({:+} bytes)",
+        total_delta / 1024,
+        total_delta
     );
     println!(
-        "final-minus-baseline: {:+} KB ({:+} bytes)",
-        retained_delta / 1024,
-        retained_delta
+        "peak RSS - cycle0 RSS: {:+} KB ({:+} bytes)",
+        peak_delta / 1024,
+        peak_delta
     );
 
-    // Monotonic check: check if memory grew continuously from cycle 5 to 10 to 15 to 20
-    let c5 = rss_history.iter().find(|(c, _)| *c == 5).unwrap().1;
-    let c10 = rss_history.iter().find(|(c, _)| *c == 10).unwrap().1;
-    let c15 = rss_history.iter().find(|(c, _)| *c == 15).unwrap().1;
-    let c20 = rss_history.iter().find(|(c, _)| *c == 20).unwrap().1;
-    let monotonic = c20 > c15 && c15 > c10 && c10 > c5;
+    let classification = if slope_150_200.abs() < 100.0 && slope_100_150.abs() < 500.0 {
+        "PLATEAU_OBSERVED"
+    } else if slope_150_200 > 0.0 && slope_150_200 < 5000.0 {
+        "SLOW_CONTINUING_GROWTH"
+    } else if slope_150_200 >= 5000.0 {
+        "LINEAR_RETENTION"
+    } else {
+        "INCONCLUSIVE"
+    };
 
-    println!(
-        "monotonic retention: {}",
-        if monotonic { "yes" } else { "no" }
-    );
-    println!("claim supported: NO MONOTONIC RETENTION OBSERVED");
+    println!("CLASSIFICATION: {}", classification);
     println!("--------------------------------------------------------------------------------");
 }
