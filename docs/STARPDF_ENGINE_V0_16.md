@@ -56,37 +56,48 @@ All metrics captured under uniform release-mode execution (`target/release`, `op
 
 ---
 
-## 5. Process Memory Qualification (Resident Set Size)
+## 5. Process Memory Qualification (Resident Set Size via macOS Mach Task Info)
 
 Memory measured via macOS `mach_task_basic_info` (`resident_size`):
 
 - **Baseline Process RSS**: `1.97 MB` (2,064,384 bytes)
 - **10-Page Document**:
   - Baseline: 2.23 MB
-  - Peak (during extraction & search): **3.45 MB**
-  - After Close / Drop: **3.45 MB**
+  - Peak (during extraction & search): **3.52 MB**
+  - After Close / Drop: **3.52 MB**
 - **100-Page Document**:
-  - Baseline: 3.73 MB
-  - Peak (during extraction & search): **6.36 MB**
-  - After Close / Drop: **6.36 MB**
+  - Baseline: 3.80 MB
+  - Peak (during extraction & search): **6.52 MB**
+  - After Close / Drop: **6.52 MB**
 - **500-Page Document**:
-  - Baseline: 7.30 MB
-  - Peak (during extraction & search): **18.62 MB**
-  - After Close / Drop: **18.62 MB**
+  - Baseline: 7.39 MB
+  - Peak (during extraction & search): **18.69 MB**
+  - After Close / Drop: **18.69 MB**
 
-### 20 Repeated Open $\to$ Edit $\to$ Save $\to$ Close Cycles
-- **Cycle 0 RSS**: `18.64 MB`
-- **Cycle 1 RSS**: `18.84 MB`
-- **Cycle 5 RSS**: `18.91 MB`
-- **Cycle 10 RSS**: `18.98 MB`
-- **Cycle 15 RSS**: `19.05 MB`
-- **Cycle 20 RSS**: `19.09 MB`
-- **Peak RSS**: `19.09 MB`
-- **Final RSS**: `19.09 MB`
-- **Final - Baseline Delta**: `+464 KB` (+475,136 bytes across 20 cycles)
-- **Memory Assessment**:
-  - The macOS system memory allocator retains deallocated heap pages in its internal free lists rather than immediately returning them to the kernel; therefore, process RSS does not drop to zero upon Rust `drop()`.
-  - Memory consumption plateaus rapidly (+49 KB over cycles 15–20), proving memory usage is strictly bounded with **NO MONOTONIC RETENTION OBSERVED**.
+### 200 Repeated Open $\to$ Edit $\to$ Save $\to$ Close Cycles
+- **cycle0**: `18.70 MB` (19,611,648 bytes)
+- **cycle1**: `18.91 MB` (19,824,640 bytes)
+- **cycle5**: `18.95 MB` (19,873,792 bytes)
+- **cycle10**: `18.98 MB` (19,906,560 bytes)
+- **cycle20**: `19.02 MB` (19,939,328 bytes)
+- **cycle40**: `19.05 MB` (19,972,096 bytes)
+- **cycle60**: `19.12 MB` (20,054,016 bytes)
+- **cycle80**: `19.12 MB` (20,054,016 bytes)
+- **cycle100**: `19.12 MB` (20,054,016 bytes)
+- **cycle125**: `19.12 MB` (20,054,016 bytes)
+- **cycle150**: `19.12 MB` (20,054,016 bytes)
+- **cycle175**: `19.12 MB` (20,054,016 bytes)
+- **cycle200**: `19.12 MB` (20,054,016 bytes)
+- **Peak RSS**: `19.12 MB` (20,054,016 bytes)
+
+### Growth Slopes
+- **0 $\to$ 20**: `16,384.0 bytes/cycle` (initial allocator arena acquisition)
+- **20 $\to$ 40**: `1,638.4 bytes/cycle`
+- **40 $\to$ 100**: `1,365.3 bytes/cycle`
+- **100 $\to$ 150**: `0.0 bytes/cycle`
+- **150 $\to$ 200**: `0.0 bytes/cycle`
+- **Total Delta (cycle200 - cycle0)**: `+432 KB` (+442,368 bytes)
+- **Classification**: **`PLATEAU_OBSERVED`**
 
 ---
 
