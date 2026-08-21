@@ -151,12 +151,46 @@ impl<'a> ObjectStore<'a> {
             });
         }
 
-        let start_pos = byte_offset as usize;
+        let mut start_pos = byte_offset as usize;
         let mut cursor = ByteCursor::new(self.source);
         cursor.set_position(start_pos)?;
 
         let mut parser = Parser::from_cursor(cursor);
-        let (parsed_ref, obj) = parser.parse_indirect_object()?;
+        let parse_res = parser.parse_indirect_object();
+
+        let (parsed_ref, obj) = match parse_res {
+            Ok((ref_parsed, obj)) if ref_parsed == obj_ref => (ref_parsed, obj),
+            _ => {
+                // Bounded drift recovery within +/- 64 bytes for `N G obj`
+                let window_start = start_pos.saturating_sub(64);
+                let window_end = (start_pos + 64).min(self.source.len());
+                let target_header = format!("{} {} obj", obj_ref.number, obj_ref.generation);
+                let mut recovered = None;
+                if let Ok(slice) = self.source.get_slice_range(window_start, window_end) {
+                    if let Some(rel_pos) = slice
+                        .windows(target_header.len())
+                        .position(|w| w == target_header.as_bytes())
+                    {
+                        start_pos = window_start + rel_pos;
+                        let mut cur = ByteCursor::new(self.source);
+                        if cur.set_position(start_pos).is_ok() {
+                            let mut p = Parser::from_cursor(cur);
+                            if let Ok((r, o)) = p.parse_indirect_object() {
+                                if r == obj_ref {
+                                    parser = p;
+                                    recovered = Some((r, o));
+                                }
+                            }
+                        }
+                    }
+                }
+                recovered.ok_or_else(|| {
+                    PdfError::InvalidSyntax(format!(
+                        "Object identity mismatch or unreadable object at offset {byte_offset} for {obj_ref}"
+                    ))
+                })?
+            }
+        };
 
         if parsed_ref != obj_ref {
             return Err(PdfError::InvalidSyntax(format!(

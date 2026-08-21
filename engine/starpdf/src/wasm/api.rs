@@ -94,10 +94,19 @@ pub fn starpdf_get_info(handle: u32) -> Result<JsValue, JsValue> {
         .with_doc(handle, |doc| {
             let page_count = doc.page_count()?;
             let is_valid = StructuralValidator::validate(doc).is_ok();
+            let recovery_status = doc.recovery_status().as_str().to_string();
+            let recovery_events = doc
+                .recovery_tracker()
+                .events
+                .iter()
+                .map(|e| format!("{}: {}", e.kind.as_str(), e.description))
+                .collect();
             let info = WasmDocumentInfo {
                 page_count,
                 pdf_version: doc.version().to_string(),
                 is_valid,
+                recovery_status,
+                recovery_events,
             };
             serde_wasm_bindgen::to_value(&info)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))

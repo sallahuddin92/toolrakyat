@@ -2,10 +2,21 @@
  * StarPDF WASM & Worker TypeScript Type Definitions
  */
 
+export type StarPdfRecoveryStatus =
+  | "NONE"
+  | "XREF_RECOVERED"
+  | "STREAM_LENGTH_RECONCILED"
+  | "OPTIONAL_ENTRY_DEFAULTED"
+  | "PRODUCER_COMPATIBILITY_PATH"
+  | "UNSUPPORTED_STRUCTURE"
+  | "MALFORMED_DOCUMENT";
+
 export interface StarPdfDocumentInfo {
   page_count: number;
   pdf_version: string;
   is_valid: boolean;
+  recovery_status?: StarPdfRecoveryStatus;
+  recovery_events?: string[];
 }
 
 export interface StarPdfSecurityInfo {
