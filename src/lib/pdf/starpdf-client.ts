@@ -1,6 +1,9 @@
 import type {
   StarPdfAddAnnotationInput,
+  StarPdfAddLineInput,
+  StarPdfAddRectangleInput,
   StarPdfAnnotation,
+  StarPdfDeleteVectorGraphicInput,
   StarPdfDocumentInfo,
   StarPdfFormField,
   StarPdfImageInfo,
@@ -12,6 +15,9 @@ import type {
   StarPdfSecurityInfo,
   StarPdfTextSpan,
   StarPdfUpdateAnnotationInput,
+  StarPdfUpdateVectorGraphicInput,
+  StarPdfVectorGraphicInfo,
+  StarPdfVectorMutationResult,
 } from "./starpdf-types";
 
 // Import wasm module functions directly for universal execution (Node / SSR / Vitest / Main fallback)
@@ -45,6 +51,12 @@ import initWasm, {
   starpdf_replace_image,
   starpdf_add_image,
   starpdf_remove_image,
+  starpdf_enumerate_graphics,
+  starpdf_enumerate_all_graphics,
+  starpdf_update_graphic,
+  starpdf_add_rectangle,
+  starpdf_add_line,
+  starpdf_delete_graphic,
   starpdf_search,
   starpdf_split_document,
   starpdf_set_checkbox,
@@ -376,6 +388,67 @@ export class StarPdfDocumentHandle {
       pageIndex,
       imageId
     ) as StarPdfImageMutationResult;
+  }
+
+  async enumerateGraphics(pageIndex: number): Promise<StarPdfVectorGraphicInfo[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_enumerate_graphics(
+      this._handle,
+      pageIndex
+    ) as StarPdfVectorGraphicInfo[];
+  }
+
+  async enumerateAllGraphics(): Promise<StarPdfVectorGraphicInfo[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_enumerate_all_graphics(
+      this._handle
+    ) as StarPdfVectorGraphicInfo[];
+  }
+
+  async updateGraphic(
+    input: StarPdfUpdateVectorGraphicInput
+  ): Promise<StarPdfVectorMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_update_graphic(
+      this._handle,
+      input
+    ) as StarPdfVectorMutationResult;
+  }
+
+  async addRectangle(
+    input: StarPdfAddRectangleInput
+  ): Promise<StarPdfVectorMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_add_rectangle(
+      this._handle,
+      input
+    ) as StarPdfVectorMutationResult;
+  }
+
+  async addLine(
+    input: StarPdfAddLineInput
+  ): Promise<StarPdfVectorMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_add_line(
+      this._handle,
+      input
+    ) as StarPdfVectorMutationResult;
+  }
+
+  async deleteGraphic(
+    input: StarPdfDeleteVectorGraphicInput
+  ): Promise<StarPdfVectorMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_delete_graphic(
+      this._handle,
+      input
+    ) as StarPdfVectorMutationResult;
   }
 
   async exportIncremental(): Promise<Uint8Array> {

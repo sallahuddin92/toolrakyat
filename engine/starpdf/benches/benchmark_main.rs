@@ -1733,6 +1733,279 @@ ET
         );
     }
 
+    let bench_vector_pdf = make_bench_pdf_with_vectors();
+
+    // 73. Vector Graphic Enumeration
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let graphics = doc.enumerate_graphics(0).unwrap();
+            std::hint::black_box(graphics);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "73. Vector Enumeration:       {:>8} ns/op  ({:.2?} for {} enumerations)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 74. Update Vector Graphic
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let graphics = doc.enumerate_graphics(0).unwrap();
+        let target_id = graphics[0].graphic_id.clone();
+        let spec = starpdf::vector::UpdateVectorGraphicSpec {
+            page_index: 0,
+            graphic_id: target_id,
+            new_fill_color: Some(Some(starpdf::vector::VectorColor::from_rgb(1.0, 0.0, 0.0))),
+            ..Default::default()
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.update_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "74. Update Vector Graphic:    {:>8} ns/op  ({:.2?} for {} updates)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 75. Add Vector Rectangle
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let spec = starpdf::vector::AddVectorGraphicSpec {
+            page_index: 0,
+            geometry: starpdf::vector::VectorGeometry::Rectangle {
+                x: 100.0,
+                y: 100.0,
+                width: 80.0,
+                height: 40.0,
+            },
+            stroke_color: Some(starpdf::vector::VectorColor::from_rgb(0.2, 0.4, 0.8)),
+            fill_color: Some(starpdf::vector::VectorColor::from_rgb(0.9, 0.9, 0.9)),
+            line_width: 1.5,
+            is_stroked: true,
+            is_filled: true,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.add_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "75. Add Vector Rectangle:     {:>8} ns/op  ({:.2?} for {} adds)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 76. Add Vector Line
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let spec = starpdf::vector::AddVectorGraphicSpec {
+            page_index: 0,
+            geometry: starpdf::vector::VectorGeometry::Line {
+                x1: 50.0,
+                y1: 500.0,
+                x2: 250.0,
+                y2: 500.0,
+            },
+            stroke_color: Some(starpdf::vector::VectorColor::from_rgb(0.0, 0.0, 0.0)),
+            fill_color: None,
+            line_width: 2.0,
+            is_stroked: true,
+            is_filled: false,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.add_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "76. Add Vector Line:          {:>8} ns/op  ({:.2?} for {} adds)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 77. Delete Vector Graphic
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let graphics = doc.enumerate_graphics(0).unwrap();
+        let spec = starpdf::vector::DeleteVectorGraphicSpec {
+            page_index: 0,
+            graphic_id: graphics[0].graphic_id.clone(),
+            clone_if_shared: false,
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.delete_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "77. Delete Vector Graphic:    {:>8} ns/op  ({:.2?} for {} deletes)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 78. Shared Stream Vector Clone Isolation
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let dup_plan = starpdf::page_ops::PageOperationPlan {
+            edits: vec![starpdf::page_ops::PageEdit::DuplicatePage {
+                index: 0,
+                insert_at: 1,
+            }],
+        };
+        let multi_bytes = doc
+            .apply_page_operations(
+                &dup_plan,
+                &starpdf::page_ops::PageOperationLimits::default(),
+            )
+            .unwrap();
+        let mut doc2 = PdfDocument::from_bytes(&multi_bytes).unwrap();
+        let graphics = doc2.enumerate_graphics(0).unwrap();
+        let spec = starpdf::vector::UpdateVectorGraphicSpec {
+            page_index: 0,
+            graphic_id: graphics[0].graphic_id.clone(),
+            new_line_width: Some(3.0),
+            clone_if_shared: true,
+            ..Default::default()
+        };
+
+        let iterations = 5_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc2.update_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "78. Shared Vector Clone:      {:>8} ns/op  ({:.2?} for {} clones)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 79. Vector Transform & Coordinate Mapping
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let iterations = 10_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let graphics = doc.enumerate_graphics(0).unwrap();
+            for g in &graphics {
+                std::hint::black_box(&g.bounds);
+                std::hint::black_box(&g.local_bounds);
+                std::hint::black_box(&g.transform);
+            }
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "79. Vector Coordinate Map:    {:>8} ns/op  ({:.2?} for {} mappings)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 80. Vector Export & Reopen Cycle
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_pdf).unwrap();
+        let spec = starpdf::vector::AddVectorGraphicSpec {
+            page_index: 0,
+            geometry: starpdf::vector::VectorGeometry::Rectangle {
+                x: 100.0,
+                y: 100.0,
+                width: 50.0,
+                height: 50.0,
+            },
+            stroke_color: Some(starpdf::vector::VectorColor::from_rgb(0.0, 1.0, 0.0)),
+            fill_color: None,
+            line_width: 1.0,
+            is_stroked: true,
+            is_filled: false,
+        };
+        let plan = doc.add_graphic(&spec).unwrap();
+
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let exported = doc.export_incremental(&plan).unwrap();
+            let mut reopened = PdfDocument::from_bytes(&exported).unwrap();
+            let graphics = reopened.enumerate_graphics(0).unwrap();
+            std::hint::black_box(graphics);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "80. Vector Export & Reopen:   {:>8} ns/op  ({:.2?} for {} cycles)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 81. 10 Sequential Vector Operations
+    {
+        let iterations = 200;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut cur_pdf = bench_vector_pdf.clone();
+            for op_idx in 0..10 {
+                let mut doc = PdfDocument::from_bytes(&cur_pdf).unwrap();
+                let plan = doc
+                    .add_graphic(&starpdf::vector::AddVectorGraphicSpec {
+                        page_index: 0,
+                        geometry: starpdf::vector::VectorGeometry::Rectangle {
+                            x: (op_idx * 15) as f64,
+                            y: (op_idx * 15) as f64,
+                            width: 30.0,
+                            height: 30.0,
+                        },
+                        stroke_color: Some(starpdf::vector::VectorColor::from_rgb(0.1, 0.2, 0.3)),
+                        fill_color: None,
+                        line_width: 1.0,
+                        is_stroked: true,
+                        is_filled: false,
+                    })
+                    .unwrap();
+                cur_pdf = doc.export_incremental(&plan).unwrap();
+            }
+            std::hint::black_box(cur_pdf);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "81. 10 Sequential Vector Ops: {:>8} ns/op  ({:.2?} for {} sets)",
+            elapsed.as_nanos() / (iterations * 10) as u128,
+            elapsed,
+            iterations
+        );
+    }
+
     println!("================================================================");
 }
 
@@ -1936,6 +2209,40 @@ fn make_bench_pdf_with_image(jpeg_bytes: &[u8]) -> Vec<u8> {
 
     pdf.extend_from_slice(
         format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
+    );
+    pdf
+}
+
+fn make_bench_pdf_with_vectors() -> Vec<u8> {
+    let content_stream = b"q\n1 0 0 1 50 600 cm\n0 0 1 rg 10 10 100 50 re f\nQ\nq\n2 w 1 0 0 RG 200 600 m 300 700 l S\nQ\n";
+    let content_len = content_stream.len();
+
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+
+    let o1_offset = pdf.len();
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let o2_offset = pdf.len();
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let o3_offset = pdf.len();
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n");
+
+    let o4_offset = pdf.len();
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {content_len} >>\nstream\n").as_bytes());
+    pdf.extend_from_slice(content_stream);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+    pdf.extend_from_slice(format!("{o1_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o2_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o3_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{o4_offset:010} 00000 n \n").as_bytes());
+
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
     );
     pdf
 }

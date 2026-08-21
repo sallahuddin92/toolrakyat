@@ -226,6 +226,90 @@ export interface StarPdfImageMutationResult {
   modified_object_count: number;
 }
 
+export interface StarPdfVectorGraphicInfo {
+  graphic_id: string;
+  page_index: number;
+  stream_index: number;
+  start_instruction_index: number;
+  end_instruction_index: number;
+  graphic_type: "Rectangle" | "Line" | "Path" | string;
+  bounds: [number, number, number, number];
+  local_bounds: [number, number, number, number];
+  transform: [number, number, number, number, number, number];
+  stroke_color_rgb?: [number, number, number];
+  fill_color_rgb?: [number, number, number];
+  stroke_color_hex?: string;
+  fill_color_hex?: string;
+  line_width: number;
+  is_stroked: boolean;
+  is_filled: boolean;
+  is_shared: boolean;
+  is_editable: boolean;
+  editability_code: string;
+  refusal_reason?: string;
+  rect_x?: number;
+  rect_y?: number;
+  rect_w?: number;
+  rect_h?: number;
+  line_x1?: number;
+  line_y1?: number;
+  line_x2?: number;
+  line_y2?: number;
+}
+
+export interface StarPdfVectorMutationResult {
+  success: boolean;
+  modified_object_count: number;
+}
+
+export interface StarPdfUpdateVectorGraphicInput {
+  page_index: number;
+  graphic_id: string;
+  rect_x?: number;
+  rect_y?: number;
+  rect_w?: number;
+  rect_h?: number;
+  line_x1?: number;
+  line_y1?: number;
+  line_x2?: number;
+  line_y2?: number;
+  stroke_color_rgb?: [number, number, number];
+  fill_color_rgb?: [number, number, number];
+  line_width?: number;
+  is_stroked?: boolean;
+  is_filled?: boolean;
+  clone_if_shared?: boolean;
+}
+
+export interface StarPdfAddRectangleInput {
+  page_index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  stroke_color_rgb?: [number, number, number];
+  fill_color_rgb?: [number, number, number];
+  line_width: number;
+  is_stroked: boolean;
+  is_filled: boolean;
+}
+
+export interface StarPdfAddLineInput {
+  page_index: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  stroke_color_rgb?: [number, number, number];
+  line_width: number;
+}
+
+export interface StarPdfDeleteVectorGraphicInput {
+  page_index: number;
+  graphic_id: string;
+  clone_if_shared?: boolean;
+}
+
 export type StarPdfWorkerRequest =
   | { type: "init"; id: string; wasmUrl?: string }
   | { type: "open"; id: string; buffer: ArrayBuffer }
@@ -252,6 +336,11 @@ export type StarPdfWorkerRequest =
   | { type: "replaceImage"; id: string; handle: number; pageIndex: number; imageId: string; newImageBytes: Uint8Array; cloneIfShared?: boolean }
   | { type: "addImage"; id: string; handle: number; pageIndex: number; imageBytes: Uint8Array; x: number; y: number; width: number; height: number }
   | { type: "removeImage"; id: string; handle: number; pageIndex: number; imageId: string }
+  | { type: "enumerateGraphics"; id: string; handle: number; pageIndex: number }
+  | { type: "updateGraphic"; id: string; handle: number; input: StarPdfUpdateVectorGraphicInput }
+  | { type: "addRectangle"; id: string; handle: number; input: StarPdfAddRectangleInput }
+  | { type: "addLine"; id: string; handle: number; input: StarPdfAddLineInput }
+  | { type: "deleteGraphic"; id: string; handle: number; input: StarPdfDeleteVectorGraphicInput }
   | { type: "exportIncremental"; id: string; handle: number }
   | { type: "deletePage"; id: string; handle: number; pageIndex: number }
   | { type: "movePage"; id: string; handle: number; fromIndex: number; toIndex: number }
@@ -295,6 +384,11 @@ export type StarPdfWorkerResponse =
   | { type: "replaceImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "addImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "removeImage"; id: string; success: true; result: StarPdfImageMutationResult }
+  | { type: "enumerateGraphics"; id: string; success: true; graphics: StarPdfVectorGraphicInfo[] }
+  | { type: "updateGraphic"; id: string; success: true; result: StarPdfVectorMutationResult }
+  | { type: "addRectangle"; id: string; success: true; result: StarPdfVectorMutationResult }
+  | { type: "addLine"; id: string; success: true; result: StarPdfVectorMutationResult }
+  | { type: "deleteGraphic"; id: string; success: true; result: StarPdfVectorMutationResult }
   | { type: "exportIncremental"; id: string; success: true; bytes: Uint8Array }
   | { type: "deletePage"; id: string; success: true; bytes: Uint8Array }
   | { type: "movePage"; id: string; success: true; bytes: Uint8Array }

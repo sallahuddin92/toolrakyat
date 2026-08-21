@@ -19,7 +19,14 @@ import {
   mergeStarPdfDocuments,
   type StarPdfPageOperation,
 } from "@/lib/pdf/starpdf-page-worker-client";
-import type { StarPdfImageInfo, StarPdfSearchResult, StarPdfSecurityInfo, StarPdfTextSpan } from "@/lib/pdf/starpdf-types";
+import type {
+  StarPdfImageInfo,
+  StarPdfSearchResult,
+  StarPdfSecurityInfo,
+  StarPdfTextSpan,
+  StarPdfUpdateVectorGraphicInput,
+  StarPdfVectorGraphicInfo,
+} from "@/lib/pdf/starpdf-types";
 
 import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
@@ -42,6 +49,7 @@ export function SmartPdfEditor() {
   const [fieldValues, setFieldValues] = useState<Record<string, string | boolean | string[]>>({});
   const [pageTextSpans, setPageTextSpans] = useState<StarPdfTextSpan[]>([]);
   const [pageImages, setPageImages] = useState<StarPdfImageInfo[]>([]);
+  const [pageGraphics, setPageGraphics] = useState<StarPdfVectorGraphicInfo[]>([]);
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
   const [isPageProcessing, setIsPageProcessing] = useState<boolean>(false);
@@ -277,6 +285,18 @@ export function SmartPdfEditor() {
         if (!cancelled) setPageImages([]);
       });
 
+    void starPdfDoc
+      .enumerateGraphics(currentPage - 1)
+      .then((graphics) => {
+        if (!cancelled) {
+          setPageGraphics(graphics || []);
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to enumerate page graphics:", err);
+        if (!cancelled) setPageGraphics([]);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -418,6 +438,211 @@ export function SmartPdfEditor() {
         toast.success("Image removed from page.");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Failed to remove image.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleUpdateGraphic = useCallback(
+    async (input: StarPdfUpdateVectorGraphicInput) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        await starPdfDoc.updateGraphic(input);
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
+        setPageGraphics(graphics || []);
+
+        toast.success("Vector shape updated successfully.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to update vector shape.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleAddRectangle = useCallback(
+    async (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      strokeColorHex?: string,
+      fillColorHex?: string,
+      lineWidth = 1.5,
+    ) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        const hexToRgb = (hex: string): [number, number, number] => {
+          const clean = hex.replace("#", "");
+          if (clean.length === 6) {
+            return [
+              parseInt(clean.substring(0, 2), 16) / 255,
+              parseInt(clean.substring(2, 4), 16) / 255,
+              parseInt(clean.substring(4, 6), 16) / 255,
+            ];
+          }
+          return [0, 0, 0];
+        };
+
+        const strokeRgb = strokeColorHex ? hexToRgb(strokeColorHex) : undefined;
+        const fillRgb = fillColorHex ? hexToRgb(fillColorHex) : undefined;
+
+        await starPdfDoc.addRectangle({
+          page_index: currentPage - 1,
+          x,
+          y,
+          width,
+          height,
+          stroke_color_rgb: strokeRgb,
+          fill_color_rgb: fillRgb,
+          line_width: lineWidth,
+          is_stroked: Boolean(strokeRgb),
+          is_filled: Boolean(fillRgb),
+        });
+
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
+        setPageGraphics(graphics || []);
+
+        toast.success("Rectangle added successfully.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to add rectangle.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleAddLine = useCallback(
+    async (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number,
+      strokeColorHex = "#000000",
+      lineWidth = 2.0,
+    ) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        const hexToRgb = (hex: string): [number, number, number] => {
+          const clean = hex.replace("#", "");
+          if (clean.length === 6) {
+            return [
+              parseInt(clean.substring(0, 2), 16) / 255,
+              parseInt(clean.substring(2, 4), 16) / 255,
+              parseInt(clean.substring(4, 6), 16) / 255,
+            ];
+          }
+          return [0, 0, 0];
+        };
+
+        const strokeRgb = hexToRgb(strokeColorHex);
+
+        await starPdfDoc.addLine({
+          page_index: currentPage - 1,
+          x1,
+          y1,
+          x2,
+          y2,
+          stroke_color_rgb: strokeRgb,
+          line_width: lineWidth,
+        });
+
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
+        setPageGraphics(graphics || []);
+
+        toast.success("Line added successfully.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to add line.";
+        toast.error(msg);
+      }
+    },
+    [starPdfDoc, sourceBytes, currentPage, pdfProxy],
+  );
+
+  const handleDeleteGraphic = useCallback(
+    async (graphicId: string) => {
+      if (!starPdfDoc || !sourceBytes) return;
+      try {
+        await starPdfDoc.deleteGraphic({
+          page_index: currentPage - 1,
+          graphic_id: graphicId,
+          clone_if_shared: true,
+        });
+        const updatedBytes = await starPdfDoc.exportIncremental();
+
+        const pdfjsLib = await getPdfjsLib();
+        const loadingTask = pdfjsLib.getDocument({
+          data: updatedBytes.slice(0),
+          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapPacked: true,
+        });
+        const proxy = await loadingTask.promise;
+
+        if (pdfProxy) {
+          void pdfProxy.destroy();
+        }
+        setPdfProxy(proxy);
+        setSourceBytes(updatedBytes);
+        setIsModified(true);
+
+        const graphics = await starPdfDoc.enumerateGraphics(currentPage - 1);
+        setPageGraphics(graphics || []);
+
+        toast.success("Vector shape removed from page.");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Failed to delete vector shape.";
         toast.error(msg);
       }
     },
@@ -747,6 +972,11 @@ export function SmartPdfEditor() {
           onReplaceImage={handleReplaceImage}
           onAddImage={handleAddImage}
           onRemoveImage={handleRemoveImage}
+          graphics={pageGraphics}
+          onUpdateGraphic={handleUpdateGraphic}
+          onAddRectangle={handleAddRectangle}
+          onAddLine={handleAddLine}
+          onDeleteGraphic={handleDeleteGraphic}
           className="hidden lg:flex"
         />
       </div>

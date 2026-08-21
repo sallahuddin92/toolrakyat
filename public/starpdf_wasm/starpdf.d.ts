@@ -5,13 +5,23 @@ export function starpdf_add_annotation(handle: number, page_index: number, annot
 
 export function starpdf_add_image(handle: number, page_index: number, image_bytes: Uint8Array, x: number, y: number, width: number, height: number): any;
 
+export function starpdf_add_line(handle: number, input_val: any): any;
+
+export function starpdf_add_rectangle(handle: number, input_val: any): any;
+
 export function starpdf_close(handle: number): boolean;
 
 export function starpdf_create_minimal_pdf(text: string): Uint8Array;
 
+export function starpdf_delete_graphic(handle: number, input_val: any): any;
+
 export function starpdf_delete_page(handle: number, page_index: number): Uint8Array;
 
 export function starpdf_duplicate_page(handle: number, page_index: number, destination_index: number): Uint8Array;
+
+export function starpdf_enumerate_all_graphics(handle: number): any;
+
+export function starpdf_enumerate_graphics(handle: number, page_index: number): any;
 
 export function starpdf_enumerate_images(handle: number, page_index: number): any;
 
@@ -75,6 +85,8 @@ export function starpdf_split_document(handle: number, ranges: any): any;
 
 export function starpdf_update_annotation(handle: number, obj_num: bigint, obj_gen: number, update_val: any): boolean;
 
+export function starpdf_update_graphic(handle: number, input_val: any): any;
+
 export function starpdf_validate(handle: number): boolean;
 
 export function starpdf_version(): string;
@@ -85,10 +97,15 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly starpdf_add_annotation: (a: number, b: number, c: any) => [number, number, number];
     readonly starpdf_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+    readonly starpdf_add_line: (a: number, b: any) => [number, number, number];
+    readonly starpdf_add_rectangle: (a: number, b: any) => [number, number, number];
     readonly starpdf_close: (a: number) => [number, number, number];
     readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
+    readonly starpdf_delete_graphic: (a: number, b: any) => [number, number, number];
     readonly starpdf_delete_page: (a: number, b: number) => [number, number, number, number];
     readonly starpdf_duplicate_page: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly starpdf_enumerate_all_graphics: (a: number) => [number, number, number];
+    readonly starpdf_enumerate_graphics: (a: number, b: number) => [number, number, number];
     readonly starpdf_enumerate_images: (a: number, b: number) => [number, number, number];
     readonly starpdf_export_incremental: (a: number) => [number, number, number, number];
     readonly starpdf_extract_all_text: (a: number) => [number, number, number];
@@ -120,6 +137,7 @@ export interface InitOutput {
     readonly starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
     readonly starpdf_split_document: (a: number, b: any) => [number, number, number];
     readonly starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
+    readonly starpdf_update_graphic: (a: number, b: any) => [number, number, number];
     readonly starpdf_validate: (a: number) => [number, number, number];
     readonly starpdf_version: () => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;

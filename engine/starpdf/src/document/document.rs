@@ -396,6 +396,52 @@ impl<'a> PdfDocument<'a> {
         self.apply_mutation(&[crate::mutation::PdfChange::RemoveImage { spec: spec.clone() }])
     }
 
+    /// Discovers and enumerates all vector graphics on a single page.
+    pub fn enumerate_graphics(
+        &mut self,
+        page_index: usize,
+    ) -> PdfResult<Vec<crate::vector::VectorGraphicInfo>> {
+        let all = self.enumerate_all_graphics()?;
+        Ok(all
+            .into_iter()
+            .filter(|g| g.page_index == page_index)
+            .collect())
+    }
+
+    /// Discovers and enumerates all vector graphics across the entire document.
+    pub fn enumerate_all_graphics(&mut self) -> PdfResult<Vec<crate::vector::VectorGraphicInfo>> {
+        let mut extractor = crate::vector::VectorExtractor::new(self)?;
+        extractor.extract_all_graphics()
+    }
+
+    /// Updates an existing vector graphic or path object on a page.
+    pub fn update_graphic(
+        &mut self,
+        spec: &crate::vector::UpdateVectorGraphicSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::UpdateVectorGraphic {
+            spec: spec.clone(),
+        }])
+    }
+
+    /// Adds a new vector graphic (Rectangle or Line) to a page.
+    pub fn add_graphic(
+        &mut self,
+        spec: &crate::vector::AddVectorGraphicSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::AddVectorGraphic { spec: spec.clone() }])
+    }
+
+    /// Deletes an existing vector graphic from a page.
+    pub fn delete_graphic(
+        &mut self,
+        spec: &crate::vector::DeleteVectorGraphicSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::DeleteVectorGraphic {
+            spec: spec.clone(),
+        }])
+    }
+
     /// Applies an ordered, atomic page-operation plan. Intermediate outputs remain private and
     /// are returned only after the complete plan reopens successfully.
     pub fn apply_page_operations(

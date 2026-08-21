@@ -15,10 +15,11 @@ use crate::syntax::object::ObjectRef;
 use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
-    WasmAddAnnotationInput, WasmAnnotation, WasmChoiceOption, WasmDocumentInfo, WasmFormField,
-    WasmImageInfo, WasmImageMutationResult, WasmPageText, WasmReplaceTextResult,
-    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
-    WasmUpdateAnnotationInput, WasmWidget,
+    WasmAddAnnotationInput, WasmAddLineInput, WasmAddRectangleInput, WasmAnnotation,
+    WasmChoiceOption, WasmDeleteVectorGraphicInput, WasmDocumentInfo, WasmFormField, WasmImageInfo,
+    WasmImageMutationResult, WasmPageText, WasmReplaceTextResult, WasmSearchBoundingBox,
+    WasmSearchResult, WasmSecurityInfo, WasmTextSpan, WasmUpdateAnnotationInput,
+    WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo, WasmVectorMutationResult, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -970,6 +971,339 @@ pub fn starpdf_remove_image(
         .map_err(to_js_error)?;
 
     let dto = WasmImageMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_enumerate_graphics(handle: u32, page_index: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let graphics = doc.enumerate_graphics(page_index as usize)?;
+            let dtos: Vec<WasmVectorGraphicInfo> = graphics
+                .into_iter()
+                .map(|g| {
+                    let (rect_x, rect_y, rect_w, rect_h) = match &g.geometry {
+                        crate::vector::VectorGeometry::Rectangle {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } => (Some(*x), Some(*y), Some(*width), Some(*height)),
+                        _ => (None, None, None, None),
+                    };
+                    let (line_x1, line_y1, line_x2, line_y2) = match &g.geometry {
+                        crate::vector::VectorGeometry::Line { x1, y1, x2, y2 } => {
+                            (Some(*x1), Some(*y1), Some(*x2), Some(*y2))
+                        }
+                        _ => (None, None, None, None),
+                    };
+                    let stroke_rgb = g
+                        .stroke_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_rgb_array);
+                    let fill_rgb = g
+                        .fill_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_rgb_array);
+                    let stroke_hex = g
+                        .stroke_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_hex);
+                    let fill_hex = g
+                        .fill_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_hex);
+
+                    WasmVectorGraphicInfo {
+                        graphic_id: g.graphic_id,
+                        page_index: g.page_index,
+                        stream_index: g.stream_index,
+                        start_instruction_index: g.start_instruction_index,
+                        end_instruction_index: g.end_instruction_index,
+                        graphic_type: g.graphic_type.as_str().to_string(),
+                        bounds: g.bounds,
+                        local_bounds: g.local_bounds,
+                        transform: g.transform,
+                        stroke_color_rgb: stroke_rgb,
+                        fill_color_rgb: fill_rgb,
+                        stroke_color_hex: stroke_hex,
+                        fill_color_hex: fill_hex,
+                        line_width: g.line_width,
+                        is_stroked: g.is_stroked,
+                        is_filled: g.is_filled,
+                        is_shared: g.is_shared,
+                        is_editable: g.editability.is_editable(),
+                        editability_code: g.editability.code().to_string(),
+                        refusal_reason: g.editability.reason(),
+                        rect_x,
+                        rect_y,
+                        rect_w,
+                        rect_h,
+                        line_x1,
+                        line_y1,
+                        line_x2,
+                        line_y2,
+                    }
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&dtos)
+                .map_err(|e| crate::error::PdfError::Serialization(e.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_enumerate_all_graphics(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let graphics = doc.enumerate_all_graphics()?;
+            let dtos: Vec<WasmVectorGraphicInfo> = graphics
+                .into_iter()
+                .map(|g| {
+                    let (rect_x, rect_y, rect_w, rect_h) = match &g.geometry {
+                        crate::vector::VectorGeometry::Rectangle {
+                            x,
+                            y,
+                            width,
+                            height,
+                        } => (Some(*x), Some(*y), Some(*width), Some(*height)),
+                        _ => (None, None, None, None),
+                    };
+                    let (line_x1, line_y1, line_x2, line_y2) = match &g.geometry {
+                        crate::vector::VectorGeometry::Line { x1, y1, x2, y2 } => {
+                            (Some(*x1), Some(*y1), Some(*x2), Some(*y2))
+                        }
+                        _ => (None, None, None, None),
+                    };
+                    let stroke_rgb = g
+                        .stroke_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_rgb_array);
+                    let fill_rgb = g
+                        .fill_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_rgb_array);
+                    let stroke_hex = g
+                        .stroke_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_hex);
+                    let fill_hex = g
+                        .fill_color
+                        .as_ref()
+                        .map(crate::vector::VectorColor::to_hex);
+
+                    WasmVectorGraphicInfo {
+                        graphic_id: g.graphic_id,
+                        page_index: g.page_index,
+                        stream_index: g.stream_index,
+                        start_instruction_index: g.start_instruction_index,
+                        end_instruction_index: g.end_instruction_index,
+                        graphic_type: g.graphic_type.as_str().to_string(),
+                        bounds: g.bounds,
+                        local_bounds: g.local_bounds,
+                        transform: g.transform,
+                        stroke_color_rgb: stroke_rgb,
+                        fill_color_rgb: fill_rgb,
+                        stroke_color_hex: stroke_hex,
+                        fill_color_hex: fill_hex,
+                        line_width: g.line_width,
+                        is_stroked: g.is_stroked,
+                        is_filled: g.is_filled,
+                        is_shared: g.is_shared,
+                        is_editable: g.editability.is_editable(),
+                        editability_code: g.editability.code().to_string(),
+                        refusal_reason: g.editability.reason(),
+                        rect_x,
+                        rect_y,
+                        rect_w,
+                        rect_h,
+                        line_x1,
+                        line_y1,
+                        line_x2,
+                        line_y2,
+                    }
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&dtos)
+                .map_err(|e| crate::error::PdfError::Serialization(e.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_update_graphic(handle: u32, input_val: JsValue) -> Result<JsValue, JsValue> {
+    let input: WasmUpdateVectorGraphicInput = serde_wasm_bindgen::from_value(input_val)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let new_geometry = if let (Some(x), Some(y), Some(w), Some(h)) =
+        (input.rect_x, input.rect_y, input.rect_w, input.rect_h)
+    {
+        Some(crate::vector::VectorGeometry::Rectangle {
+            x,
+            y,
+            width: w,
+            height: h,
+        })
+    } else if let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+        (input.line_x1, input.line_y1, input.line_x2, input.line_y2)
+    {
+        Some(crate::vector::VectorGeometry::Line { x1, y1, x2, y2 })
+    } else {
+        None
+    };
+
+    let new_stroke_color = input
+        .stroke_color_rgb
+        .map(|[r, g, b]| Some(crate::vector::VectorColor::from_rgb(r, g, b)));
+    let new_fill_color = input
+        .fill_color_rgb
+        .map(|[r, g, b]| Some(crate::vector::VectorColor::from_rgb(r, g, b)));
+
+    let spec = crate::vector::UpdateVectorGraphicSpec {
+        page_index: input.page_index,
+        graphic_id: input.graphic_id,
+        new_geometry,
+        new_stroke_color,
+        new_fill_color,
+        new_line_width: input.line_width,
+        new_is_stroked: input.is_stroked,
+        new_is_filled: input.is_filled,
+        clone_if_shared: input.clone_if_shared,
+    };
+
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.update_graphic(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmVectorMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_add_rectangle(handle: u32, input_val: JsValue) -> Result<JsValue, JsValue> {
+    let input: WasmAddRectangleInput = serde_wasm_bindgen::from_value(input_val)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let stroke_color = input
+        .stroke_color_rgb
+        .map(|[r, g, b]| crate::vector::VectorColor::from_rgb(r, g, b));
+    let fill_color = input
+        .fill_color_rgb
+        .map(|[r, g, b]| crate::vector::VectorColor::from_rgb(r, g, b));
+
+    let spec = crate::vector::AddVectorGraphicSpec {
+        page_index: input.page_index,
+        geometry: crate::vector::VectorGeometry::Rectangle {
+            x: input.x,
+            y: input.y,
+            width: input.width,
+            height: input.height,
+        },
+        stroke_color,
+        fill_color,
+        line_width: input.line_width,
+        is_stroked: input.is_stroked,
+        is_filled: input.is_filled,
+    };
+
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.add_graphic(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmVectorMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_add_line(handle: u32, input_val: JsValue) -> Result<JsValue, JsValue> {
+    let input: WasmAddLineInput = serde_wasm_bindgen::from_value(input_val)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let stroke_color = input
+        .stroke_color_rgb
+        .map(|[r, g, b]| crate::vector::VectorColor::from_rgb(r, g, b));
+
+    let spec = crate::vector::AddVectorGraphicSpec {
+        page_index: input.page_index,
+        geometry: crate::vector::VectorGeometry::Line {
+            x1: input.x1,
+            y1: input.y1,
+            x2: input.x2,
+            y2: input.y2,
+        },
+        stroke_color,
+        fill_color: None,
+        line_width: input.line_width,
+        is_stroked: true,
+        is_filled: false,
+    };
+
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.add_graphic(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmVectorMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_delete_graphic(handle: u32, input_val: JsValue) -> Result<JsValue, JsValue> {
+    let input: WasmDeleteVectorGraphicInput = serde_wasm_bindgen::from_value(input_val)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let spec = crate::vector::DeleteVectorGraphicSpec {
+        page_index: input.page_index,
+        graphic_id: input.graphic_id,
+        clone_if_shared: input.clone_if_shared,
+    };
+
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.delete_graphic(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmVectorMutationResult {
         success: true,
         modified_object_count: mod_count,
     };

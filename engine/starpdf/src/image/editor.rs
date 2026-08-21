@@ -68,9 +68,18 @@ impl ImageEditor {
             let mut dict = BTreeMap::new();
             dict.insert("Type".to_string(), PdfObject::Name("XObject".to_string()));
             dict.insert("Subtype".to_string(), PdfObject::Name("Image".to_string()));
-            dict.insert("Width".to_string(), PdfObject::Integer(i64::from(payload.width)));
-            dict.insert("Height".to_string(), PdfObject::Integer(i64::from(payload.height)));
-            dict.insert("ColorSpace".to_string(), PdfObject::Name(payload.color_space));
+            dict.insert(
+                "Width".to_string(),
+                PdfObject::Integer(i64::from(payload.width)),
+            );
+            dict.insert(
+                "Height".to_string(),
+                PdfObject::Integer(i64::from(payload.height)),
+            );
+            dict.insert(
+                "ColorSpace".to_string(),
+                PdfObject::Name(payload.color_space),
+            );
             dict.insert(
                 "BitsPerComponent".to_string(),
                 PdfObject::Integer(i64::from(payload.bits_per_component)),
@@ -135,15 +144,18 @@ impl ImageEditor {
                     PdfError::InvalidObject("Resolved object is not a stream".to_string())
                 })?;
 
-            existing_stream
-                .dict
-                .insert("Width".to_string(), PdfObject::Integer(i64::from(payload.width)));
-            existing_stream
-                .dict
-                .insert("Height".to_string(), PdfObject::Integer(i64::from(payload.height)));
-            existing_stream
-                .dict
-                .insert("ColorSpace".to_string(), PdfObject::Name(payload.color_space));
+            existing_stream.dict.insert(
+                "Width".to_string(),
+                PdfObject::Integer(i64::from(payload.width)),
+            );
+            existing_stream.dict.insert(
+                "Height".to_string(),
+                PdfObject::Integer(i64::from(payload.height)),
+            );
+            existing_stream.dict.insert(
+                "ColorSpace".to_string(),
+                PdfObject::Name(payload.color_space),
+            );
             existing_stream.dict.insert(
                 "BitsPerComponent".to_string(),
                 PdfObject::Integer(i64::from(payload.bits_per_component)),
@@ -192,9 +204,18 @@ impl ImageEditor {
         let mut dict = BTreeMap::new();
         dict.insert("Type".to_string(), PdfObject::Name("XObject".to_string()));
         dict.insert("Subtype".to_string(), PdfObject::Name("Image".to_string()));
-        dict.insert("Width".to_string(), PdfObject::Integer(i64::from(payload.width)));
-        dict.insert("Height".to_string(), PdfObject::Integer(i64::from(payload.height)));
-        dict.insert("ColorSpace".to_string(), PdfObject::Name(payload.color_space));
+        dict.insert(
+            "Width".to_string(),
+            PdfObject::Integer(i64::from(payload.width)),
+        );
+        dict.insert(
+            "Height".to_string(),
+            PdfObject::Integer(i64::from(payload.height)),
+        );
+        dict.insert(
+            "ColorSpace".to_string(),
+            PdfObject::Name(payload.color_space),
+        );
         dict.insert(
             "BitsPerComponent".to_string(),
             PdfObject::Integer(i64::from(payload.bits_per_component)),
@@ -530,37 +551,7 @@ impl ImageEditor {
             write!(writer, " ").map_err(|e| PdfError::Serialization(e.to_string()))?;
         }
 
-        let op_str = match instr.operator {
-            ContentOperator::Q => "q",
-            ContentOperator::QEnd => "Q",
-            ContentOperator::Cm => "cm",
-            ContentOperator::Bt => "BT",
-            ContentOperator::Et => "ET",
-            ContentOperator::Tf => "Tf",
-            ContentOperator::Tm => "Tm",
-            ContentOperator::Td => "Td",
-            ContentOperator::TD => "TD",
-            ContentOperator::TStar => "T*",
-            ContentOperator::Tj => "Tj",
-            ContentOperator::TJ => "TJ",
-            ContentOperator::Do => "Do",
-            ContentOperator::Re => "re",
-            ContentOperator::M => "m",
-            ContentOperator::L => "l",
-            ContentOperator::C => "c",
-            ContentOperator::H => "h",
-            ContentOperator::S => "S",
-            ContentOperator::SClose => "s",
-            ContentOperator::F => "f",
-            ContentOperator::FUpper => "F",
-            ContentOperator::FStar => "f*",
-            ContentOperator::B => "B",
-            ContentOperator::BStar => "B*",
-            ContentOperator::BClose => "b",
-            ContentOperator::BCloseStar => "b*",
-            ContentOperator::Unknown(ref s) => s.as_str(),
-        };
-
+        let op_str = instr.operator.as_str();
         writeln!(writer, "{op_str}").map_err(|e| PdfError::Serialization(e.to_string()))?;
         Ok(())
     }

@@ -216,6 +216,35 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     modified_objects.extend(plan.modified_objects);
                     overall_status = overall_status.combine(plan.appearance_status);
                 }
+                PdfChange::UpdateVectorGraphic { spec } => {
+                    let plan = crate::vector::VectorEditor::update_graphic(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
+                PdfChange::AddVectorGraphic { spec } => {
+                    let plan = crate::vector::VectorEditor::add_graphic(
+                        self.store,
+                        &self.page_refs,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
+                PdfChange::DeleteVectorGraphic { spec } => {
+                    let plan = crate::vector::VectorEditor::delete_graphic(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
             }
 
             if modified_objects.len() > MAX_GENERATED_OBJECTS {

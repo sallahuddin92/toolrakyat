@@ -474,4 +474,95 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(images4.length).toBe(0);
     await doc4.close();
   });
+
+  it("supports bounded vector graphic operations (add, enumerate, update, delete)", async () => {
+    const minimalBytes = await StarPdfClient.createMinimalPdf("Vector Test Doc");
+    const doc = await StarPdfClient.open(minimalBytes);
+
+    // Initial state: no vector shapes
+    const initialGraphics = await doc.enumerateGraphics(0);
+    expect(initialGraphics.length).toBe(0);
+
+    // 1. Add Rectangle
+    const addRectRes = await doc.addRectangle({
+      page_index: 0,
+      x: 50,
+      y: 50,
+      width: 120,
+      height: 60,
+      stroke_color_rgb: [0, 0, 1],
+      fill_color_rgb: [0.8, 0.9, 1],
+      line_width: 2.0,
+      is_stroked: true,
+      is_filled: true,
+    });
+    expect(addRectRes.success).toBe(true);
+
+    // 2. Add Line
+    const addLineRes = await doc.addLine({
+      page_index: 0,
+      x1: 100,
+      y1: 200,
+      x2: 300,
+      y2: 200,
+      stroke_color_rgb: [1, 0, 0],
+      line_width: 3.0,
+    });
+    expect(addLineRes.success).toBe(true);
+
+    const docWithVectors = await doc.exportIncremental();
+    await doc.close();
+
+    // 3. Reopen and verify enumeration
+    const doc2 = await StarPdfClient.open(docWithVectors);
+    const graphics = await doc2.enumerateGraphics(0);
+    expect(graphics.length).toBe(2);
+
+    const rect = graphics.find((g) => g.graphic_type === "Rectangle");
+    expect(rect).toBeDefined();
+    expect(rect?.is_stroked).toBe(true);
+    expect(rect?.is_filled).toBe(true);
+    expect(rect?.is_editable).toBe(true);
+
+    const line = graphics.find((g) => g.graphic_type === "Line");
+    expect(line).toBeDefined();
+    expect(line?.line_width).toBe(3.0);
+
+    // 4. Update the rectangle's line width and stroke color
+    const updateRes = await doc2.updateGraphic({
+      page_index: 0,
+      graphic_id: rect!.graphic_id,
+      line_width: 5.0,
+      stroke_color_rgb: [0, 1, 0],
+      clone_if_shared: true,
+    });
+    expect(updateRes.success).toBe(true);
+
+    const docAfterUpdate = await doc2.exportIncremental();
+    await doc2.close();
+
+    // 5. Reopen and delete the line
+    const doc3 = await StarPdfClient.open(docAfterUpdate);
+    const graphics3 = await doc3.enumerateGraphics(0);
+    const line3 = graphics3.find((g) => g.graphic_type === "Line");
+    expect(line3).toBeDefined();
+
+    const deleteRes = await doc3.deleteGraphic({
+      page_index: 0,
+      graphic_id: line3!.graphic_id,
+      clone_if_shared: true,
+    });
+    expect(deleteRes.success).toBe(true);
+
+    const docFinalBytes = await doc3.exportIncremental();
+    await doc3.close();
+
+    // 6. Final verification
+    const doc4 = await StarPdfClient.open(docFinalBytes);
+    const finalGraphics = await doc4.enumerateGraphics(0);
+    expect(finalGraphics.length).toBe(1);
+    expect(finalGraphics[0].graphic_type).toBe("Rectangle");
+    expect(finalGraphics[0].line_width).toBe(5.0);
+    await doc4.close();
+  });
 });

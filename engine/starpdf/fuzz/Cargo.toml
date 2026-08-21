@@ -229,3 +229,9 @@ path = "fuzz_targets/fuzz_image_operations.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "fuzz_vector_operations"
+path = "fuzz_targets/fuzz_vector_operations.rs"
+test = false
+doc = false
+
