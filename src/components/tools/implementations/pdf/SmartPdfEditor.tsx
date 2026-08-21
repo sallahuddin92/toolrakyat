@@ -33,7 +33,6 @@ import { PdfDropzone } from "./PdfDropzone";
 import { PdfToolbar } from "./PdfToolbar";
 import { PdfThumbnailRail } from "./PdfThumbnailRail";
 import { PdfPageCanvas } from "./PdfPageCanvas";
-import { PdfFormInspector } from "./PdfFormInspector";
 import { PdfDocumentInfo } from "./PdfDocumentInfo";
 import { PdfPageOperations } from "./PdfPageOperations";
 import { PdfContextualToolbar, type SelectedItem } from "./PdfContextualToolbar";
@@ -77,7 +76,6 @@ export function SmartPdfEditor() {
 
   // Layout Panel Visibility (Desktop Workspace)
   const [isThumbnailsOpen, setIsThumbnailsOpen] = useState<boolean>(true);
-  const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(true);
 
   // StarPDF search state
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -291,7 +289,7 @@ export function SmartPdfEditor() {
     [],
   );
 
-  const handleResetForm = useCallback(() => {
+  const _handleResetForm = useCallback(() => {
     if (!inspectionResult) return;
     const originalValues: Record<string, string | boolean | string[]> = {};
     for (const field of inspectionResult.fields) {
@@ -484,7 +482,7 @@ export function SmartPdfEditor() {
     [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
-  const handleAddImage = useCallback(
+  const _handleAddImage = useCallback(
     async (file: File, x: number, y: number, width: number, height: number) => {
       if (!starPdfDoc || !sourceBytes) return;
       try {
@@ -589,7 +587,7 @@ export function SmartPdfEditor() {
     [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
-  const handleAddRectangle = useCallback(
+  const _handleAddRectangle = useCallback(
     async (
       x: number,
       y: number,
@@ -658,7 +656,7 @@ export function SmartPdfEditor() {
     [starPdfDoc, sourceBytes, currentPage, pdfProxy, pushHistorySnapshot],
   );
 
-  const handleAddLine = useCallback(
+  const _handleAddLine = useCallback(
     async (
       x1: number,
       y1: number,
@@ -1014,8 +1012,6 @@ export function SmartPdfEditor() {
         onMergeClick={() => mergeInputRef.current?.click()}
         isThumbnailsOpen={isThumbnailsOpen}
         onToggleThumbnails={() => setIsThumbnailsOpen(!isThumbnailsOpen)}
-        isInspectorOpen={isInspectorOpen}
-        onToggleInspector={() => setIsInspectorOpen(!isInspectorOpen)}
       />
 
       {/* Page Operations Rail / Actions */}
@@ -1159,32 +1155,6 @@ export function SmartPdfEditor() {
             />
           </div>
         </main>
-
-        {/* Right Form Fields, Text, Image & Annotation Inspector */}
-        {isInspectorOpen && (
-          <PdfFormInspector
-            fields={inspectionResult.fields}
-            fieldValues={fieldValues}
-            onFieldValueChange={handleFieldValueChange}
-            onResetForm={handleResetForm}
-            isModified={isModified}
-            textSpans={pageTextSpans}
-            onReplaceText={handleReplaceExistingText}
-            images={pageImages}
-            onReplaceImage={handleReplaceImage}
-            onAddImage={handleAddImage}
-            onRemoveImage={handleRemoveImage}
-            graphics={pageGraphics}
-            onUpdateGraphic={handleUpdateGraphic}
-            onAddRectangle={handleAddRectangle}
-            onAddLine={handleAddLine}
-            onDeleteGraphic={handleDeleteGraphic}
-            annotations={inspectionResult.annotations}
-            annotationValues={annotationValues}
-            onAnnotationChange={handleAnnotationChange}
-            className="flex"
-          />
-        )}
       </div>
 
       {/* Document Properties Modal */}

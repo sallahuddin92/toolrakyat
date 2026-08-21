@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { type PdfDocumentMetadata } from "@/lib/pdf/pdf-types";
 import { formatBytes } from "@/lib/tools/format";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,9 @@ import {
   Info,
   ShieldCheck,
   X,
+  ChevronDown,
+  ChevronRight,
+  Code2,
 } from "lucide-react";
 
 interface PdfDocumentInfoProps {
@@ -16,6 +20,8 @@ interface PdfDocumentInfoProps {
 }
 
 export function PdfDocumentInfo({ metadata, isOpen, onClose }: PdfDocumentInfoProps) {
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+
   if (!isOpen) return null;
 
   return (
@@ -24,12 +30,13 @@ export function PdfDocumentInfo({ metadata, isOpen, onClose }: PdfDocumentInfoPr
       role="dialog"
       aria-modal="true"
       aria-labelledby="doc-info-title"
+      data-testid="doc-info-modal"
     >
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden space-y-4 p-6">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <h3 id="doc-info-title" className="text-base font-semibold text-slate-900 flex items-center gap-2">
             <Info className="size-4 text-sky-600" />
-            Document Properties
+            Document Properties & Diagnostics
           </h3>
           <Button variant="ghost" size="icon" onClick={onClose} className="size-8 rounded-lg text-slate-500">
             <X className="size-4" />
@@ -56,7 +63,7 @@ export function PdfDocumentInfo({ metadata, isOpen, onClose }: PdfDocumentInfoPr
 
           <div className="grid grid-cols-3 gap-2 py-1 border-b border-slate-50">
             <span className="text-slate-500 font-medium">Form Fields</span>
-            <span className="col-span-2 text-slate-900">{metadata.formFieldCount} field(s)</span>
+            <span className="col-span-2 text-slate-900">{metadata.formFieldCount} interactive field(s)</span>
           </div>
 
           {metadata.title && (
@@ -86,6 +93,32 @@ export function PdfDocumentInfo({ metadata, isOpen, onClose }: PdfDocumentInfoPr
               <span className="col-span-2 text-slate-900 truncate" title={metadata.producer}>
                 {metadata.producer}
               </span>
+            </div>
+          )}
+        </div>
+
+        {/* Optional Document Diagnostics Section */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            className="w-full flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100 text-xs font-medium text-slate-700 transition-colors"
+            data-testid="toggle-diagnostics-btn"
+          >
+            <span className="flex items-center gap-1.5">
+              <Code2 className="size-3.5 text-slate-500" />
+              Document Diagnostics
+            </span>
+            {showDiagnostics ? <ChevronDown className="size-3.5 text-slate-400" /> : <ChevronRight className="size-3.5 text-slate-400" />}
+          </button>
+          {showDiagnostics && (
+            <div className="p-3 text-[11px] bg-slate-900 text-slate-200 font-mono space-y-1.5">
+              <div>Page count: {metadata.pageCount}</div>
+              <div>Form field count: {metadata.formFieldCount}</div>
+              <div>File size: {formatBytes(metadata.fileSize)}</div>
+              {metadata.creationDate && <div>Created: {metadata.creationDate.toISOString()}</div>}
+              {metadata.modificationDate && <div>Modified: {metadata.modificationDate.toISOString()}</div>}
+              <div className="text-slate-400 text-[10px] pt-1">StarPDF WASM Direct-Manipulation Engine v0.20</div>
             </div>
           )}
         </div>

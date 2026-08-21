@@ -21,8 +21,6 @@ import {
   FilePlus2,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   ShieldCheck,
 } from "lucide-react";
 import { type ExportMode } from "@/lib/pdf/pdf-types";
@@ -55,8 +53,6 @@ interface PdfToolbarProps {
   onMergeClick?: () => void;
   isThumbnailsOpen?: boolean;
   onToggleThumbnails?: () => void;
-  isInspectorOpen?: boolean;
-  onToggleInspector?: () => void;
 }
 
 export function PdfToolbar({
@@ -87,8 +83,6 @@ export function PdfToolbar({
   onMergeClick,
   isThumbnailsOpen = true,
   onToggleThumbnails,
-  isInspectorOpen = true,
-  onToggleInspector,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -192,8 +186,9 @@ export function PdfToolbar({
             size="icon"
             onClick={onShowInfo}
             className="size-6 text-slate-400 hover:text-slate-600 rounded-md shrink-0"
-            title="Document Properties"
+            title="Document Properties & Diagnostics"
             aria-label="Document properties"
+            data-testid="toolbar-info-btn"
           >
             <Info className="size-3.5" />
           </Button>
@@ -370,7 +365,7 @@ export function PdfToolbar({
         )}
       </div>
 
-      {/* Right: Privacy badge + Inspector toggle + Export Menu */}
+      {/* Right: Privacy badge + Export Menu */}
       <div className="flex items-center gap-2">
         {/* Compact Local Processing Privacy Badge */}
         <div
@@ -381,21 +376,6 @@ export function PdfToolbar({
           <ShieldCheck className="size-3.5 text-emerald-600 shrink-0" />
           <span>Local processing</span>
         </div>
-
-        {onToggleInspector && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onToggleInspector}
-            className="size-8 text-slate-600 rounded-lg shrink-0 flex items-center justify-center"
-            title={isInspectorOpen ? "Hide Inspector Panel" : "Show Inspector Panel"}
-            aria-label={isInspectorOpen ? "Hide inspector panel" : "Show inspector panel"}
-            data-testid="toolbar-toggle-inspector-btn"
-          >
-            {isInspectorOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-          </Button>
-        )}
 
         <div className="relative">
           <div className="flex items-center rounded-xl bg-sky-600 text-white shadow-xs">

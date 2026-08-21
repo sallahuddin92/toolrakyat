@@ -64,8 +64,8 @@ function TextControls({
         <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal">
           <Lock className="size-3 text-slate-400" /> Read-Only
         </Badge>
-        <span className="truncate max-w-[260px]" title={span.refusal_reason || "Font encoding is read-only"}>
-          {span.refusal_reason || "Non-rewritable font program"}
+        <span className="truncate max-w-[260px]" title={span.refusal_reason || "This text can't be safely rewritten."}>
+          This text can&apos;t be safely rewritten.
         </span>
       </div>
     );
@@ -464,6 +464,19 @@ export function PdfContextualToolbar({
       {selection.type === "annotation" && (() => {
         const annot = selection.data as PdfMarkupAnnotation;
         const currentVal = annotationValue ?? annot.contents;
+
+        if (annot.subtype === "Link") {
+          return (
+            <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="context-annotation-controls">
+              <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+                Link
+              </Badge>
+              <span className="truncate max-w-[260px] text-slate-500 italic">
+                Interactive Link Destination (Read-Only)
+              </span>
+            </div>
+          );
+        }
 
         return (
           <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
