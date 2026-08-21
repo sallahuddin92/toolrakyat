@@ -2006,6 +2006,303 @@ ET
         );
     }
 
+    // 82. 10-Page Document Open & Page Traversal
+    let bench_text_10 = make_bench_text_doc(10, 20);
+    let bench_text_100 = make_bench_text_doc(100, 20);
+    let bench_text_500 = make_bench_text_doc(500, 20);
+    let bench_vector_100 = make_bench_vector_doc(100, 10);
+    {
+        let iterations = 2_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&bench_text_10).unwrap();
+            let count = doc.page_count().unwrap();
+            std::hint::black_box(count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "82. 10-Page Document Open:    {:>8} ns/op  ({:.2?} for {} opens)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 83. 100-Page Document Open & Page Traversal
+    {
+        let iterations = 500;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+            let count = doc.page_count().unwrap();
+            std::hint::black_box(count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "83. 100-Page Document Open:   {:>8} ns/op  ({:.2?} for {} opens)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 84. 500-Page Document Open & Page Traversal
+    {
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&bench_text_500).unwrap();
+            let count = doc.page_count().unwrap();
+            std::hint::black_box(count);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "84. 500-Page Document Open:   {:>8} ns/op  ({:.2?} for {} opens)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 85. 100-Page Text Extraction
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let all_text = doc.extract_all_text().unwrap();
+            std::hint::black_box(all_text);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "85. 100-Page Text Extraction: {:>8} ns/op  ({:.2?} for {} docs)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 86. 100-Page Search Indexing & Query
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+        let iterations = 50;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let hits = doc.search("benchmark", &SearchOptions::default()).unwrap();
+            std::hint::black_box(hits);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "86. 100-Page Search Query:    {:>8} ns/op  ({:.2?} for {} queries)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 87. 100-Page Vector Graphic Enumeration (1,000 shapes)
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_100).unwrap();
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let graphics = doc.enumerate_all_graphics().unwrap();
+            std::hint::black_box(graphics);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "87. 100-Page Vector Enum:     {:>8} ns/op  ({:.2?} for {} docs)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 88. 100-Page Vector Graphic Mutation on Page 50
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_vector_100).unwrap();
+        let graphics = doc.enumerate_graphics(50).unwrap();
+        let target_id = graphics[0].graphic_id.clone();
+        let spec = starpdf::vector::UpdateVectorGraphicSpec {
+            page_index: 50,
+            graphic_id: target_id,
+            new_geometry: None,
+            new_stroke_color: Some(Some(starpdf::vector::VectorColor::from_rgb(0.5, 0.5, 0.5))),
+            new_fill_color: None,
+            new_line_width: Some(3.0),
+            new_is_stroked: Some(true),
+            new_is_filled: None,
+            clone_if_shared: true,
+        };
+
+        let iterations = 1_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc.update_graphic(&spec).unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "88. 100-Page Vector Mutate:   {:>8} ns/op  ({:.2?} for {} updates)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 89. 100-Page Existing Text Mutation on Page 50
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+        let page_text = doc.extract_page_text(50).unwrap();
+        let span = &page_text.spans[0];
+        let target = starpdf::mutation::text_edit::TextEditTarget::from_span(span);
+
+        let iterations = 1_000;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let plan = doc
+                .replace_text(50, &target, "BENCHMARK_MUTATION_TEXT")
+                .unwrap();
+            std::hint::black_box(plan);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "89. 100-Page Text Mutate:     {:>8} ns/op  ({:.2?} for {} updates)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 90. 100-Page Page Move / Reorder
+    {
+        let iterations = 50;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+            let moved = doc.move_page(99, 0).unwrap();
+            std::hint::black_box(moved);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "90. 100-Page Page Move:       {:>8} ns/op  ({:.2?} for {} moves)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 91. 100-Page Page Extraction (10 pages)
+    {
+        let mut doc = PdfDocument::from_bytes(&bench_text_100).unwrap();
+        let indices = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+        let iterations = 100;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let extracted = doc.extract_pages(&indices).unwrap();
+            std::hint::black_box(extracted);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "91. 100-Page Extract 10p:     {:>8} ns/op  ({:.2?} for {} extracts)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 92. Large Multi-Document Merge (50p + 50p)
+    let bench_text_50 = make_bench_text_doc(50, 10);
+    let bench_vector_50 = make_bench_vector_doc(50, 5);
+    {
+        let iterations = 50;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let merged = PdfDocument::merge_documents(&[&bench_text_50, &bench_vector_50]).unwrap();
+            std::hint::black_box(merged);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "92. Large Doc Merge 50p+50p:  {:>8} ns/op  ({:.2?} for {} merges)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 93. 20-Cycle Repeated Open/Edit/Save/Close
+    {
+        let iterations = 10;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut cur = bench_text_50.clone();
+            for c in 0..20 {
+                let next = {
+                    let mut doc = PdfDocument::from_bytes(&cur).unwrap();
+                    let page_text = doc.extract_page_text(0).unwrap();
+                    let target = starpdf::mutation::text_edit::TextEditTarget::from_span(
+                        &page_text.spans[0],
+                    );
+                    let plan = doc.replace_text(0, &target, &format!("C_{c}")).unwrap();
+                    doc.export_incremental(&plan).unwrap()
+                };
+                cur = next;
+            }
+            std::hint::black_box(cur);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "93. 20-Cycle Open/Edit/Save:  {:>8} ns/op  ({:.2?} for {} runs)",
+            elapsed.as_nanos() / (iterations * 20) as u128,
+            elapsed,
+            iterations
+        );
+    }
+
+    // 94. 10-Cycle Incremental Save Size Growth
+    {
+        let mut cur = bench_text_10.clone();
+        let init_sz = cur.len();
+        for c in 0..10 {
+            let next = {
+                let mut doc = PdfDocument::from_bytes(&cur).unwrap();
+                let page_text = doc.extract_page_text(0).unwrap();
+                let target =
+                    starpdf::mutation::text_edit::TextEditTarget::from_span(&page_text.spans[0]);
+                let plan = doc
+                    .replace_text(0, &target, &format!("SAVE_CYCLE_{c}"))
+                    .unwrap();
+                doc.export_incremental(&plan).unwrap()
+            };
+            cur = next;
+        }
+        let delta = cur.len() - init_sz;
+        let avg_delta = delta / 10;
+        println!(
+            "94. 10-Cycle Save Size Delta: {:>8} B/save (Total delta: +{} B over 10 saves)",
+            avg_delta, delta
+        );
+    }
+
+    // 95. 500-Page Standalone Document Serialization
+    {
+        let iterations = 20;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let mut doc = PdfDocument::from_bytes(&bench_text_500).unwrap();
+            let all_indices: Vec<usize> = (0..500).collect();
+            let exported = doc.extract_pages(&all_indices).unwrap();
+            std::hint::black_box(exported);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "95. 500-Page Standalone Write:{:>8} ns/op  ({:.2?} for {} writes)",
+            elapsed.as_nanos() / iterations as u128,
+            elapsed,
+            iterations
+        );
+    }
+
     println!("================================================================");
 }
 
@@ -2244,5 +2541,171 @@ fn make_bench_pdf_with_vectors() -> Vec<u8> {
     pdf.extend_from_slice(
         format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
     );
+    pdf
+}
+
+fn make_bench_text_doc(num_pages: usize, lines_per_page: usize) -> Vec<u8> {
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+
+    let mut offsets: Vec<usize> = Vec::new();
+    offsets.push(0);
+
+    let o1 = pdf.len();
+    offsets.push(o1);
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let font_obj_num = 3 + num_pages * 2;
+
+    let o2 = pdf.len();
+    offsets.push(o2);
+    let mut kids = String::new();
+    for i in 0..num_pages {
+        let p_num = 3 + i * 2;
+        kids.push_str(&format!("{p_num} 0 R "));
+    }
+    pdf.extend_from_slice(
+        format!("2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {num_pages} >>\nendobj\n")
+            .as_bytes(),
+    );
+
+    for i in 0..num_pages {
+        let page_obj_num = 3 + i * 2;
+        let content_obj_num = 4 + i * 2;
+
+        let p_offset = pdf.len();
+        offsets.push(p_offset);
+        pdf.extend_from_slice(
+            format!(
+                "{page_obj_num} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_obj_num} 0 R /Resources << /Font << /F1 {font_obj_num} 0 R >> >> >>\nendobj\n"
+            )
+            .as_bytes(),
+        );
+
+        let mut content = String::new();
+        content.push_str("BT\n/F1 11 Tf\n");
+        for line in 0..lines_per_page {
+            let y = 740 - (line * 16);
+            content.push_str(&format!(
+                "50 {y} Td (Page {p} Line {line}: StarPDF benchmark stream text #{rec:04}.) Tj\n",
+                p = i + 1,
+                line = line + 1,
+                rec = (i * lines_per_page + line) % 10000
+            ));
+        }
+        content.push_str("ET\n");
+
+        let c_offset = pdf.len();
+        offsets.push(c_offset);
+        pdf.extend_from_slice(
+            format!(
+                "{content_obj_num} 0 obj\n<< /Length {len} >>\nstream\n{content}\nendstream\nendobj\n",
+                len = content.len()
+            )
+            .as_bytes(),
+        );
+    }
+
+    let font_offset = pdf.len();
+    offsets.push(font_offset);
+    pdf.extend_from_slice(
+        format!("{font_obj_num} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n")
+            .as_bytes(),
+    );
+
+    let total_objs = offsets.len();
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {total_objs}\n0000000000 65535 f \n").as_bytes());
+    for off in &offsets[1..] {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size {total_objs} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
+            .as_bytes(),
+    );
+
+    pdf
+}
+
+fn make_bench_vector_doc(num_pages: usize, shapes_per_page: usize) -> Vec<u8> {
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+
+    let mut offsets: Vec<usize> = Vec::new();
+    offsets.push(0);
+
+    let o1 = pdf.len();
+    offsets.push(o1);
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let o2 = pdf.len();
+    offsets.push(o2);
+    let mut kids = String::new();
+    for i in 0..num_pages {
+        let p_num = 3 + i * 2;
+        kids.push_str(&format!("{p_num} 0 R "));
+    }
+    pdf.extend_from_slice(
+        format!("2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {num_pages} >>\nendobj\n")
+            .as_bytes(),
+    );
+
+    for i in 0..num_pages {
+        let page_obj_num = 3 + i * 2;
+        let content_obj_num = 4 + i * 2;
+
+        let p_offset = pdf.len();
+        offsets.push(p_offset);
+        pdf.extend_from_slice(
+            format!(
+                "{page_obj_num} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content_obj_num} 0 R >>\nendobj\n"
+            )
+            .as_bytes(),
+        );
+
+        let mut content = String::new();
+        for s in 0..shapes_per_page {
+            let x = 50 + (s % 5) * 100;
+            let y = 100 + (s / 5) * 60;
+            let r = ((s * 47) % 255) as f64 / 255.0;
+            let g = ((s * 93) % 255) as f64 / 255.0;
+            let b = ((s * 137) % 255) as f64 / 255.0;
+            if s % 2 == 0 {
+                content.push_str(&format!(
+                    "q\n{r:.2} {g:.2} {b:.2} rg\n1.5 w\n0 0 0 RG\n{x} {y} 80 40 re\nB\nQ\n"
+                ));
+            } else {
+                content.push_str(&format!(
+                    "q\n2.0 w\n{r:.2} {g:.2} {b:.2} RG\n{x} {y} m {x2} {y2} l\nS\nQ\n",
+                    x2 = x + 80,
+                    y2 = y + 40
+                ));
+            }
+        }
+
+        let c_offset = pdf.len();
+        offsets.push(c_offset);
+        pdf.extend_from_slice(
+            format!(
+                "{content_obj_num} 0 obj\n<< /Length {len} >>\nstream\n{content}\nendstream\nendobj\n",
+                len = content.len()
+            )
+            .as_bytes(),
+        );
+    }
+
+    let total_objs = offsets.len();
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {total_objs}\n0000000000 65535 f \n").as_bytes());
+    for off in &offsets[1..] {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size {total_objs} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
+            .as_bytes(),
+    );
+
     pdf
 }
