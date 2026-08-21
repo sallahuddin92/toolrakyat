@@ -671,4 +671,85 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(finalP0Text.plain_text).toContain("CYCLE_20_MUTATION");
     await finalDoc.close();
   });
+
+  it("v0.17: rejects stale document handles after close", async () => {
+    const doc = await StarPdfClient.open(await StarPdfClient.createMinimalPdf("Stale Handle Test"));
+    expect(doc.isClosed).toBe(false);
+    await doc.close();
+    expect(doc.isClosed).toBe(true);
+
+    await expect(doc.getPageCount()).rejects.toThrow(/closed/i);
+    await expect(doc.extractPageText(0)).rejects.toThrow(/closed/i);
+    await expect(doc.search("test")).rejects.toThrow(/closed/i);
+    await expect(doc.exportIncremental()).rejects.toThrow(/closed/i);
+  });
+
+  it("v0.17: qualifies 100-page document load, search, extraction, and page extraction in client", async () => {
+    // Generate deterministic 100-page PDF
+    let pdf = "%PDF-1.7\n%StarPDF\n";
+    const offsets: number[] = [0];
+    const numPages = 100;
+
+    offsets.push(pdf.length);
+    pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+    offsets.push(pdf.length);
+    let kids = "";
+    for (let i = 0; i < numPages; i++) {
+      kids += `${3 + i * 2} 0 R `;
+    }
+    pdf += `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>\nendobj\n`;
+
+    const fontObjNum = 3 + numPages * 2;
+    for (let i = 0; i < numPages; i++) {
+      const pageObjNum = 3 + i * 2;
+      const contentObjNum = 4 + i * 2;
+
+      offsets.push(pdf.length);
+      pdf += `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>\nendobj\n`;
+
+      let streamContent = "BT\n/F1 11 Tf\n";
+      for (let l = 0; l < 5; l++) {
+        const y = 720 - l * 20;
+        streamContent += `50 ${y} Td (Page ${i + 1} Line ${l + 1}: StarPDF v0.17 qualification benchmark text) Tj\n`;
+      }
+      streamContent += "ET\n";
+
+      offsets.push(pdf.length);
+      pdf += `${contentObjNum} 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`;
+    }
+
+    offsets.push(pdf.length);
+    pdf += `${fontObjNum} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < offsets.length; i++) {
+      pdf += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+
+    const doc100Bytes = new TextEncoder().encode(pdf);
+    const doc = await StarPdfClient.open(doc100Bytes);
+
+    const count = await doc.getPageCount();
+    expect(count).toBe(100);
+
+    const p50Text = await doc.extractPageText(49);
+    expect(p50Text.plain_text).toContain("Page 50 Line 1");
+    expect(p50Text.spans.length).toBe(5);
+
+    const searchHits = await doc.search("benchmark", { caseSensitive: false });
+    expect(searchHits.length).toBe(500);
+
+    // Extract pages 0, 25, 50, 75, 99
+    const extractedBytes = await doc.extractPages([0, 25, 50, 75, 99]);
+    expect(extractedBytes.length).toBeGreaterThan(100);
+
+    const extractedDoc = await StarPdfClient.open(extractedBytes);
+    expect(await extractedDoc.getPageCount()).toBe(5);
+    await extractedDoc.close();
+
+    await doc.close();
+  });
 });
