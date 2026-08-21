@@ -1841,6 +1841,72 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
   });
+
+  test("v0.19 Workflow K: Open -> Select/Edit Supported Annotation -> Export -> Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/smartpdf-form.pdf");
+    const originalBytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "workflow-k.pdf", originalBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Verify annotation detected
+    await expect(page.getByRole("button", { name: /Forms \(3\)/ })).toBeVisible();
+
+    // 2. Select annotation on canvas
+    const canvasField = page.locator('[data-testid="canvas-field-full_name"]');
+    await expect(canvasField).toBeVisible({ timeout: 10000 });
+    await canvasField.dispatchEvent("click");
+
+    // 3. Contextual UI recognizes annotation
+    const contextInput = page.locator('[data-testid="context-form-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+
+    // 4. Test Escape clears selection
+    await page.keyboard.press("Escape");
+    await expect(contextInput).not.toBeVisible();
+
+    // 5. Re-select and mutate annotation property
+    await canvasField.dispatchEvent("click");
+    await expect(contextInput).toBeVisible();
+    await contextInput.fill("Persisted Annotation Test");
+
+    // 6. Verify document becomes dirty
+    await expect(page.locator('[data-testid="document-modified-dot"]')).toBeVisible({ timeout: 5000 });
+
+    // 7. Verify raw object IDs are NOT displayed in user-facing UI
+    await expect(page.locator('[data-testid="smartpdf-editor-workspace"]')).not.toContainText("0 0 obj");
+    await expect(page.locator('[data-testid="smartpdf-editor-workspace"]')).not.toContainText("Annot 0");
+
+    // 8. Export modified document
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("workflow-k-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(100);
+    expect(exportedBytes).not.toEqual(originalBytes);
+
+    // 9. Reopen exported document
+    await page.getByRole("button", { name: "Open" }).click();
+    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
+    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await confirmBtn.click();
+    }
+    await uploadPdfBytes(page, "workflow-k-edited.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 10. Verify reopened document contains expected annotation state and unrelated content is usable
+    const reopenedInput = page.locator('input[placeholder="Enter text..."]').first();
+    await expect(reopenedInput).toBeVisible();
+    await expect(reopenedInput).toHaveValue("Persisted Annotation Test");
+    await expect(page.getByRole("button", { name: /Text \(/ })).toBeVisible();
+  });
 });
 
 

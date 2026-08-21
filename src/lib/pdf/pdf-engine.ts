@@ -98,6 +98,17 @@ export async function inspectPdfDocument(
         value = field.getSelected() ?? [];
       }
 
+      let rect: { x: number; y: number; width: number; height: number } | undefined;
+      try {
+        const widgets = field.acroField.getWidgets();
+        if (widgets.length > 0) {
+          const r = widgets[0].getRectangle();
+          rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+        }
+      } catch {
+        // Optional widget rectangle
+      }
+
       fields.push({
         name,
         type,
@@ -106,6 +117,7 @@ export async function inspectPdfDocument(
         options,
         isReadOnly,
         isRequired,
+        rect,
       });
     }
   } catch {

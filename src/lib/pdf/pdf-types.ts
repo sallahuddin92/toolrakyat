@@ -14,6 +14,7 @@ export interface AcroFormField {
   options?: string[];
   isReadOnly: boolean;
   isRequired: boolean;
+  rect?: { x: number; y: number; width: number; height: number };
 }
 
 export interface PdfDocumentMetadata {

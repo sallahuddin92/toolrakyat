@@ -31,6 +31,7 @@ export function PdfInteractiveOverlay({
   textSpans = [],
   images = [],
   graphics = [],
+  fields = [],
   selectedItem,
   onSelectItem,
 }: PdfInteractiveOverlayProps) {
@@ -183,6 +184,43 @@ export function PdfInteractiveOverlay({
             )}
             title={`Vector shape (${g.graphic_type || "Path"}) - Click to edit color & width`}
             data-testid={`canvas-graphic-${g.graphic_id}`}
+          />
+        );
+      })}
+
+      {/* 4. FORM FIELD / WIDGET ANNOTATIONS */}
+      {fields.map((field) => {
+        if (!field.rect) return null;
+        const isSelected = selectedItem?.type === "form" && selectedItem.id === field.name;
+        const rect = convertPdfRectToPixels(field.rect.x, field.rect.y, field.rect.width, field.rect.height);
+
+        return (
+          <div
+            key={`field-${field.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectItem({
+                type: "form",
+                id: field.name,
+                data: field,
+                bounds: rect,
+              });
+            }}
+            style={{
+              left: `${rect.left}px`,
+              top: `${rect.top}px`,
+              width: `${rect.width}px`,
+              height: `${rect.height}px`,
+            }}
+            className={cn(
+              "absolute pointer-events-auto cursor-pointer rounded-xs transition-colors",
+              isSelected
+                ? "ring-2 ring-amber-500 bg-amber-400/20 shadow-xs z-20"
+                : "hover:bg-amber-400/10 hover:ring-1 hover:ring-amber-300/60 z-10",
+              field.isReadOnly && "cursor-not-allowed opacity-80",
+            )}
+            title={`Form field / annotation (${field.type}): ${field.name}${field.isReadOnly ? " (Read-only)" : ""}`}
+            data-testid={`canvas-field-${field.name}`}
           />
         );
       })}
