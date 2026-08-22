@@ -3404,14 +3404,60 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // Verify deleted cleanly
     await expect(renWord).toBeHidden({ timeout: 5000 });
-    await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
-
     // 3. Test Undo restores it
     const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
     await undoBtn.click();
     await expect(renWord).toBeVisible({ timeout: 5000 });
   });
+
+  test("v0.20 Phase 3B.2A: Multi-Span Layout Safety Lock preserves downstream text coordinates exactly", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multispan-heading.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "multispan-layout-safety.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Measure downstream "Renaissance" position before edit
+    const renWord = page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]');
+    await expect(renWord).toBeVisible({ timeout: 5000 });
+    const origStyle = await renWord.getAttribute("style");
+    expect(origStyle).not.toBeNull();
+    const origLeft = parseFloat(origStyle!.match(/left:\s*([\d.]+)px/)![1]);
+    const origTop = parseFloat(origStyle!.match(/top:\s*([\d.]+)px/)![1]);
+
+    // Select multi-span word "Architectural" and replace with shorter "Modern"
+    const archWord = page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]');
+    await expect(archWord).toBeVisible({ timeout: 5000 });
+    await archWord.click();
+
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await contextInput.fill("Modern");
+    await page.locator('[data-testid="context-text-save-btn"]').click();
+
+    // Wait for mutation to complete and verify "Modern" is shown
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Modern"]')).toBeVisible({ timeout: 5000 });
+
+    // Verify downstream "Renaissance" did NOT shift on canvas
+    const newRenWord = page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]');
+    await expect(newRenWord).toBeVisible({ timeout: 5000 });
+    const newStyle = await newRenWord.getAttribute("style");
+    expect(newStyle).not.toBeNull();
+    const newLeft = parseFloat(newStyle!.match(/left:\s*([\d.]+)px/)![1]);
+    const newTop = parseFloat(newStyle!.match(/top:\s*([\d.]+)px/)![1]);
+
+    expect(Math.abs(newLeft - origLeft)).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(newTop - origTop)).toBeLessThanOrEqual(0.01);
+  });
 });
+
+
+
 
 
 

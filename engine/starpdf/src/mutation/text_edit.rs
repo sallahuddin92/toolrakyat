@@ -117,70 +117,27 @@ pub struct ContentStreamEditor;
 
 impl ContentStreamEditor {
     /// Replaces targeted text bytes in raw content stream data, preserving all unrelated operators and graphics state.
+    /// Replaces targeted text bytes in raw content stream data, preserving all unrelated operators and graphics state.
     pub fn replace_in_stream(
         stream_bytes: &[u8],
         target: &TextEditTarget,
         new_bytes: &[u8],
     ) -> PdfResult<Vec<u8>> {
-        let mut parser = ContentParser::from_bytes(stream_bytes);
-        let mut instructions = parser.parse_instructions()?;
+        Self::replace_in_stream_with_compensation(stream_bytes, target, new_bytes, None)
+    }
 
-        if target.instruction_index >= instructions.len() {
-            return Err(PdfError::TargetTextNotFound(format!(
-                "Instruction index {} out of bounds (total instructions: {})",
-                target.instruction_index,
-                instructions.len()
-            )));
-        }
-
-        let instr = &mut instructions[target.instruction_index];
-        match instr.operator {
-            ContentOperator::Tj => {
-                if target.operand_index != 0 {
-                    return Err(PdfError::TargetTextNotFound(format!(
-                        "Tj operator expects operand index 0, found {}",
-                        target.operand_index
-                    )));
-                }
-                if instr.operands.is_empty() {
-                    return Err(PdfError::TargetTextNotFound(
-                        "Tj operator missing string operand".to_string(),
-                    ));
-                }
-                instr.operands[0] = ContentOperand::String(new_bytes.to_vec());
-            }
-            ContentOperator::TJ => {
-                if instr.operands.is_empty() {
-                    return Err(PdfError::TargetTextNotFound(
-                        "TJ operator missing array operand".to_string(),
-                    ));
-                }
-                match &mut instr.operands[0] {
-                    ContentOperand::Array(items) => {
-                        if target.operand_index >= items.len() {
-                            return Err(PdfError::TargetTextNotFound(format!(
-                                "TJ array operand index {} out of bounds (array length: {})",
-                                target.operand_index,
-                                items.len()
-                            )));
-                        }
-                        items[target.operand_index] = ContentOperand::String(new_bytes.to_vec());
-                    }
-                    _ => {
-                        return Err(PdfError::TargetTextNotFound(
-                            "TJ operand is not an array".to_string(),
-                        ));
-                    }
-                }
-            }
-            ref op => {
-                return Err(PdfError::TargetTextNotFound(format!(
-                    "Target instruction is '{op}', expected text-show operator 'Tj' or 'TJ'"
-                )));
-            }
-        }
-
-        Ok(Self::serialize_instructions(&instructions))
+    /// Replaces targeted text bytes with optional layout advance compensation.
+    pub fn replace_in_stream_with_compensation(
+        stream_bytes: &[u8],
+        target: &TextEditTarget,
+        new_bytes: &[u8],
+        compensation: Option<f64>,
+    ) -> PdfResult<Vec<u8>> {
+        Self::replace_multiple_in_stream_with_compensation(
+            stream_bytes,
+            &[(target, new_bytes)],
+            compensation,
+        )
     }
 
     /// Replaces multiple targeted text bytes in raw content stream data atomically.
@@ -188,10 +145,21 @@ impl ContentStreamEditor {
         stream_bytes: &[u8],
         edits: &[(&TextEditTarget, &[u8])],
     ) -> PdfResult<Vec<u8>> {
+        Self::replace_multiple_in_stream_with_compensation(stream_bytes, edits, None)
+    }
+
+    /// Replaces multiple targeted text bytes in raw content stream data atomically with optional layout advance compensation.
+    pub fn replace_multiple_in_stream_with_compensation(
+        stream_bytes: &[u8],
+        edits: &[(&TextEditTarget, &[u8])],
+        compensation: Option<f64>,
+    ) -> PdfResult<Vec<u8>> {
         let mut parser = ContentParser::from_bytes(stream_bytes);
         let mut instructions = parser.parse_instructions()?;
 
-        for (target, new_bytes) in edits {
+        let last_edit_idx = edits.len().saturating_sub(1);
+
+        for (i, (target, new_bytes)) in edits.iter().enumerate() {
             if target.instruction_index >= instructions.len() {
                 return Err(PdfError::TargetTextNotFound(format!(
                     "Instruction index {} out of bounds (total instructions: {})",
@@ -200,6 +168,7 @@ impl ContentStreamEditor {
                 )));
             }
 
+            let is_last = i == last_edit_idx;
             let instr = &mut instructions[target.instruction_index];
             match instr.operator {
                 ContentOperator::Tj => {
@@ -214,7 +183,16 @@ impl ContentStreamEditor {
                             "Tj operator missing string operand".to_string(),
                         ));
                     }
-                    instr.operands[0] = ContentOperand::String(new_bytes.to_vec());
+                    if is_last && compensation.is_some_and(|c| c.abs() >= 0.001) {
+                        let adj = compensation.unwrap_or(0.0);
+                        instr.operator = ContentOperator::TJ;
+                        instr.operands = vec![ContentOperand::Array(vec![
+                            ContentOperand::String(new_bytes.to_vec()),
+                            ContentOperand::Real(adj),
+                        ])];
+                    } else {
+                        instr.operands[0] = ContentOperand::String(new_bytes.to_vec());
+                    }
                 }
                 ContentOperator::TJ => {
                     if instr.operands.is_empty() {
@@ -233,7 +211,28 @@ impl ContentStreamEditor {
                             }
                             items[target.operand_index] =
                                 ContentOperand::String(new_bytes.to_vec());
+
+                            if is_last && compensation.is_some_and(|c| c.abs() >= 0.001) {
+                                let adj = compensation.unwrap_or(0.0);
+                                let next_idx = target.operand_index + 1;
+                                if next_idx < items.len() {
+                                    match &mut items[next_idx] {
+                                        ContentOperand::Integer(val) => {
+                                            *val += adj.round() as i64;
+                                        }
+                                        ContentOperand::Real(val) => {
+                                            *val += adj;
+                                        }
+                                        _ => {
+                                            items.insert(next_idx, ContentOperand::Real(adj));
+                                        }
+                                    }
+                                } else {
+                                    items.push(ContentOperand::Real(adj));
+                                }
+                            }
                         }
+
                         _ => {
                             return Err(PdfError::TargetTextNotFound(
                                 "TJ operand is not an array".to_string(),
