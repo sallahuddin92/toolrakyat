@@ -37,7 +37,9 @@ import {
   undoHistory,
   redoHistory,
   ReplaceTextCommand,
+  DeleteTextCommand,
   ReplaceImageCommand,
+
   RemoveImageCommand,
   AddImageCommand,
   UpdateVectorCommand,
@@ -642,21 +644,6 @@ export function SmartPdfEditor() {
     }
   }, [isModified, performOpenNewFile]);
 
-  // Global Keyboard Shortcuts (Escape to cancel tool mode or selection)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (editorMode === "FILL_AND_SIGN") {
-          setEditorMode("SELECT");
-        } else if (selectedItem) {
-          setSelectedItem(null);
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editorMode, selectedItem]);
-
   // Creation & Placement Handlers
   const handlePlaceFreeText = useCallback(
     (pageIndex: number, x: number, y: number, text: string) => {
@@ -733,6 +720,61 @@ export function SmartPdfEditor() {
     },
     [sourceBytes],
   );
+
+  // Global Keyboard Shortcuts (Escape to cancel tool mode or selection, Delete/Backspace for selected objects)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (editorMode === "FILL_AND_SIGN") {
+          setEditorMode("SELECT");
+        } else if (selectedItem) {
+          setSelectedItem(null);
+        }
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const target = e.target;
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          (target instanceof HTMLElement && target.isContentEditable)
+        ) {
+          return;
+        }
+
+        if (selectedItem && !isBusyRef.current) {
+          e.preventDefault();
+          const item = selectedItem;
+          if (item.type === "annotation") {
+            void handleDeleteAnnotation(item.id);
+          } else if (item.type === "image") {
+            setSelectedItem(null);
+            void executeCommand(new RemoveImageCommand(item.id));
+          } else if (item.type === "vector") {
+            setSelectedItem(null);
+            void executeCommand(new DeleteVectorCommand(item.id));
+          } else if (item.type === "text") {
+            const isSingleEditable = item.group
+              ? item.group.editability === "EDITABLE_ATOMIC"
+              : item.data.is_editable;
+            if (isSingleEditable) {
+              const spanId = item.group?.primarySpanId || item.data.span_id;
+              setSelectedItem(null);
+              void executeCommand(new DeleteTextCommand(spanId));
+            } else {
+              toast.error("This text can't be safely removed in place.");
+            }
+          } else if (item.type === "form") {
+            handleFormFieldChange(item.id, "");
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editorMode, selectedItem, handleDeleteAnnotation, executeCommand, handleFormFieldChange]);
+
 
   // Form Affordance Detection (Form Assist)
   const currentCandidates = useMemo(() => {
@@ -1067,7 +1109,12 @@ export function SmartPdfEditor() {
               onReplaceText={async (spanId, newText) => {
                 await executeCommand(new ReplaceTextCommand(spanId, newText));
               }}
+              onDeleteText={async (spanId) => {
+                setSelectedItem(null);
+                await executeCommand(new DeleteTextCommand(spanId));
+              }}
               onReplaceImage={async (imageId, file) => {
+
                 await executeCommand(new ReplaceImageCommand(imageId, file));
               }}
               onRemoveImage={async (imageId) => {

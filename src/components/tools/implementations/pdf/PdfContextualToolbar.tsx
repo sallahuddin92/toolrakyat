@@ -33,6 +33,7 @@ interface PdfContextualToolbarProps {
   selection: SmartPdfSelection;
   onDeselect: () => void;
   onReplaceText: (spanId: string, newText: string) => Promise<void>;
+  onDeleteText?: (spanId: string) => Promise<void>;
   onReplaceImage: (imageId: string, file: File) => Promise<void>;
   onRemoveImage: (imageId: string) => Promise<void>;
   onUpdateGraphic: (input: StarPdfUpdateVectorGraphicInput) => Promise<void>;
@@ -49,16 +50,19 @@ function TextControls({
   span,
   group,
   onReplaceText,
+  onDeleteText,
   onDeselect,
   onAddTextInstead,
 }: {
   span: StarPdfTextSpan;
   group?: import("@/lib/pdf/grouping").HumanTextGroup;
   onReplaceText: (spanId: string, newText: string) => Promise<void>;
+  onDeleteText?: (spanId: string) => Promise<void>;
   onDeselect: () => void;
   onAddTextInstead?: () => void;
 }) {
-  const [editText, setEditText] = useState(group?.text || span.text);
+  const originalText = group?.text || span.text;
+  const [editText, setEditText] = useState(originalText);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -114,10 +118,21 @@ function TextControls({
   }
 
   const handleTextSubmit = async () => {
-    if (!editText.trim()) return;
+    if (editText === originalText) {
+      onDeselect();
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await onReplaceText(group?.primarySpanId || span.span_id, editText);
+      if (!editText.trim()) {
+        if (onDeleteText) {
+          await onDeleteText(group?.primarySpanId || span.span_id);
+        } else {
+          await onReplaceText(group?.primarySpanId || span.span_id, "");
+        }
+      } else {
+        await onReplaceText(group?.primarySpanId || span.span_id, editText);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -142,16 +157,45 @@ function TextControls({
         type="button"
         size="sm"
         onClick={() => void handleTextSubmit()}
-        disabled={isSubmitting || !editText.trim()}
-        className="h-8 text-xs gap-1 bg-sky-600 hover:bg-sky-700 text-white"
+        disabled={isSubmitting}
+        className="h-8 text-xs gap-1 bg-sky-600 hover:bg-sky-700 text-white shrink-0"
         data-testid="context-text-save-btn"
       >
         <Check className="size-3.5" />
         <span>Apply</span>
       </Button>
+      {editText && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditText("")}
+          className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+          title="Clear text input"
+          data-testid="context-text-clear-btn"
+        >
+          Clear
+        </Button>
+      )}
+      {onDeleteText && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => void onDeleteText(group?.primarySpanId || span.span_id)}
+          disabled={isSubmitting}
+          className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+          title="Delete native text"
+          data-testid="context-text-delete-btn"
+        >
+          <Trash2 className="size-3.5" />
+          <span>Delete</span>
+        </Button>
+      )}
     </div>
   );
 }
+
 
 
 function ImageControls({
@@ -399,6 +443,22 @@ function AnnotationControls({
         data-testid="context-annotation-input"
         autoFocus
       />
+      {displayVal && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setLocalText("");
+            onAnnotationChange?.(annot.id, "");
+          }}
+          className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+          title="Clear annotation contents"
+          data-testid="context-annotation-clear-btn"
+        >
+          Clear
+        </Button>
+      )}
 
       {onDeleteAnnotation && (
         <Button
@@ -406,7 +466,7 @@ function AnnotationControls({
           variant="ghost"
           size="sm"
           onClick={() => void onDeleteAnnotation(annot.id)}
-          className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+          className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
           title="Delete annotation"
           data-testid="context-annotation-delete-btn"
         >
@@ -422,6 +482,7 @@ export function PdfContextualToolbar({
   selection,
   onDeselect,
   onReplaceText,
+  onDeleteText,
   onReplaceImage,
   onRemoveImage,
   onUpdateGraphic,
@@ -469,6 +530,7 @@ export function PdfContextualToolbar({
           span={selection.data as StarPdfTextSpan}
           group={selection.group}
           onReplaceText={onReplaceText}
+          onDeleteText={onDeleteText}
           onDeselect={onDeselect}
           onAddTextInstead={onAddTextInstead}
         />
@@ -561,17 +623,33 @@ export function PdfContextualToolbar({
 
         // Default text-like form field
         return (
-          <Input
-            type="text"
-            value={typeof currentVal === "string" ? currentVal : ""}
-            onChange={(e) => onFormFieldChange(field.name, e.target.value)}
-            disabled={field.isReadOnly}
-            className="h-8 text-xs w-48 sm:w-64 bg-white"
-            placeholder="Field value..."
-            data-testid="context-form-input"
-          />
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="text"
+              value={typeof currentVal === "string" ? currentVal : ""}
+              onChange={(e) => onFormFieldChange(field.name, e.target.value)}
+              disabled={field.isReadOnly}
+              className="h-8 text-xs w-48 sm:w-64 bg-white"
+              placeholder="Field value..."
+              data-testid="context-form-input"
+            />
+            {!field.isReadOnly && Boolean(currentVal) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onFormFieldChange(field.name, "")}
+                className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+                title="Clear field value"
+                data-testid="context-form-clear-btn"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
         );
       })()}
+
 
       {/* MARKUP ANNOTATION SELECTION CONTROLS */}
       {selection.type === "annotation" && (

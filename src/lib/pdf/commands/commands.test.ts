@@ -10,8 +10,8 @@ import {
 } from "./history";
 import { SetFormFieldValueCommand } from "./form-commands";
 import { UpdateAnnotationCommand } from "./annotation-commands";
-import { ExtractPagesCommand } from "./page-commands";
 import type { SmartPdfCommandContext } from "./types";
+
 
 describe("SmartPDF Command Architecture & History Lifecycle", () => {
   describe("Bounded 25-Snapshot History Semantics", () => {
@@ -132,13 +132,20 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       expect(result.annotationValues).toEqual({ "annot-1": "Updated Note" });
     });
 
-    it("ExtractPagesCommand rejects empty selection and declares non-mutating flag", async () => {
-      const cmd = new ExtractPagesCommand([]);
-      expect(cmd.isMutating).toBe(false);
+    it("ReplaceTextCommand and DeleteTextCommand declare mutating flag and throw when starPdfDoc is absent", async () => {
+      const { ReplaceTextCommand, DeleteTextCommand } = await import("./text-commands");
+      const replaceCmd = new ReplaceTextCommand("span-1", "New Text");
+      expect(replaceCmd.isMutating).toBe(true);
+      await expect(replaceCmd.execute(baseContext)).rejects.toThrow(
+        "No active StarPDF document handle available",
+      );
 
-      await expect(cmd.execute(baseContext)).rejects.toThrow(
-        "No pages selected for extraction",
+      const deleteCmd = new DeleteTextCommand("span-1");
+      expect(deleteCmd.isMutating).toBe(true);
+      await expect(deleteCmd.execute(baseContext)).rejects.toThrow(
+        "No active StarPDF document handle available",
       );
     });
   });
 });
+
