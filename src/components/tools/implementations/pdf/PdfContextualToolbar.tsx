@@ -42,30 +42,73 @@ interface PdfContextualToolbarProps {
   onAnnotationChange?: (annotId: string, value: string) => void;
   annotationValue?: string;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
+  onAddTextInstead?: () => void;
 }
-
 
 function TextControls({
   span,
+  group,
   onReplaceText,
   onDeselect,
+  onAddTextInstead,
 }: {
   span: StarPdfTextSpan;
+  group?: import("@/lib/pdf/grouping").HumanTextGroup;
   onReplaceText: (spanId: string, newText: string) => Promise<void>;
   onDeselect: () => void;
+  onAddTextInstead?: () => void;
 }) {
-  const [editText, setEditText] = useState(span.text);
+  const [editText, setEditText] = useState(group?.text || span.text);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  if (!span.is_editable) {
+  const isEditable = group ? group.editability === "EDITABLE_ATOMIC" : span.is_editable;
+
+  if (!isEditable) {
+    const isMultiSpan = group?.editability === "GROUP_SELECTION_ONLY";
+    const detailedReason =
+      group?.detailed_reason ||
+      span.refusal_reason ||
+      "This PDF uses a specialized embedded font mapping that StarPDF cannot safely rewrite for the requested characters. The original PDF was left unchanged.";
+
     return (
-      <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="context-text-controls">
+      <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap" data-testid="context-text-controls">
         <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal">
-          <Lock className="size-3 text-slate-400" /> Read-Only
+          <Lock className="size-3 text-slate-400" /> {isMultiSpan ? "Multi-Span" : "Read-Only"}
         </Badge>
-        <span className="truncate max-w-[260px]" title={span.refusal_reason || "This text can't be safely rewritten."}>
-          This text can&apos;t be safely rewritten.
+        <span className="font-medium text-slate-700" data-testid="context-text-refusal-msg">
+          This text can&apos;t be safely edited in place.
         </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowDetails((prev) => !prev)}
+          className="h-6 px-1.5 text-[11px] text-slate-500 hover:text-slate-800 underline"
+          data-testid="context-text-details-btn"
+        >
+          {showDetails ? "Hide details" : "Details"}
+        </Button>
+        {onAddTextInstead && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onAddTextInstead}
+            className="h-6 px-2 text-[11px] bg-white border-slate-300 text-slate-700 hover:bg-slate-50"
+            data-testid="context-text-add-instead-btn"
+          >
+            Add new text instead
+          </Button>
+        )}
+        {showDetails && (
+          <div
+            className="w-full mt-1 p-2 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-600 leading-relaxed"
+            data-testid="context-text-details-panel"
+          >
+            {detailedReason}
+          </div>
+        )}
       </div>
     );
   }
@@ -74,7 +117,7 @@ function TextControls({
     if (!editText.trim()) return;
     setIsSubmitting(true);
     try {
-      await onReplaceText(span.span_id, editText);
+      await onReplaceText(group?.primarySpanId || span.span_id, editText);
     } finally {
       setIsSubmitting(false);
     }
@@ -109,6 +152,7 @@ function TextControls({
     </div>
   );
 }
+
 
 function ImageControls({
   img,
@@ -387,7 +431,9 @@ export function PdfContextualToolbar({
   onAnnotationChange,
   annotationValue,
   onDeleteAnnotation,
+  onAddTextInstead,
 }: PdfContextualToolbarProps) {
+
   if (!selection) return null;
 
   return (
@@ -421,10 +467,13 @@ export function PdfContextualToolbar({
         <TextControls
           key={selection.id}
           span={selection.data as StarPdfTextSpan}
+          group={selection.group}
           onReplaceText={onReplaceText}
           onDeselect={onDeselect}
+          onAddTextInstead={onAddTextInstead}
         />
       )}
+
 
       {/* IMAGE SELECTION CONTROLS */}
       {selection.type === "image" && (

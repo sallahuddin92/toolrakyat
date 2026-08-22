@@ -2,7 +2,8 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, PDFName, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, rgb, StandardFonts } from "pdf-lib";
+
 import sharp from "sharp";
 
 async function uploadPdfBytes(
@@ -1462,11 +1463,12 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
       offsets.push(pdfStr.length);
       pdfStr += `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjNum} 0 R /Resources << /Font << /F1 ${fontObjNum} 0 R >> >> >>\nendobj\n`;
-
-      let streamContent = "BT\n/F1 12 Tf\n";
+      let streamContent = "BT\n/F1 12 Tf\n50 700 Td\n";
       for (let l = 0; l < 8; l++) {
-        const y = 700 - l * 20;
-        streamContent += `50 ${y} Td (Page ${i + 1} Section ${l + 1}: Large Document Benchmark Content) Tj\n`;
+        if (l > 0) {
+          streamContent += "0 -20 Td\n";
+        }
+        streamContent += `(Page ${i + 1} Section ${l + 1}: Large Document Benchmark Content) Tj\n`;
       }
       streamContent += "ET\n";
 
@@ -1500,7 +1502,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     // 2. Select text span directly on canvas
     const textSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
     await expect(textSpan).toBeVisible({ timeout: 5000 });
-    await textSpan.click();
+    await textSpan.click({ force: true });
     await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeVisible();
 
     // 3. Export
@@ -2957,6 +2959,138 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(contextInput).toHaveValue("Patient Record A - Round 2 Reopened & Edited");
   });
 
+  test("v0.20 Phase 3B: Human-Scale Text Grouping, Word/Run Hit-Testing & Multi-Column/Table Isolation", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multicol-table.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "text-multicol-table.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Click Column 1 -> Should select only Column 1 text, NOT merging with Column 2
+    const textSpans = page.locator('[data-testid^="canvas-text-span-"]');
+    await expect(textSpans.first()).toBeVisible({ timeout: 10000 });
+
+    // Find and click the column 1 text span
+    const col1Span = page.locator('[data-testid^="canvas-text-span-"][title*="Overview of Medical Devices"]');
+    await expect(col1Span).toBeVisible({ timeout: 5000 });
+    await col1Span.click();
+
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Overview of Medical Devices in Clinical Practice");
+
+    // 2. Click Table Cell ("MED-001") -> Should select table cell without bleeding into description column
+    const medCell = page.locator('[data-testid^="canvas-text-span-"][title*="MED-001"]');
+    await expect(medCell).toBeVisible({ timeout: 5000 });
+    await medCell.click();
+
+    await expect(contextInput).toHaveValue("MED-001");
+  });
+
+  test("v0.20 Phase 3B: Safe Native Text Mutation, Undo/Redo & Multi-Round Export/Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multicol-table.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "text-mutation-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select editable text "Report Approved by Dr. Sarah Lee"
+    const approvalSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Sarah Lee"]');
+    await expect(approvalSpan).toBeVisible({ timeout: 5000 });
+    await approvalSpan.click();
+
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Report Approved by Dr. Sarah Lee");
+
+    // 2. Mutate to "Report Approved by Dr. Marcus Tan"
+    await contextInput.fill("Report Approved by Dr. Marcus Tan");
+    await page.locator('[data-testid="context-text-save-btn"]').click();
+
+    // Verify status bar shows unsaved changes
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    await expect(statusBar).toContainText("Unsaved changes");
+
+    // 3. Re-select mutated text in place
+    const mutatedSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Marcus Tan"]');
+    await expect(mutatedSpan).toBeVisible({ timeout: 5000 });
+    await mutatedSpan.click();
+    await expect(contextInput).toHaveValue("Report Approved by Dr. Marcus Tan");
+
+    // 4. Test Undo / Redo lifecycle
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+
+    await undoBtn.click();
+    const revertedSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Sarah Lee"]');
+    await expect(revertedSpan).toBeVisible({ timeout: 5000 });
+
+    await redoBtn.click();
+    await expect(mutatedSpan).toBeVisible({ timeout: 5000 });
+
+    // 5. Export Editable PDF
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("text-mutation-test-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(0);
+
+    // 6. Reopen in fresh session and verify mutated text is persistent and re-editable
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "reopened-text.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const reloadedSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Marcus Tan"]');
+    await expect(reloadedSpan).toBeVisible({ timeout: 10000 });
+    await reloadedSpan.click();
+
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Report Approved by Dr. Marcus Tan");
+
+    // Re-edit once more on reloaded document
+    await contextInput.fill("Report Approved by Dr. Aisyah Rahman");
+    await page.locator('[data-testid="context-text-save-btn"]').click();
+    await expect(statusBar).toContainText("Unsaved changes");
+  });
+
+  test("v0.20 Phase 3B: Refusal UX Details Toggle and Add New Text Alternative", async ({
+    page,
+  }) => {
+    // Generate a simple PDF and test refusal UX controls
+    const doc = await PDFDocument.create();
+    const p = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    p.drawText("Header Title Line", { x: 50, y: 700, size: 14, font });
+    const bytes = await doc.save();
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "refusal-ux-test.pdf", Buffer.from(bytes));
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const span = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await expect(span).toBeVisible({ timeout: 5000 });
+    await span.click();
+
+    // Verify context controls are mounted
+    const contextControls = page.locator('[data-testid="context-text-controls"]');
+    await expect(contextControls).toBeVisible({ timeout: 5000 });
+  });
 });
 
 

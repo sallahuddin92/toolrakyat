@@ -1091,8 +1091,13 @@ export function SmartPdfEditor() {
                 selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
               }
               onDeleteAnnotation={handleDeleteAnnotation}
+              onAddTextInstead={() => {
+                setEditorMode("FILL_AND_SIGN");
+                setFillAndSignTool("text");
+              }}
             />
           )}
+
 
           <div className="my-auto transition-transform duration-75">
             <PdfPageCanvas

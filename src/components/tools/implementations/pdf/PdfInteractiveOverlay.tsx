@@ -15,8 +15,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
 import { Check, X } from "lucide-react";
-import type { FlatFormCandidate } from "@/lib/pdf/detection";
-import { computeAutoCenteredMark } from "@/lib/pdf/detection";
+import { computeAutoCenteredMark, type FlatFormCandidate } from "@/lib/pdf/detection";
+import { groupTextSpans } from "@/lib/pdf/grouping";
+
+
+
 
 interface PdfInteractiveOverlayProps {
   pageWidth: number;
@@ -85,8 +88,10 @@ export function PdfInteractiveOverlay({
 }: PdfInteractiveOverlayProps) {
   const pageDims = useMemo(() => ({ width: pageWidth, height: pageHeight, rotation }), [pageWidth, pageHeight, rotation]);
   const pageIdx = pageNumber - 1;
+  const humanTextGroups = useMemo(() => groupTextSpans(textSpans), [textSpans]);
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
+
 
   // Inline placement state for text tool
   const [inlineText, setInlineText] = useState<InlineTextState | null>(null);
@@ -337,23 +342,28 @@ export function PdfInteractiveOverlay({
           );
         })}
 
-      {/* 3. TEXT SPANS (Z-20) */}
+      {/* 3. HUMAN-SCALE TEXT GROUPS (Z-30) */}
       {!isFillAndSign &&
-        textSpans.map((span) => {
-          const isSelected = selectedItem?.type === "text" && selectedItem.id === span.span_id;
-          const pdfRect = { x: span.x, y: span.y, width: span.width, height: span.height };
+        humanTextGroups.map((group) => {
+          const isSelected =
+            selectedItem?.type === "text" &&
+            (selectedItem.id === group.id ||
+              selectedItem.id === group.primarySpanId ||
+              selectedItem.group?.id === group.id);
+          const pdfRect = { x: group.x, y: group.y, width: group.width, height: group.height };
           const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
           return (
             <div
-              key={span.span_id}
+              key={group.id}
               onClick={(e) => {
                 e.stopPropagation();
                 onSelectItem({
                   type: "text",
-                  id: span.span_id,
+                  id: group.primarySpanId,
                   pageIndex: pageIdx,
-                  data: span,
+                  data: group.sourceSpans[0],
+                  group,
                   pdfRect,
                   bounds: rect,
                 });
@@ -367,19 +377,21 @@ export function PdfInteractiveOverlay({
               className={cn(
                 "absolute pointer-events-auto cursor-pointer rounded-xs transition-colors",
                 isSelected
-                  ? "ring-2 ring-sky-500 bg-sky-400/20 shadow-xs z-40"
-                  : "hover:bg-sky-400/15 hover:ring-1 hover:ring-sky-300/60 z-20",
-                !span.is_editable && "cursor-not-allowed opacity-80",
+                  ? "ring-2 ring-sky-500 bg-sky-400/20 shadow-xs z-50"
+                  : "hover:bg-sky-400/15 hover:ring-1 hover:ring-sky-300/60 z-30",
+                !group.is_editable && "cursor-default opacity-80",
               )}
               title={
-                span.is_editable
-                  ? `Text: "${span.text}" (Click to edit)`
-                  : `Read-only text: ${span.refusal_reason || "Font encoding not rewritable"}`
+                group.is_editable
+                  ? `Text: "${group.text}" (Click to edit)`
+                  : `Read-only text: ${group.refusal_reason || "Cannot edit in place"}`
               }
-              data-testid={`canvas-text-span-${span.span_id}`}
+              data-testid={`canvas-text-span-${group.primarySpanId}`}
+              data-group-id={group.id}
             />
           );
         })}
+
 
       {/* 4. MARKUP ANNOTATIONS (Z-25) */}
       {!isFillAndSign &&

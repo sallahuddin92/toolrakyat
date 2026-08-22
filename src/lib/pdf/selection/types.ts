@@ -4,6 +4,7 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "../starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "../pdf-types";
+import type { HumanTextGroup } from "../grouping/types";
 
 export type SelectionType = "text" | "image" | "vector" | "form" | "annotation";
 
@@ -26,9 +27,11 @@ export interface TextSelection {
   id: string; // span_id
   pageIndex: number;
   data: StarPdfTextSpan;
+  group?: HumanTextGroup;
   pdfRect: PdfRect;
   bounds?: PixelRect;
 }
+
 
 export interface ImageSelection {
   type: "image";
@@ -104,14 +107,21 @@ export function resolveSelectionAfterMutation(
 
   switch (previousSelection.type) {
     case "text": {
-      const match = pageTextSpans.find((s) => s.span_id === previousSelection.id);
+      const match = pageTextSpans.find(
+        (s) =>
+          s.span_id === previousSelection.id ||
+          (previousSelection.group && s.span_id === previousSelection.group.primarySpanId),
+      );
       if (!match) return null;
       return {
         ...previousSelection,
+        id: previousSelection.id,
         data: match,
         pdfRect: { x: match.x, y: match.y, width: match.width, height: match.height },
       };
     }
+
+
     case "image": {
       const match = pageImages.find((img) => img.image_id === previousSelection.id);
       if (!match) return null;
