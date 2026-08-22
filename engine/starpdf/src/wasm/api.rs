@@ -250,6 +250,41 @@ pub fn starpdf_replace_text(
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
+pub fn starpdf_replace_text_group(
+    handle: u32,
+    page_index: u32,
+    span_ids: JsValue,
+    new_text: &str,
+) -> Result<JsValue, JsValue> {
+    let ids: Vec<String> = serde_wasm_bindgen::from_value(span_ids)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let mut layout_str = String::from("EXACT_FIT");
+    let mut mod_count = 0;
+
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.replace_text_group(page_index as usize, &ids, new_text)?;
+            if let Some(l) = &plan.layout_policy_result {
+                layout_str = l.as_str().to_string();
+            }
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmReplaceTextResult {
+        success: true,
+        layout_result: layout_str,
+        modified_object_count: mod_count,
+    };
+
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
 pub fn starpdf_get_text_editability(
     handle: u32,
     page_index: u32,

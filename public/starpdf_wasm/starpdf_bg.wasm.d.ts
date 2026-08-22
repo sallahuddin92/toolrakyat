@@ -3,10 +3,15 @@
 export const memory: WebAssembly.Memory;
 export const starpdf_add_annotation: (a: number, b: number, c: any) => [number, number, number];
 export const starpdf_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
+export const starpdf_add_line: (a: number, b: any) => [number, number, number];
+export const starpdf_add_rectangle: (a: number, b: any) => [number, number, number];
 export const starpdf_close: (a: number) => [number, number, number];
 export const starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
+export const starpdf_delete_graphic: (a: number, b: any) => [number, number, number];
 export const starpdf_delete_page: (a: number, b: number) => [number, number, number, number];
 export const starpdf_duplicate_page: (a: number, b: number, c: number) => [number, number, number, number];
+export const starpdf_enumerate_all_graphics: (a: number) => [number, number, number];
+export const starpdf_enumerate_graphics: (a: number, b: number) => [number, number, number];
 export const starpdf_enumerate_images: (a: number, b: number) => [number, number, number];
 export const starpdf_export_incremental: (a: number) => [number, number, number, number];
 export const starpdf_extract_all_text: (a: number) => [number, number, number];
@@ -30,6 +35,7 @@ export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: num
 export const starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_replace_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const starpdf_replace_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const starpdf_replace_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
 export const starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
 export const starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
@@ -38,6 +44,7 @@ export const starpdf_set_radio: (a: number, b: bigint, c: number, d: bigint, e: 
 export const starpdf_set_text_field: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];
 export const starpdf_split_document: (a: number, b: any) => [number, number, number];
 export const starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
+export const starpdf_update_graphic: (a: number, b: any) => [number, number, number];
 export const starpdf_validate: (a: number) => [number, number, number];
 export const starpdf_version: () => [number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;

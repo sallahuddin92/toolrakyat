@@ -140,12 +140,25 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         "No active StarPDF document handle available",
       );
 
+      const multiReplaceCmd = new ReplaceTextCommand(["s1", "s2", "s3"], "Group Replacement");
+      expect(multiReplaceCmd.isMutating).toBe(true);
+      await expect(multiReplaceCmd.execute(baseContext)).rejects.toThrow(
+        "No active StarPDF document handle available",
+      );
+
       const deleteCmd = new DeleteTextCommand("span-1");
       expect(deleteCmd.isMutating).toBe(true);
       await expect(deleteCmd.execute(baseContext)).rejects.toThrow(
         "No active StarPDF document handle available",
       );
+
+      const multiDeleteCmd = new DeleteTextCommand(["s1", "s2", "s3"]);
+      expect(multiDeleteCmd.isMutating).toBe(true);
+      await expect(multiDeleteCmd.execute(baseContext)).rejects.toThrow(
+        "No active StarPDF document handle available",
+      );
     });
   });
 });
+
 

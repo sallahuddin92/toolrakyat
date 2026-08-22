@@ -56,19 +56,47 @@ describe("groupTextSpans", () => {
     expect(groups[0].refusal_reason).toBe("Specialized font encoding");
   });
 
-  it("groups contiguous sub-words into a single human text run while retaining all source spans", () => {
-    const span1 = createSpan({ text: "P", x: 50, y: 700, width: 8, span_id: "s1" });
-    const span2 = createSpan({ text: "atient", x: 58, y: 700, width: 30, span_id: "s2" });
-    const span3 = createSpan({ text: "Name", x: 92, y: 700, width: 28, span_id: "s3" });
+  it("groups contiguous intra-word fragments into an EDITABLE_ATOMIC word group", () => {
+    const span1 = createSpan({ text: "Arch", x: 50, y: 700, width: 25, span_id: "s1", font_name: "F1", is_editable: true });
+    const span2 = createSpan({ text: "itect", x: 75, y: 700, width: 25, span_id: "s2", font_name: "F1", is_editable: true });
+    const span3 = createSpan({ text: "ural", x: 100, y: 700, width: 20, span_id: "s3", font_name: "F1", is_editable: true });
 
     const groups = groupTextSpans([span1, span2, span3]);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0].text).toBe("Patient Name");
+    expect(groups[0].text).toBe("Architectural");
     expect(groups[0].sourceSpans).toHaveLength(3);
-    expect(groups[0].editability).toBe("GROUP_SELECTION_ONLY");
-    expect(groups[0].is_editable).toBe(false);
-    expect(groups[0].refusal_reason).toContain("multiple PDF text operations");
+    expect(groups[0].editability).toBe("EDITABLE_ATOMIC");
+    expect(groups[0].is_editable).toBe(true);
+    expect(groups[0].type).toBe("word");
+  });
+
+  it("separates words across spaces into independent word groups", () => {
+    const span1 = createSpan({ text: "Star", x: 50, y: 700, width: 22, span_id: "s1", font_name: "F1" });
+    const span2 = createSpan({ text: "Orion", x: 72, y: 700, width: 30, span_id: "s2", font_name: "F1" });
+    // "Renaissance" starts after a normal inter-word space (gap of 8pt > spaceWidth * 0.45)
+    const span3 = createSpan({ text: "Renaissance", x: 110, y: 700, width: 65, span_id: "s3", font_name: "F1" });
+
+    const groups = groupTextSpans([span1, span2, span3]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].text).toBe("StarOrion");
+    expect(groups[0].sourceSpans).toHaveLength(2);
+    expect(groups[0].editability).toBe("EDITABLE_ATOMIC");
+    expect(groups[1].text).toBe("Renaissance");
+    expect(groups[1].sourceSpans).toHaveLength(1);
+    expect(groups[1].editability).toBe("EDITABLE_ATOMIC");
+  });
+
+  it("safely marks mixed-font multi-span words as READ_ONLY_REFUSAL", () => {
+    const span1 = createSpan({ text: "Arch", x: 50, y: 700, width: 25, span_id: "s1", font_name: "F1", is_editable: true });
+    const span2 = createSpan({ text: "itectural", x: 75, y: 700, width: 45, span_id: "s2", font_name: "F2", is_editable: true });
+
+    const groups = groupTextSpans([span1, span2]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].text).toBe("Arch");
+    expect(groups[1].text).toBe("itectural");
   });
 
   it("does NOT group across multi-column gap", () => {
@@ -98,14 +126,14 @@ describe("groupTextSpans", () => {
   });
 
   it("does NOT group across different lines / baselines", () => {
-    const line1 = createSpan({ text: "First Line of Paragraph", x: 50, y: 700, width: 150 });
-    const line2 = createSpan({ text: "Second Line of Paragraph", x: 50, y: 680, width: 160 }); // y diff = 20 > 2.0
+    const line1 = createSpan({ text: "Line One Heading", x: 50, y: 700, width: 100, span_id: "l1" });
+    const line2 = createSpan({ text: "Line Two Subtitle", x: 50, y: 680, width: 100, span_id: "l2" });
 
     const groups = groupTextSpans([line1, line2]);
 
     expect(groups).toHaveLength(2);
-    expect(groups[0].text).toBe("First Line of Paragraph");
-    expect(groups[1].text).toBe("Second Line of Paragraph");
+    expect(groups[0].text).toBe("Line One Heading");
+    expect(groups[1].text).toBe("Line Two Subtitle");
   });
 
   it("does NOT group across different rotation angles", () => {

@@ -3255,7 +3255,164 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
     await expect(approvalSpan).toBeHidden({ timeout: 5000 });
   });
+
+  test("v0.20 Phase 3B.2: Word-Level Granularity & Single-Click Selection on Multi-Span Heading", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multispan-heading.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "multispan-heading.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Click on "Architectural" (3-fragment word)
+    const archWord = page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]');
+    await expect(archWord).toBeVisible({ timeout: 5000 });
+    await archWord.click();
+
+    // Verify contextual input has exact word "Architectural" (NOT the entire multi-line heading)
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Architectural");
+
+    // 2. Verify subsequent words in same heading can be selected independently
+    const renWord = page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]');
+    await expect(renWord).toBeVisible({ timeout: 5000 });
+    await renWord.click();
+    await expect(contextInput).toHaveValue("Renaissance");
+
+    const starWord = page.locator('[data-testid^="canvas-text-span-"][title*="StarOrion-X:"]');
+    await expect(starWord).toBeVisible({ timeout: 5000 });
+    await starWord.click();
+    await expect(contextInput).toHaveValue("StarOrion-X:");
+
+    const stateWord = page.locator('[data-testid^="canvas-text-span-"][title*="State-of-the-Art"]');
+    await expect(stateWord).toBeVisible({ timeout: 5000 });
+    await stateWord.click();
+    await expect(contextInput).toHaveValue("State-of-the-Art");
+
+    const langWord = page.locator('[data-testid^="canvas-text-span-"][title*="Language"]');
+    await expect(langWord).toBeVisible({ timeout: 5000 });
+    await langWord.click();
+    await expect(contextInput).toHaveValue("Language");
+  });
+
+
+  test("v0.20 Phase 3B.2: Atomic Multi-Span Native Text Mutation, Undo/Redo & Multi-Round Export/Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multispan-heading.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "multispan-edit-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select "Architectural" (3-span word)
+    const archWord = page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]');
+    await expect(archWord).toBeVisible({ timeout: 5000 });
+    await archWord.click();
+
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Architectural");
+
+    // 2. Mutate multi-span word to "Structural"
+    await contextInput.fill("Structural");
+    await page.locator('[data-testid="context-text-save-btn"]').click();
+
+    // Verify word mutated and original spans disappeared
+    const structWord = page.locator('[data-testid^="canvas-text-span-"][title*="Structural"]');
+    await expect(structWord).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]')).toBeHidden();
+
+    // Verify neighboring text ("StarOrion-X:" and "Renaissance") remains undisturbed
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="StarOrion-X:"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]')).toBeVisible({ timeout: 5000 });
+
+    // 3. Test Undo restores exact original multi-span text
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+
+    await undoBtn.click();
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]')).toBeVisible({ timeout: 5000 });
+    await expect(structWord).toBeHidden();
+
+    // 4. Test Redo re-applies the atomic mutation
+    await redoBtn.click();
+    await expect(structWord).toBeVisible({ timeout: 5000 });
+
+    // 5. Export editable PDF and reopen in fresh session
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("multispan-edit-test-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(0);
+
+    // 6. Reopen in fresh session
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "reopened-multispan.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Verify structural extraction
+    const reopenedStructWord = page.locator('[data-testid^="canvas-text-span-"][title*="Structural"]');
+    await expect(reopenedStructWord).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Architectural"]')).toBeHidden();
+
+    // 7. Perform a second edit round on the mutated word
+    await reopenedStructWord.click();
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Structural");
+
+    await contextInput.fill("Robust");
+    await page.locator('[data-testid="context-text-save-btn"]').click();
+
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Robust"]')).toBeVisible({ timeout: 5000 });
+  });
+
+  test("v0.20 Phase 3B.2: Multi-Span Native Text Deletion & Typing Safety", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multispan-heading.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "multispan-delete-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select multi-span word "Renaissance"
+    const renWord = page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]');
+    await expect(renWord).toBeVisible({ timeout: 5000 });
+    await renWord.click();
+
+    const deleteBtn = page.locator('[data-testid="context-text-delete-btn"]');
+    await expect(deleteBtn).toBeVisible({ timeout: 5000 });
+
+    // 2. Delete multi-span word
+    await deleteBtn.click();
+
+    // Verify deleted cleanly
+    await expect(renWord).toBeHidden({ timeout: 5000 });
+    await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
+
+    // 3. Test Undo restores it
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await undoBtn.click();
+    await expect(renWord).toBeVisible({ timeout: 5000 });
+  });
 });
+
 
 
 

@@ -40,8 +40,11 @@ export interface HumanTextGroup {
 export interface TextGroupingOptions {
   /** Maximum baseline distance difference in points to consider spans on the same line (default: 2.0) */
   maxBaselineDiff?: number;
-  /** Maximum horizontal gap multiplier of space width before breaking group (default: 1.8) */
+  /** Maximum horizontal gap multiplier of space width before breaking word (default: 0.45) */
   maxHorizontalGapMultiplier?: number;
   /** Maximum font size difference in points (default: 1.5) */
   maxFontSizeDiff?: number;
+  /** Target grouping granularity (default: 'word') */
+  granularity?: "word" | "run";
 }
+
