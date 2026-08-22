@@ -351,6 +351,7 @@ export type StarPdfWorkerRequest =
   | { type: "enumerateImages"; id: string; handle: number; pageIndex: number }
   | { type: "replaceImage"; id: string; handle: number; pageIndex: number; imageId: string; newImageBytes: Uint8Array; cloneIfShared?: boolean }
   | { type: "addImage"; id: string; handle: number; pageIndex: number; imageBytes: Uint8Array; x: number; y: number; width: number; height: number }
+  | { type: "updateImage"; id: string; handle: number; pageIndex: number; imageId: string; x: number; y: number; width: number; height: number; cloneIfShared?: boolean }
   | { type: "removeImage"; id: string; handle: number; pageIndex: number; imageId: string }
   | { type: "enumerateGraphics"; id: string; handle: number; pageIndex: number }
   | { type: "updateGraphic"; id: string; handle: number; input: StarPdfUpdateVectorGraphicInput }
@@ -401,8 +402,10 @@ export type StarPdfWorkerResponse =
   | { type: "enumerateImages"; id: string; success: true; images: StarPdfImageInfo[] }
   | { type: "replaceImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "addImage"; id: string; success: true; result: StarPdfImageMutationResult }
+  | { type: "updateImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "removeImage"; id: string; success: true; result: StarPdfImageMutationResult }
   | { type: "enumerateGraphics"; id: string; success: true; graphics: StarPdfVectorGraphicInfo[] }
+
   | { type: "updateGraphic"; id: string; success: true; result: StarPdfVectorMutationResult }
   | { type: "addRectangle"; id: string; success: true; result: StarPdfVectorMutationResult }
   | { type: "addLine"; id: string; success: true; result: StarPdfVectorMutationResult }

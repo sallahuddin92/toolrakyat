@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+
 import type {
   StarPdfImageInfo,
   StarPdfTextSpan,
@@ -9,17 +10,18 @@ import type {
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import {
   type SmartPdfSelection,
+  type PixelRect,
+  type PdfRect,
   convertPdfRectToPixels,
   convertPixelsToPdfPoint,
+  convertPixelsToPdfRect,
+  convertPdfPointToPixels,
 } from "@/lib/pdf/selection";
 import { cn } from "@/lib/utils";
 import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
 import { Check, X } from "lucide-react";
 import { computeAutoCenteredMark, type FlatFormCandidate } from "@/lib/pdf/detection";
 import { groupTextSpans } from "@/lib/pdf/grouping";
-
-
-
 
 interface PdfInteractiveOverlayProps {
   pageWidth: number;
@@ -47,7 +49,26 @@ interface PdfInteractiveOverlayProps {
     inkList: [number, number][][],
     rect: [number, number, number, number],
   ) => void;
+  onTransformImage?: (pageIndex: number, imageId: string, pdfRect: PdfRect) => void;
+  onTransformVector?: (
+    pageIndex: number,
+    graphicId: string,
+    pdfRect: PdfRect,
+    linePoints?: { x1: number; y1: number; x2: number; y2: number },
+  ) => void;
 }
+
+interface DragTransformState {
+  type: "move" | "resize" | "endpoint1" | "endpoint2";
+  handle?: "nw" | "ne" | "se" | "sw";
+  startPointerX: number;
+  startPointerY: number;
+  startRect: PixelRect;
+  currentRect: PixelRect;
+  startLine?: { x1: number; y1: number; x2: number; y2: number };
+  currentLine?: { x1: number; y1: number; x2: number; y2: number };
+}
+
 
 interface InlineTextState {
   pixelX: number;
@@ -85,7 +106,10 @@ export function PdfInteractiveOverlay({
   onPlaceCross,
   onPlaceSignature,
   onPlaceDrawing,
+  onTransformImage,
+  onTransformVector,
 }: PdfInteractiveOverlayProps) {
+
   const pageDims = useMemo(() => ({ width: pageWidth, height: pageHeight, rotation }), [pageWidth, pageHeight, rotation]);
   const pageIdx = pageNumber - 1;
   const humanTextGroups = useMemo(() => groupTextSpans(textSpans), [textSpans]);
@@ -103,8 +127,195 @@ export function PdfInteractiveOverlay({
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<{ x: number; y: number }[]>([]);
 
+  // Direct Manipulation Drag/Transform State
+  const [dragTransform, setDragTransform] = useState<DragTransformState | null>(null);
+
+  const startDrag = useCallback(
+    (
+      e: React.PointerEvent,
+      type: "move" | "resize" | "endpoint1" | "endpoint2",
+      handle?: "nw" | "ne" | "se" | "sw",
+      startLine?: { x1: number; y1: number; x2: number; y2: number },
+    ) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!selectedItem || !selectedItem.bounds) return;
+
+      const startRect = selectedItem.bounds;
+      setDragTransform({
+        type,
+        handle,
+        startPointerX: e.clientX,
+        startPointerY: e.clientY,
+        startRect: { ...startRect },
+        currentRect: { ...startRect },
+        startLine: startLine ? { ...startLine } : undefined,
+        currentLine: startLine ? { ...startLine } : undefined,
+      });
+    },
+    [selectedItem],
+  );
+
+  useEffect(() => {
+    if (!dragTransform) return;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const deltaX = e.clientX - dragTransform.startPointerX;
+      const deltaY = e.clientY - dragTransform.startPointerY;
+      const { startRect, type, handle, startLine } = dragTransform;
+
+      if (type === "move") {
+        const currentRect: PixelRect = {
+          left: Math.max(0, startRect.left + deltaX),
+          top: Math.max(0, startRect.top + deltaY),
+          width: startRect.width,
+          height: startRect.height,
+        };
+        let currentLine = undefined;
+        if (startLine) {
+          currentLine = {
+            x1: startLine.x1 + deltaX,
+            y1: startLine.y1 + deltaY,
+            x2: startLine.x2 + deltaX,
+            y2: startLine.y2 + deltaY,
+          };
+        }
+        setDragTransform((prev) => (prev ? { ...prev, currentRect, currentLine } : null));
+      } else if (type === "resize") {
+        let left = startRect.left;
+        let top = startRect.top;
+        let width = startRect.width;
+        let height = startRect.height;
+
+        if (handle === "se") {
+          width = Math.max(10, startRect.width + deltaX);
+          height = Math.max(10, startRect.height + deltaY);
+        } else if (handle === "sw") {
+          const newW = Math.max(10, startRect.width - deltaX);
+          left = startRect.left + (startRect.width - newW);
+          width = newW;
+          height = Math.max(10, startRect.height + deltaY);
+        } else if (handle === "ne") {
+          width = Math.max(10, startRect.width + deltaX);
+          const newH = Math.max(10, startRect.height - deltaY);
+          top = startRect.top + (startRect.height - newH);
+          height = newH;
+        } else if (handle === "nw") {
+          const newW = Math.max(10, startRect.width - deltaX);
+          const newH = Math.max(10, startRect.height - deltaY);
+          left = startRect.left + (startRect.width - newW);
+          top = startRect.top + (startRect.height - newH);
+          width = newW;
+          height = newH;
+        }
+
+        setDragTransform((prev) =>
+          prev ? { ...prev, currentRect: { left, top, width, height } } : null,
+        );
+      } else if (type === "endpoint1" && startLine) {
+        setDragTransform((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentLine: {
+                  x1: startLine.x1 + deltaX,
+                  y1: startLine.y1 + deltaY,
+                  x2: startLine.x2,
+                  y2: startLine.y2,
+                },
+              }
+            : null,
+        );
+      } else if (type === "endpoint2" && startLine) {
+        setDragTransform((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentLine: {
+                  x1: startLine.x1,
+                  y1: startLine.y1,
+                  x2: startLine.x2 + deltaX,
+                  y2: startLine.y2 + deltaY,
+                },
+              }
+            : null,
+        );
+      }
+    };
+
+    const onPointerUp = () => {
+      const { startRect, currentRect, currentLine } = dragTransform;
+      setDragTransform(null);
+
+      const deltaX = Math.abs(currentRect.left - startRect.left);
+      const deltaY = Math.abs(currentRect.top - startRect.top);
+      const deltaW = Math.abs(currentRect.width - startRect.width);
+      const deltaH = Math.abs(currentRect.height - startRect.height);
+
+      if (deltaX <= 1 && deltaY <= 1 && deltaW <= 1 && deltaH <= 1 && !currentLine) {
+        return;
+      }
+
+      if (selectedItem?.type === "image") {
+        const newPdfRect = convertPixelsToPdfRect(currentRect, pageDims, scale, rotation);
+        onTransformImage?.(pageIdx, selectedItem.id, newPdfRect);
+      } else if (selectedItem?.type === "vector") {
+        if (currentLine) {
+          const pt1 = convertPixelsToPdfPoint(
+            currentLine.x1,
+            currentLine.y1,
+            pageDims,
+            scale,
+            rotation,
+          );
+          const pt2 = convertPixelsToPdfPoint(
+            currentLine.x2,
+            currentLine.y2,
+            pageDims,
+            scale,
+            rotation,
+          );
+          onTransformVector?.(
+            pageIdx,
+            selectedItem.id,
+            { x: pt1.x, y: pt1.y, width: 0, height: 0 },
+            { x1: pt1.x, y1: pt1.y, x2: pt2.x, y2: pt2.y },
+          );
+        } else {
+          const newPdfRect = convertPixelsToPdfRect(currentRect, pageDims, scale, rotation);
+          onTransformVector?.(pageIdx, selectedItem.id, newPdfRect);
+        }
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDragTransform(null);
+      }
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [
+    dragTransform,
+    selectedItem,
+    pageDims,
+    scale,
+    rotation,
+    pageIdx,
+    onTransformImage,
+    onTransformVector,
+  ]);
+
 
   const isFillAndSign = mode === "FILL_AND_SIGN";
+
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -263,10 +474,11 @@ export function PdfInteractiveOverlay({
       {/* 1. VECTOR GRAPHICS (Z-10) */}
       {!isFillAndSign &&
         graphics.map((g) => {
-
           const isSelected = selectedItem?.type === "vector" && selectedItem.id === g.graphic_id;
-          const [x, y, w, h] = g.bounds || [0, 0, 100, 100];
-          const pdfRect = { x, y, width: w, height: h };
+          const [minX, minY, maxX, maxY] = g.bounds || [0, 0, 100, 100];
+          const width = Math.max(1, maxX - minX);
+          const height = Math.max(1, maxY - minY);
+          const pdfRect = { x: minX, y: minY, width, height };
           const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
           return (
@@ -298,6 +510,7 @@ export function PdfInteractiveOverlay({
               title={`Vector shape (${g.graphic_type || "Path"}) - Click to edit color & width`}
               data-testid={`canvas-graphic-${g.graphic_id}`}
             />
+
           );
         })}
 
@@ -305,8 +518,10 @@ export function PdfInteractiveOverlay({
       {!isFillAndSign &&
         images.map((img) => {
           const isSelected = selectedItem?.type === "image" && selectedItem.id === img.image_id;
-          const [x, y, w, h] = img.rect || [0, 0, img.width, img.height];
-          const pdfRect = { x, y, width: w || img.width, height: h || img.height };
+          const [minX, minY, maxX, maxY] = img.rect || [0, 0, img.width, img.height];
+          const width = maxX > minX ? maxX - minX : img.width;
+          const height = maxY > minY ? maxY - minY : img.height;
+          const pdfRect = { x: minX, y: minY, width, height };
           const rect = convertPdfRectToPixels(pdfRect, pageDims, scale, rotation);
 
           return (
@@ -335,12 +550,12 @@ export function PdfInteractiveOverlay({
                   ? "ring-2 ring-emerald-500 bg-emerald-400/20 shadow-xs z-40"
                   : "hover:bg-emerald-400/15 hover:ring-1 hover:ring-emerald-300/60 z-12",
               )}
-
               title={`Image (${Math.round(img.width)}×${Math.round(img.height)} pt) - Click to replace or remove`}
               data-testid={`canvas-image-${img.image_id}`}
             />
           );
         })}
+
 
       {/* 3. HUMAN-SCALE TEXT GROUPS (Z-30) */}
       {!isFillAndSign &&
@@ -666,7 +881,158 @@ export function PdfInteractiveOverlay({
           />
         </svg>
       )}
+
+      {/* DIRECT MANIPULATION TRANSFORM BOX FOR SELECTED IMAGE / VECTOR */}
+      {!isFillAndSign &&
+        selectedItem &&
+        (selectedItem.type === "image" || selectedItem.type === "vector") &&
+        selectedItem.pageIndex === pageIdx &&
+        (() => {
+          const isVectorLine =
+            selectedItem.type === "vector" &&
+            (selectedItem.data as StarPdfVectorGraphicInfo)?.graphic_type === "Line";
+
+          if (isVectorLine) {
+            const g = selectedItem.data as StarPdfVectorGraphicInfo;
+            const [lx1, ly1, lx2, ly2] = [
+              g.line_x1 ?? g.bounds[0],
+              g.line_y1 ?? g.bounds[1],
+              g.line_x2 ?? g.bounds[0] + g.bounds[2],
+              g.line_y2 ?? g.bounds[1] + g.bounds[3],
+            ];
+            const p1 = convertPdfPointToPixels(lx1, ly1, pageDims, scale, rotation);
+            const p2 = convertPdfPointToPixels(lx2, ly2, pageDims, scale, rotation);
+            const curP1 = dragTransform?.currentLine
+              ? { x: dragTransform.currentLine.x1, y: dragTransform.currentLine.y1 }
+              : p1;
+            const curP2 = dragTransform?.currentLine
+              ? { x: dragTransform.currentLine.x2, y: dragTransform.currentLine.y2 }
+              : p2;
+
+            return (
+              <div className="absolute inset-0 pointer-events-none z-50">
+                {/* SVG line preview during drag */}
+                {dragTransform?.currentLine && (
+                  <svg className="absolute inset-0 pointer-events-none w-full h-full">
+                    <line
+                      x1={curP1.x}
+                      y1={curP1.y}
+                      x2={curP2.x}
+                      y2={curP2.y}
+                      stroke="#4f46e5"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                    />
+                  </svg>
+                )}
+                {/* Endpoint 1 handle */}
+                <div
+                  onPointerDown={(e) =>
+                    startDrag(e, "endpoint1", undefined, {
+                      x1: p1.x,
+                      y1: p1.y,
+                      x2: p2.x,
+                      y2: p2.y,
+                    })
+                  }
+                  style={{ left: `${curP1.x - 6}px`, top: `${curP1.y - 6}px` }}
+                  className="absolute size-3 bg-white border-2 border-indigo-600 rounded-full pointer-events-auto cursor-crosshair shadow-sm hover:scale-125 transition-transform"
+                  title="Drag start endpoint"
+                  data-testid="vector-line-endpoint-1"
+                />
+                {/* Endpoint 2 handle */}
+                <div
+                  onPointerDown={(e) =>
+                    startDrag(e, "endpoint2", undefined, {
+                      x1: p1.x,
+                      y1: p1.y,
+                      x2: p2.x,
+                      y2: p2.y,
+                    })
+                  }
+                  style={{ left: `${curP2.x - 6}px`, top: `${curP2.y - 6}px` }}
+                  className="absolute size-3 bg-white border-2 border-indigo-600 rounded-full pointer-events-auto cursor-crosshair shadow-sm hover:scale-125 transition-transform"
+                  title="Drag end endpoint"
+                  data-testid="vector-line-endpoint-2"
+                />
+              </div>
+            );
+          }
+
+          const activeRect = dragTransform?.currentRect || selectedItem.bounds;
+          if (!activeRect) return null;
+
+          const ringColor =
+            selectedItem.type === "image"
+              ? "ring-emerald-500 bg-emerald-400/10"
+              : "ring-indigo-500 bg-indigo-400/10";
+          const borderColor =
+            selectedItem.type === "image" ? "border-emerald-600" : "border-indigo-600";
+
+          return (
+            <div
+              style={{
+                left: `${activeRect.left}px`,
+                top: `${activeRect.top}px`,
+                width: `${activeRect.width}px`,
+                height: `${activeRect.height}px`,
+              }}
+              className={cn(
+                "absolute pointer-events-auto ring-2 z-50 rounded-xs shadow-xs select-none",
+                ringColor,
+              )}
+              data-testid="direct-manipulation-transform-box"
+            >
+              {/* Move handle (interior area) */}
+              <div
+                onPointerDown={(e) => startDrag(e, "move")}
+                className="absolute inset-0 cursor-move"
+                title="Drag to move"
+                data-testid="direct-manipulation-move-handle"
+              />
+              {/* Corner resize handles */}
+              <div
+                onPointerDown={(e) => startDrag(e, "resize", "nw")}
+                className={cn(
+                  "absolute -top-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
+                  borderColor,
+                )}
+                title="Resize top-left"
+                data-testid="direct-manipulation-handle-nw"
+              />
+              <div
+                onPointerDown={(e) => startDrag(e, "resize", "ne")}
+                className={cn(
+                  "absolute -top-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
+                  borderColor,
+                )}
+                title="Resize top-right"
+                data-testid="direct-manipulation-handle-ne"
+              />
+              <div
+                onPointerDown={(e) => startDrag(e, "resize", "se")}
+                className={cn(
+                  "absolute -bottom-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
+                  borderColor,
+                )}
+                title="Resize bottom-right"
+                data-testid="direct-manipulation-handle-se"
+              />
+              <div
+                onPointerDown={(e) => startDrag(e, "resize", "sw")}
+                className={cn(
+                  "absolute -bottom-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
+                  borderColor,
+                )}
+                title="Resize bottom-left"
+                data-testid="direct-manipulation-handle-sw"
+              />
+            </div>
+          );
+        })()}
+
     </div>
   );
 }
+
 

@@ -143,3 +143,53 @@ export function convertPdfPointToPixels(
   };
 }
 
+/**
+ * Converts a screen pixel bounding box (origin top-left of page canvas)
+ * to standard PDF user-space bounding box (origin bottom-left).
+ */
+export function convertPixelsToPdfRect(
+  pixelRect: PixelRect,
+  page: PageDimensions,
+  scale: number,
+  rotation = 0,
+): PdfRect {
+  const rot = ((rotation % 360) + 360) % 360;
+  const unscaledLeft = pixelRect.left / Math.max(0.01, scale);
+  const unscaledTop = pixelRect.top / Math.max(0.01, scale);
+  const unscaledW = pixelRect.width / Math.max(0.01, scale);
+  const unscaledH = pixelRect.height / Math.max(0.01, scale);
+
+  if (rot === 90) {
+    return {
+      x: unscaledTop,
+      y: unscaledLeft,
+      width: unscaledH,
+      height: unscaledW,
+    };
+  }
+  if (rot === 180) {
+    return {
+      x: page.width - (unscaledLeft + unscaledW),
+      y: unscaledTop,
+      width: unscaledW,
+      height: unscaledH,
+    };
+  }
+  if (rot === 270) {
+    return {
+      x: page.width - (unscaledTop + unscaledH),
+      y: page.height - (unscaledLeft + unscaledW),
+      width: unscaledH,
+      height: unscaledW,
+    };
+  }
+
+  return {
+    x: unscaledLeft,
+    y: Math.max(0, page.height - (unscaledTop + unscaledH)),
+    width: unscaledW,
+    height: unscaledH,
+  };
+}
+
+

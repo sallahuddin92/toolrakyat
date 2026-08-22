@@ -89,6 +89,8 @@ export function starpdf_update_annotation(handle: number, obj_num: bigint, obj_g
 
 export function starpdf_update_graphic(handle: number, input_val: any): any;
 
+export function starpdf_update_image(handle: number, page_index: number, image_id: string, new_x: number, new_y: number, new_width: number, new_height: number, clone_if_shared: boolean): any;
+
 export function starpdf_validate(handle: number): boolean;
 
 export function starpdf_version(): string;
@@ -141,6 +143,7 @@ export interface InitOutput {
     readonly starpdf_split_document: (a: number, b: any) => [number, number, number];
     readonly starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
     readonly starpdf_update_graphic: (a: number, b: any) => [number, number, number];
+    readonly starpdf_update_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly starpdf_validate: (a: number) => [number, number, number];
     readonly starpdf_version: () => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;

@@ -457,6 +457,186 @@ impl ImageEditor {
         })
     }
 
+    /// Moves and/or resizes an existing image occurrence on a page content stream.
+    pub fn update_image(
+        store: &mut ObjectStore,
+        page_refs: &[ObjectRef],
+        next_alloc_obj_num: &mut u64,
+        spec: &crate::image::types::UpdateImageSpec,
+    ) -> PdfResult<MutationPlan> {
+        let target_image = {
+            let mut extractor = ImageExtractor::from_store(store, page_refs);
+            let images = extractor.extract_page_images(spec.page_index)?;
+
+            images
+                .into_iter()
+                .find(|img| img.image_id == spec.image_id)
+                .ok_or_else(|| {
+                    PdfError::ImageNotFound(format!(
+                        "Image with ID '{}' not found on page {}",
+                        spec.image_id, spec.page_index
+                    ))
+                })?
+        };
+
+        if target_image.is_nested_form {
+            return Err(PdfError::NestedFormXObjectRefusal(format!(
+                "Image '{}' is nested inside a Form XObject. Bounded policy refuses in-place mutation of nested Form XObjects.",
+                spec.image_id
+            )));
+        }
+
+        let page_ref = page_refs[spec.page_index];
+        let page_obj = store.resolve(page_ref)?.clone();
+        let mut page_dict = page_obj
+            .as_dict()
+            .cloned()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "dictionary",
+                actual: page_obj.type_name(),
+            })?;
+
+        let contents_ref =
+            Self::get_page_content_stream_ref(&page_dict, target_image.stream_index)?;
+
+        let mut stream_obj = store
+            .resolve(contents_ref)?
+            .as_stream()
+            .cloned()
+            .ok_or_else(|| {
+                PdfError::InvalidObject("Resolved object is not a stream".to_string())
+            })?;
+
+        let decoded = FlateDecoder::decode(&stream_obj.data, &DecompressLimits::default())
+            .unwrap_or_else(|_| stream_obj.data.clone());
+
+        let mut parser = ContentParser::from_bytes(&decoded);
+        let instructions = parser.parse_instructions()?;
+
+        let mut updated_instructions = Vec::with_capacity(instructions.len() + 4);
+        let target_idx = target_image.instruction_index;
+
+        let is_isolated_block = target_idx >= 2
+            && target_idx + 1 < instructions.len()
+            && instructions[target_idx - 2].operator == ContentOperator::Q
+            && instructions[target_idx - 1].operator == ContentOperator::Cm
+            && instructions[target_idx].operator == ContentOperator::Do
+            && instructions[target_idx + 1].operator == ContentOperator::QEnd;
+
+        for (idx, instr) in instructions.into_iter().enumerate() {
+            if is_isolated_block {
+                if idx == target_idx - 2 {
+                    updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::Q));
+                } else if idx == target_idx - 1 {
+                    updated_instructions.push(ContentInstruction::new(
+                        vec![
+                            ContentOperand::Real(spec.new_width),
+                            ContentOperand::Real(0.0),
+                            ContentOperand::Real(0.0),
+                            ContentOperand::Real(spec.new_height),
+                            ContentOperand::Real(spec.new_x),
+                            ContentOperand::Real(spec.new_y),
+                        ],
+                        ContentOperator::Cm,
+                    ));
+                } else if idx == target_idx {
+                    updated_instructions.push(instr);
+                } else if idx == target_idx + 1 {
+                    updated_instructions
+                        .push(ContentInstruction::new(vec![], ContentOperator::QEnd));
+                } else {
+                    updated_instructions.push(instr);
+                }
+            } else if idx == target_idx {
+                updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::Q));
+                updated_instructions.push(ContentInstruction::new(
+                    vec![
+                        ContentOperand::Real(spec.new_width),
+                        ContentOperand::Real(0.0),
+                        ContentOperand::Real(0.0),
+                        ContentOperand::Real(spec.new_height),
+                        ContentOperand::Real(spec.new_x),
+                        ContentOperand::Real(spec.new_y),
+                    ],
+                    ContentOperator::Cm,
+                ));
+                updated_instructions.push(instr);
+                updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::QEnd));
+            } else {
+                updated_instructions.push(instr);
+            }
+        }
+
+        let mut new_stream_bytes = Vec::new();
+        for instr in updated_instructions {
+            Self::serialize_instruction(&mut new_stream_bytes, &instr)?;
+        }
+
+        stream_obj.data = new_stream_bytes;
+        stream_obj.stream_length = stream_obj.data.len();
+        stream_obj.dict.remove("Filter");
+        stream_obj.dict.insert(
+            "Length".to_string(),
+            PdfObject::Integer(stream_obj.data.len() as i64),
+        );
+
+        let mut modified_objects = BTreeMap::new();
+
+        // Check if stream is shared with other pages
+        let mut count_referencing_pages = 0;
+        for &other_page_ref in page_refs {
+            if let Ok(other_obj) = store.resolve(other_page_ref) {
+                if let Some(other_dict) = other_obj.as_dict() {
+                    if let Some(c) = other_dict.get("Contents") {
+                        if let Some(cr) = c.as_reference() {
+                            if cr == contents_ref {
+                                count_referencing_pages += 1;
+                            }
+                        } else if let Some(arr) = c.as_array() {
+                            for item in arr {
+                                if item.as_reference() == Some(contents_ref) {
+                                    count_referencing_pages += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if count_referencing_pages > 1 {
+            let new_stream_num = *next_alloc_obj_num;
+            *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
+            let new_stream_ref = ObjectRef::new(new_stream_num, 0);
+
+            modified_objects.insert(new_stream_ref, PdfObject::Stream(stream_obj));
+
+            if let Some(contents_entry) = page_dict.get_mut("Contents") {
+                match contents_entry {
+                    PdfObject::Reference(_) => {
+                        *contents_entry = PdfObject::Reference(new_stream_ref);
+                    }
+                    PdfObject::Array(arr) => {
+                        if target_image.stream_index < arr.len() {
+                            arr[target_image.stream_index] = PdfObject::Reference(new_stream_ref);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            modified_objects.insert(page_ref, PdfObject::Dictionary(page_dict));
+        } else {
+            modified_objects.insert(contents_ref, PdfObject::Stream(stream_obj));
+        }
+
+        Ok(MutationPlan {
+            modified_objects,
+            appearance_status: AppearanceStatus::ValueUpdated,
+            glyph_mapping_quality: None,
+            layout_policy_result: None,
+        })
+    }
+
     /// Resolves the specific content stream reference for a given stream index on a page.
     fn get_page_content_stream_ref(
         page_dict: &BTreeMap<String, PdfObject>,

@@ -6,4 +6,6 @@ pub mod types;
 pub use editor::ImageEditor;
 pub use extractor::{ImageExtractor, Matrix2D};
 pub use jpeg::{parse_jpeg_info, JpegInfo};
-pub use types::{AddImageSpec, ImageFormat, ImageXObjectInfo, RemoveImageSpec, ReplaceImageSpec};
+pub use types::{
+    AddImageSpec, ImageFormat, ImageXObjectInfo, RemoveImageSpec, ReplaceImageSpec, UpdateImageSpec,
+};

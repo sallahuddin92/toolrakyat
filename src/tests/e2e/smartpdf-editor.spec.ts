@@ -3454,7 +3454,131 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(Math.abs(newLeft - origLeft)).toBeLessThanOrEqual(0.01);
     expect(Math.abs(newTop - origTop)).toBeLessThanOrEqual(0.01);
   });
+
+  test("v0.21 Phase 4: Direct Image Manipulation (Move & Resize) with Shared XObject Paint Isolation", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/image-shared-xobject.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "image-shared-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Find the two image occurrences
+    const images = page.locator('[data-testid^="canvas-image-"]');
+    await expect(images).toHaveCount(2, { timeout: 5000 });
+
+    const img1 = images.nth(0);
+    const img2 = images.nth(1);
+
+    const img2StyleBefore = await img2.getAttribute("style");
+    expect(img2StyleBefore).not.toBeNull();
+
+    // 2. Click img1 to select it
+    await img1.click();
+    const transformBox = page.locator('[data-testid="direct-manipulation-transform-box"]');
+    await expect(transformBox).toBeVisible({ timeout: 5000 });
+
+    // 3. Drag move handle
+    const moveHandle = page.locator('[data-testid="direct-manipulation-move-handle"]');
+    const moveBox = await moveHandle.boundingBox();
+    expect(moveBox).not.toBeNull();
+
+    await page.mouse.move(moveBox!.x + moveBox!.width / 2, moveBox!.y + moveBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(moveBox!.x + moveBox!.width / 2 + 50, moveBox!.y + moveBox!.height / 2 + 50, { steps: 5 });
+    await page.mouse.up();
+
+    // 4. Verify img1 moved, and img2 remained unchanged (Shared XObject isolation)
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+    const img2StyleAfter = await img2.getAttribute("style");
+    expect(img2StyleAfter).toBe(img2StyleBefore);
+
+    // 5. Test Undo restores img1
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await undoBtn.click();
+    await page.waitForTimeout(500);
+
+    // 6. Test Corner Resize on img1
+    await img1.click();
+    const handleSe = page.locator('[data-testid="direct-manipulation-handle-se"]');
+    await expect(handleSe).toBeVisible({ timeout: 5000 });
+    const seBox = await handleSe.boundingBox();
+    expect(seBox).not.toBeNull();
+
+    await page.mouse.move(seBox!.x + seBox!.width / 2, seBox!.y + seBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(seBox!.x + seBox!.width / 2 + 40, seBox!.y + seBox!.height / 2 + 40, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("v0.21 Phase 4: Direct Vector Manipulation (Rectangle Resize, Color Styling & Line Endpoint Edit)", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/vector-primitives.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "vector-primitives-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select Rectangle Vector Graphic
+    const vectors = page.locator('[data-testid^="canvas-graphic-"]');
+    await expect(vectors).toHaveCount(2, { timeout: 5000 });
+
+
+    const rectVector = vectors.nth(0);
+    await rectVector.click();
+
+    // 2. Verify contextual toolbar has vector controls (stroke, fill, width)
+    const strokeInput = page.locator('[data-testid="context-vector-stroke-color"]');
+    await expect(strokeInput).toBeVisible({ timeout: 5000 });
+    const fillInput = page.locator('[data-testid="context-vector-fill-color"]');
+    await expect(fillInput).toBeVisible({ timeout: 5000 });
+
+    // 3. Resize rectangle via direct manipulation corner handle
+    const handleSe = page.locator('[data-testid="direct-manipulation-handle-se"]');
+    await expect(handleSe).toBeVisible({ timeout: 5000 });
+    const seBox = await handleSe.boundingBox();
+    expect(seBox).not.toBeNull();
+
+    await page.mouse.move(seBox!.x + seBox!.width / 2, seBox!.y + seBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(seBox!.x + seBox!.width / 2 + 30, seBox!.y + seBox!.height / 2 + 20, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+    // 4. Select Line Vector Graphic
+    const lineVector = vectors.nth(1);
+    await lineVector.click();
+
+    // 5. Verify line endpoint handles are visible
+    const ep1 = page.locator('[data-testid="vector-line-endpoint-1"]');
+    const ep2 = page.locator('[data-testid="vector-line-endpoint-2"]');
+    await expect(ep1).toBeVisible({ timeout: 5000 });
+    await expect(ep2).toBeVisible({ timeout: 5000 });
+
+    // 6. Drag endpoint 2 to reposition
+    const ep2Box = await ep2.boundingBox();
+    expect(ep2Box).not.toBeNull();
+
+    await page.mouse.move(ep2Box!.x + ep2Box!.width / 2, ep2Box!.y + ep2Box!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(ep2Box!.x + ep2Box!.width / 2 + 40, ep2Box!.y + ep2Box!.height / 2 - 30, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
 });
+
 
 
 

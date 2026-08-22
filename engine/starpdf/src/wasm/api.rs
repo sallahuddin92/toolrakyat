@@ -996,6 +996,44 @@ pub fn starpdf_add_image(
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
+pub fn starpdf_update_image(
+    handle: u32,
+    page_index: u32,
+    image_id: &str,
+    new_x: f64,
+    new_y: f64,
+    new_width: f64,
+    new_height: f64,
+    clone_if_shared: bool,
+) -> Result<JsValue, JsValue> {
+    let mut mod_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let spec = crate::image::UpdateImageSpec {
+                page_index: page_index as usize,
+                image_id: image_id.to_string(),
+                new_x,
+                new_y,
+                new_width,
+                new_height,
+                clone_if_shared,
+            };
+            let plan = doc.update_image(&spec)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmImageMutationResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
 pub fn starpdf_remove_image(
     handle: u32,
     page_index: u32,
@@ -1018,6 +1056,7 @@ pub fn starpdf_remove_image(
         success: true,
         modified_object_count: mod_count,
     };
+
     serde_wasm_bindgen::to_value(&dto)
         .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
 }

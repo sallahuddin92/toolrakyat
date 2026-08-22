@@ -297,8 +297,10 @@ pub struct WasmUpdateVectorGraphicInput {
     pub line_width: Option<f64>,
     pub is_stroked: Option<bool>,
     pub is_filled: Option<bool>,
+    #[serde(default)]
     pub clone_if_shared: bool,
 }
+
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]

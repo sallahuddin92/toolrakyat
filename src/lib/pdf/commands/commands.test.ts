@@ -158,7 +158,70 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         "No active StarPDF document handle available",
       );
     });
+
+    it("Image and Vector direct manipulation commands declare mutating flag and execute through handle", async () => {
+      const { UpdateImageCommand } = await import("./image-commands");
+      const { AddRectangleCommand, AddLineCommand, UpdateVectorCommand } = await import(
+        "./vector-commands"
+      );
+
+      const updateImg = new UpdateImageCommand("img-1", 100, 200, 150, 120);
+      expect(updateImg.isMutating).toBe(true);
+
+      const addRect = new AddRectangleCommand(0, 50, 60, 200, 100);
+      expect(addRect.isMutating).toBe(true);
+
+      const addLine = new AddLineCommand(0, 10, 20, 110, 120);
+      expect(addLine.isMutating).toBe(true);
+
+      const updateVec = new UpdateVectorCommand({ page_index: 0, graphic_id: "g1", rect_w: 180 });
+      expect(updateVec.isMutating).toBe(true);
+    });
+
+    it("UpdateVectorCommand mutates vector shape in real document", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const { StarPdfClient } = await import("../starpdf-client");
+      const { UpdateVectorCommand } = await import("./vector-commands");
+
+      const fixturePath = path.resolve(process.cwd(), "test-assets/vector-primitives.pdf");
+      const bytes = fs.readFileSync(fixturePath);
+      const starDoc = await StarPdfClient.open(bytes);
+
+      const graphics = await starDoc.enumerateGraphics(0);
+      expect(graphics.length).toBe(2);
+
+      const rectGraphic = graphics[0];
+      const cmd = new UpdateVectorCommand({
+        page_index: 0,
+        graphic_id: rectGraphic.graphic_id,
+        rect_x: 120,
+        rect_y: 520,
+        rect_w: 180,
+        rect_h: 90,
+      });
+
+      const res = await cmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: bytes,
+      });
+
+
+
+      expect(res.bytes).toBeDefined();
+      expect(res.bytes!.byteLength).toBeGreaterThan(0);
+
+      // Reopen and check
+      const reopened = await StarPdfClient.open(res.bytes!);
+      const reGraphics = await reopened.enumerateGraphics(0);
+      expect(reGraphics[0].bounds).toBeDefined();
+      await starDoc.close();
+      await reopened.close();
+    });
   });
+
 });
+
 
 

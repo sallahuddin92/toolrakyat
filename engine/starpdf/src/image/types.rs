@@ -84,3 +84,15 @@ pub struct RemoveImageSpec {
     pub page_index: usize,
     pub image_id: String,
 }
+
+/// Parameters for moving and/or resizing an existing image on a page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateImageSpec {
+    pub page_index: usize,
+    pub image_id: String,
+    pub new_x: f64,
+    pub new_y: f64,
+    pub new_width: f64,
+    pub new_height: f64,
+    pub clone_if_shared: bool,
+}

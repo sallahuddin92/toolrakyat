@@ -39,8 +39,9 @@ import {
   ReplaceTextCommand,
   DeleteTextCommand,
   ReplaceImageCommand,
-
+  UpdateImageCommand,
   RemoveImageCommand,
+
   AddImageCommand,
   UpdateVectorCommand,
   DeleteVectorCommand,
@@ -688,12 +689,63 @@ export function SmartPdfEditor() {
     [executeCommand],
   );
 
+  const handleTransformImage = useCallback(
+    async (pageIndex: number, imageId: string, pdfRect: import("@/lib/pdf/selection").PdfRect) => {
+      await executeCommand(
+        new UpdateImageCommand(
+          imageId,
+          pdfRect.x,
+          pdfRect.y,
+          pdfRect.width,
+          pdfRect.height,
+          pageIndex,
+        ),
+      );
+    },
+    [executeCommand],
+  );
+
+  const handleTransformVector = useCallback(
+    async (
+      pageIndex: number,
+      graphicId: string,
+      pdfRect: import("@/lib/pdf/selection").PdfRect,
+      linePoints?: { x1: number; y1: number; x2: number; y2: number },
+    ) => {
+      if (linePoints) {
+        await executeCommand(
+          new UpdateVectorCommand({
+            page_index: pageIndex,
+            graphic_id: graphicId,
+            line_x1: linePoints.x1,
+            line_y1: linePoints.y1,
+            line_x2: linePoints.x2,
+            line_y2: linePoints.y2,
+          }),
+        );
+      } else {
+        await executeCommand(
+          new UpdateVectorCommand({
+            page_index: pageIndex,
+            graphic_id: graphicId,
+            rect_x: pdfRect.x,
+            rect_y: pdfRect.y,
+            rect_w: pdfRect.width,
+            rect_h: pdfRect.height,
+          }),
+        );
+      }
+    },
+    [executeCommand],
+  );
+
   const handleDeleteAnnotation = useCallback(
     async (annotId: string) => {
       await executeCommand(new DeleteAnnotationCommand(currentPage - 1, annotId));
     },
     [currentPage, executeCommand],
   );
+
 
   const handleFormFieldChange = useCallback(
     (fieldName: string, value: string | boolean | string[]) => {
@@ -1099,12 +1151,13 @@ export function SmartPdfEditor() {
           ref={viewportContainerRef}
           className="flex-1 bg-slate-100/90 overflow-auto p-6 sm:p-8 flex items-center justify-center min-w-0 relative"
           aria-label="PDF Document Page Viewport"
-          onClick={() => {
-            if (editorMode === "SELECT") {
+          onClick={(e) => {
+            if (e.target === e.currentTarget && editorMode === "SELECT") {
               setSelectedItem(null);
             }
           }}
         >
+
           {/* Floating Contextual Object Action Bar */}
           {selectedItem && (
             <PdfContextualToolbar
@@ -1176,7 +1229,10 @@ export function SmartPdfEditor() {
               onPlaceCross={handlePlaceCross}
               onPlaceSignature={handlePlaceSignature}
               onPlaceDrawing={handlePlaceDrawing}
+              onTransformImage={handleTransformImage}
+              onTransformVector={handleTransformVector}
             />
+
 
           </div>
         </main>
