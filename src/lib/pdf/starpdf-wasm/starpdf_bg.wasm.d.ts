@@ -35,6 +35,7 @@ export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: num
 export const starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_replace_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
 export const starpdf_replace_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const starpdf_replace_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
 export const starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
 export const starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];

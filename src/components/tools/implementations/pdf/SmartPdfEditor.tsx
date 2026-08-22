@@ -759,13 +759,17 @@ export function SmartPdfEditor() {
               ? item.group.editability === "EDITABLE_ATOMIC"
               : item.data.is_editable;
             if (isSingleEditable) {
-              const spanId = item.group?.primarySpanId || item.data.span_id;
+              const targetSpanIds =
+                item.group && item.group.sourceSpans.length > 0
+                  ? item.group.sourceSpans.map((s) => s.span_id)
+                  : item.data.span_id;
               setSelectedItem(null);
-              void executeCommand(new DeleteTextCommand(spanId));
+              void executeCommand(new DeleteTextCommand(targetSpanIds));
             } else {
               toast.error("This text can't be safely removed in place.");
             }
           } else if (item.type === "form") {
+
             handleFormFieldChange(item.id, "");
           }
         }

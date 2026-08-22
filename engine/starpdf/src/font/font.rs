@@ -86,7 +86,7 @@ impl Font {
 
         // 1. Resolve /Widths array
         let mut widths = BTreeMap::new();
-        let mut default_width = 1000.0;
+        let mut default_width = 500.0;
 
         let first_char = font_dict
             .get("FirstChar")

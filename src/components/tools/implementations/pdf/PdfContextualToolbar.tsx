@@ -32,8 +32,8 @@ export type SelectedItem = NonNullable<SmartPdfSelection>;
 interface PdfContextualToolbarProps {
   selection: SmartPdfSelection;
   onDeselect: () => void;
-  onReplaceText: (spanId: string, newText: string) => Promise<void>;
-  onDeleteText?: (spanId: string) => Promise<void>;
+  onReplaceText: (spanId: string | string[], newText: string) => Promise<void>;
+  onDeleteText?: (spanId: string | string[]) => Promise<void>;
   onReplaceImage: (imageId: string, file: File) => Promise<void>;
   onRemoveImage: (imageId: string) => Promise<void>;
   onUpdateGraphic: (input: StarPdfUpdateVectorGraphicInput) => Promise<void>;
@@ -56,8 +56,8 @@ function TextControls({
 }: {
   span: StarPdfTextSpan;
   group?: import("@/lib/pdf/grouping").HumanTextGroup;
-  onReplaceText: (spanId: string, newText: string) => Promise<void>;
-  onDeleteText?: (spanId: string) => Promise<void>;
+  onReplaceText: (spanId: string | string[], newText: string) => Promise<void>;
+  onDeleteText?: (spanId: string | string[]) => Promise<void>;
   onDeselect: () => void;
   onAddTextInstead?: () => void;
 }) {
@@ -67,18 +67,21 @@ function TextControls({
   const [showDetails, setShowDetails] = useState(false);
 
   const isEditable = group ? group.editability === "EDITABLE_ATOMIC" : span.is_editable;
+  const targetSpanIds =
+    group && group.sourceSpans.length > 0
+      ? group.sourceSpans.map((s) => s.span_id)
+      : span.span_id;
 
   if (!isEditable) {
-    const isMultiSpan = group?.editability === "GROUP_SELECTION_ONLY";
     const detailedReason =
       group?.detailed_reason ||
       span.refusal_reason ||
-      "This PDF uses a specialized embedded font mapping that StarPDF cannot safely rewrite for the requested characters. The original PDF was left unchanged.";
+      "This text uses an encoding or layout structure that StarPDF cannot safely rewrite without risking distortion.";
 
     return (
       <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap" data-testid="context-text-controls">
         <Badge variant="secondary" className="bg-slate-100 text-slate-700 gap-1 font-normal">
-          <Lock className="size-3 text-slate-400" /> {isMultiSpan ? "Multi-Span" : "Read-Only"}
+          <Lock className="size-3 text-slate-400" /> Read-Only
         </Badge>
         <span className="font-medium text-slate-700" data-testid="context-text-refusal-msg">
           This text can&apos;t be safely edited in place.
@@ -126,17 +129,18 @@ function TextControls({
     try {
       if (!editText.trim()) {
         if (onDeleteText) {
-          await onDeleteText(group?.primarySpanId || span.span_id);
+          await onDeleteText(targetSpanIds);
         } else {
-          await onReplaceText(group?.primarySpanId || span.span_id, "");
+          await onReplaceText(targetSpanIds, "");
         }
       } else {
-        await onReplaceText(group?.primarySpanId || span.span_id, editText);
+        await onReplaceText(targetSpanIds, editText);
       }
     } finally {
       setIsSubmitting(false);
     }
   };
+
 
   return (
     <div className="flex items-center gap-2 min-w-0" data-testid="context-text-controls">

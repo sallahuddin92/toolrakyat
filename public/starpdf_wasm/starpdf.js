@@ -515,6 +515,23 @@ export function starpdf_replace_text(handle, page_index, span_id, new_text) {
 
 /**
  * @param {number} handle
+ * @param {number} page_index
+ * @param {any} span_ids
+ * @param {string} new_text
+ * @returns {any}
+ */
+export function starpdf_replace_text_group(handle, page_index, span_ids, new_text) {
+    const ptr0 = passStringToWasm0(new_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_replace_text_group(handle, page_index, span_ids, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @param {string} query
  * @param {boolean} case_sensitive
  * @returns {any}

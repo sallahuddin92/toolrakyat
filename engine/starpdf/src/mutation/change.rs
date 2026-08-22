@@ -51,6 +51,13 @@ pub enum PdfChange {
         target: crate::mutation::text_edit::TextEditTarget,
         replacement: String,
     },
+    /// Replaces a contiguous group of native content-stream text operations atomically.
+    ReplaceTextGroup {
+        page_index: usize,
+        targets: Vec<crate::mutation::text_edit::TextEditTarget>,
+        replacement: String,
+    },
+
     /// Replaces an existing Image XObject in-stream or with shared clone.
     ReplaceImage {
         spec: crate::image::ReplaceImageSpec,

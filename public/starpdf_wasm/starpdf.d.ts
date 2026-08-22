@@ -69,6 +69,8 @@ export function starpdf_replace_image(handle: number, page_index: number, image_
 
 export function starpdf_replace_text(handle: number, page_index: number, span_id: string, new_text: string): any;
 
+export function starpdf_replace_text_group(handle: number, page_index: number, span_ids: any, new_text: string): any;
+
 export function starpdf_search(handle: number, query: string, case_sensitive: boolean): any;
 
 export function starpdf_set_checkbox(handle: number, obj_num: bigint, obj_gen: number, checked: boolean): boolean;
@@ -129,6 +131,7 @@ export interface InitOutput {
     readonly starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_replace_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly starpdf_replace_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly starpdf_replace_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
     readonly starpdf_search: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_set_checkbox: (a: number, b: bigint, c: number, d: number) => [number, number, number];
     readonly starpdf_set_choice: (a: number, b: bigint, c: number, d: number, e: number) => [number, number, number];

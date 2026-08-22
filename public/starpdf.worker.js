@@ -29,7 +29,9 @@ import initWasm, {
   starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_replace_text,
+  starpdf_replace_text_group,
   starpdf_get_text_editability,
+
   starpdf_enumerate_images,
   starpdf_replace_image,
   starpdf_add_image,
@@ -191,6 +193,12 @@ self.onmessage = async (event) => {
         self.postMessage({ type: "replaceText", id: req.id, success: true, result });
         break;
       }
+      case "replaceTextGroup": {
+        const result = starpdf_replace_text_group(req.handle, req.pageIndex, req.spanIds, req.newText);
+        self.postMessage({ type: "replaceTextGroup", id: req.id, success: true, result });
+        break;
+      }
+
       case "getTextEditability": {
         const span = starpdf_get_text_editability(req.handle, req.pageIndex, req.spanId);
         self.postMessage({ type: "getTextEditability", id: req.id, success: true, span });

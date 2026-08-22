@@ -3,19 +3,36 @@ import type { HumanTextGroup, TextGroupingOptions } from "./types";
 
 const DEFAULT_OPTIONS: Required<TextGroupingOptions> = {
   maxBaselineDiff: 2.0,
-  maxHorizontalGapMultiplier: 1.8,
+  maxHorizontalGapMultiplier: 1.6,
   maxFontSizeDiff: 1.5,
+  granularity: "word",
 };
 
+
+
+
+function normalizeFont(name?: string): string {
+  if (!name) return "";
+  return name.replace(/^[A-Z]{6}\+/, "").replace(/-\d+$/, "");
+}
+
+function isSameFont(a: StarPdfTextSpan, b: StarPdfTextSpan): boolean {
+  if (a.font_name === b.font_name) return true;
+  if (a.font_base_name && b.font_base_name && a.font_base_name === b.font_base_name) return true;
+  const normA = normalizeFont(a.font_base_name || a.font_name);
+  const normB = normalizeFont(b.font_base_name || b.font_name);
+  return normA === normB && normA.length > 0;
+}
+
 /**
- * Groups raw extracted StarPDF text spans into human-scale text runs/words
+ * Groups raw extracted StarPDF text spans into human-scale text words/runs
  * while preserving 100% exact underlying source span provenance.
  *
  * Invariants:
- * - Never groups across different pages or rotations.
- * - Never groups across multi-column gaps or table cell boundaries.
- * - Single-span groups retain atomic editability status.
- * - Multi-span visual groups are marked GROUP_SELECTION_ONLY to guarantee safety.
+ * - Never groups across different pages, orientations, columns, or table cells.
+ * - Single-span and multi-span words with proven same-font, same-stream safety
+ *   are classified as EDITABLE_ATOMIC.
+ * - Incompatible multi-span groups safely refuse mutation as READ_ONLY_REFUSAL.
  */
 export function groupTextSpans(
   spans: StarPdfTextSpan[],
@@ -44,10 +61,8 @@ export function groupTextSpans(
   }
 
   for (const bucketSpans of pageBuckets.values()) {
-    // Sort spans top-to-bottom, left-to-right
-    // In PDF coordinates, top of page has larger Y.
+    // Sort spans top-to-bottom, left-to-right (PDF coordinate space: higher Y is higher on page)
     const sorted = [...bucketSpans].sort((a, b) => {
-      // If baselines are significantly different, higher Y comes first (PDF coords)
       if (Math.abs(a.y - b.y) > opts.maxBaselineDiff) {
         return b.y - a.y;
       }
@@ -79,15 +94,17 @@ export function groupTextSpans(
         maxX = Math.max(maxX, s.x + s.width);
         maxY = Math.max(maxY, s.y + s.height);
 
-        // Add space if there is a gap between consecutive spans in same group
+        // Add space if there is a true word gap between consecutive spans in same group
         if (i > 0) {
           const prev = currentGroupSpans[i - 1];
           const gap = s.x - (prev.x + prev.width);
-          const spaceEst = prev.font_size * 0.25;
-          if (gap >= spaceEst * 0.8 && !textParts[textParts.length - 1]?.endsWith(" ") && !s.text.startsWith(" ")) {
+          const spaceEst = prev.font_size * 0.28;
+          if (gap >= spaceEst * 1.6 && !textParts[textParts.length - 1]?.endsWith(" ") && !s.text.startsWith(" ")) {
             textParts.push(" ");
           }
         }
+
+
         textParts.push(s.text);
       }
 
@@ -111,11 +128,26 @@ export function groupTextSpans(
           detailed_reason = singleSpan.refusal_reason;
         }
       } else {
-        // Multi-span visual group
-        is_editable = false;
-        editability = "GROUP_SELECTION_ONLY";
-        refusal_reason = "This text selection spans multiple PDF text operations and can't yet be safely rewritten as one native edit.";
-        detailed_reason = `This visual text run consists of ${currentGroupSpans.length} separate PDF content stream operations.`;
+        // Multi-span group evaluation
+        const allSpansEditable = currentGroupSpans.every((s) => s.is_editable);
+        const allSameFont = currentGroupSpans.every((s) => isSameFont(s, first));
+        const allSameStream = currentGroupSpans.every((s) => s.stream_index === first.stream_index);
+
+        if (allSpansEditable && allSameFont && allSameStream) {
+          is_editable = true;
+          editability = "EDITABLE_ATOMIC";
+        } else {
+          is_editable = false;
+          editability = "READ_ONLY_REFUSAL";
+          refusal_reason = "This text can't be safely edited in place.";
+          if (!allSameFont) {
+            detailed_reason = "This text spans multiple different font resources that cannot be rewritten together.";
+          } else if (!allSameStream) {
+            detailed_reason = "This text spans multiple content streams that cannot be modified in a single text transaction.";
+          } else {
+            detailed_reason = "This text is built from multiple PDF text operations that cannot be safely rewritten together.";
+          }
+        }
       }
 
       const id = isSingle
@@ -126,7 +158,7 @@ export function groupTextSpans(
         id,
         pageIndex,
         text: combinedText,
-        type: isSingle ? "word" : "run",
+        type: opts.granularity === "run" ? "run" : "word",
         x: minX,
         y: minY,
         width: Math.max(1, maxX - minX),
@@ -158,18 +190,22 @@ export function groupTextSpans(
       // Check font size proximity
       const sameFontSize = Math.abs(span.font_size - prev.font_size) <= opts.maxFontSizeDiff;
       // Check font resource name
-      const sameFont = span.font_name === prev.font_name;
+      const sameFont = isSameFont(span, prev);
 
       // Estimate expected spacing
       const avgFontSize = (span.font_size + prev.font_size) / 2;
       const spaceWidth = avgFontSize * 0.28;
-      const maxAllowedGap = Math.max(12.0, spaceWidth * opts.maxHorizontalGapMultiplier);
+
+      // Intra-word adjacency: span starts after prev.x, with gap between prev.x + prev.width and span.x <= spaceWidth * 0.45
+      // Or in cases where estimated width overlaps, span.x is within prev.x .. prev.x + prev.width
+      const isWhitespace = prev.text.endsWith(" ") || span.text.startsWith(" ");
+      const withinHorizontalBounds =
+        span.x >= prev.x && span.x <= prev.x + Math.max(prev.width, spaceWidth * 2) + spaceWidth * opts.maxHorizontalGapMultiplier;
 
       const gap = span.x - (prev.x + prev.width);
-      // Gaps between 0 and maxAllowedGap (or slight overlap from kerning) are groupable
-      const adjacentHorizontally = gap >= -2.0 && gap <= maxAllowedGap;
+      const isWordContinuation = (gap <= spaceWidth * opts.maxHorizontalGapMultiplier || span.x <= prev.x + prev.width + 1.0) && withinHorizontalBounds;
 
-      if (sameBaseline && sameFontSize && sameFont && adjacentHorizontally) {
+      if (sameBaseline && sameFontSize && sameFont && isWordContinuation && !isWhitespace) {
         currentGroupSpans.push(span);
       } else {
         flushCurrentGroup();
@@ -177,8 +213,10 @@ export function groupTextSpans(
       }
     }
 
+
     flushCurrentGroup();
   }
 
   return groups;
 }
+

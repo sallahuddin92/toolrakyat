@@ -183,6 +183,75 @@ impl ContentStreamEditor {
         Ok(Self::serialize_instructions(&instructions))
     }
 
+    /// Replaces multiple targeted text bytes in raw content stream data atomically.
+    pub fn replace_multiple_in_stream(
+        stream_bytes: &[u8],
+        edits: &[(&TextEditTarget, &[u8])],
+    ) -> PdfResult<Vec<u8>> {
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let mut instructions = parser.parse_instructions()?;
+
+        for (target, new_bytes) in edits {
+            if target.instruction_index >= instructions.len() {
+                return Err(PdfError::TargetTextNotFound(format!(
+                    "Instruction index {} out of bounds (total instructions: {})",
+                    target.instruction_index,
+                    instructions.len()
+                )));
+            }
+
+            let instr = &mut instructions[target.instruction_index];
+            match instr.operator {
+                ContentOperator::Tj => {
+                    if target.operand_index != 0 {
+                        return Err(PdfError::TargetTextNotFound(format!(
+                            "Tj operator expects operand index 0, found {}",
+                            target.operand_index
+                        )));
+                    }
+                    if instr.operands.is_empty() {
+                        return Err(PdfError::TargetTextNotFound(
+                            "Tj operator missing string operand".to_string(),
+                        ));
+                    }
+                    instr.operands[0] = ContentOperand::String(new_bytes.to_vec());
+                }
+                ContentOperator::TJ => {
+                    if instr.operands.is_empty() {
+                        return Err(PdfError::TargetTextNotFound(
+                            "TJ operator missing array operand".to_string(),
+                        ));
+                    }
+                    match &mut instr.operands[0] {
+                        ContentOperand::Array(items) => {
+                            if target.operand_index >= items.len() {
+                                return Err(PdfError::TargetTextNotFound(format!(
+                                    "TJ array operand index {} out of bounds (array length: {})",
+                                    target.operand_index,
+                                    items.len()
+                                )));
+                            }
+                            items[target.operand_index] =
+                                ContentOperand::String(new_bytes.to_vec());
+                        }
+                        _ => {
+                            return Err(PdfError::TargetTextNotFound(
+                                "TJ operand is not an array".to_string(),
+                            ));
+                        }
+                    }
+                }
+                ref op => {
+                    return Err(PdfError::TargetTextNotFound(format!(
+                        "Target instruction is '{op}', expected text-show operator 'Tj' or 'TJ'"
+                    )));
+                }
+            }
+        }
+
+        Ok(Self::serialize_instructions(&instructions))
+    }
+
     /// Deterministically serializes content stream instructions into valid PDF content stream bytes.
     pub fn serialize_instructions(instructions: &[ContentInstruction]) -> Vec<u8> {
         let mut output = Vec::with_capacity(instructions.len() * 32);

@@ -46,7 +46,9 @@ import initWasm, {
   starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_replace_text,
+  starpdf_replace_text_group,
   starpdf_get_text_editability,
+
   starpdf_enumerate_images,
   starpdf_replace_image,
   starpdf_add_image,
@@ -316,6 +318,22 @@ export class StarPdfDocumentHandle {
       newText
     ) as StarPdfReplaceTextResult;
   }
+
+  async replaceTextGroup(
+    pageIndex: number,
+    spanIds: string[],
+    newText: string
+  ): Promise<StarPdfReplaceTextResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_replace_text_group(
+      this._handle,
+      pageIndex,
+      spanIds,
+      newText
+    ) as StarPdfReplaceTextResult;
+  }
+
 
   async getTextEditability(
     pageIndex: number,
