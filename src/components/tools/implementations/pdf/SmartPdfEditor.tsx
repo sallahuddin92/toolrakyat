@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+
 import { getPdfjsLib, type PDFDocumentProxy } from "@/lib/pdf/pdfjs-init";
 import toast from "react-hot-toast";
 
@@ -54,7 +55,11 @@ import {
   MergeDocumentsCommand,
   ExportDocumentCommand,
 } from "@/lib/pdf/commands";
-
+import {
+  type FlatFormCandidate,
+  detectFlatFormCandidates,
+  deduplicateCandidates,
+} from "@/lib/pdf/detection";
 
 import { Button } from "@/components/ui/button";
 import { PdfDropzone } from "./PdfDropzone";
@@ -85,16 +90,18 @@ export function SmartPdfEditor() {
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
 
-  // Application Tool Mode System (Phase 3A)
+  // Application Tool Mode System (Phase 3A / 3A.1)
   const [editorMode, setEditorMode] = useState<EditorMode>("SELECT");
   const [fillAndSignTool, setFillAndSignTool] = useState<FillAndSignTool>("text");
   const [showFlatFormBanner, setShowFlatFormBanner] = useState<boolean>(true);
+  const [formAssistEnabled, setFormAssistEnabled] = useState<boolean>(true);
+  const [rasterCandidates, setRasterCandidates] = useState<Record<number, FlatFormCandidate[]>>({});
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const signatureInputRef = useRef<HTMLInputElement | null>(null);
 
+
   // Unified selection state on canvas
   const [selectedItem, setSelectedItem] = useState<SmartPdfSelection>(null);
-
 
   // Command Execution State (IDLE vs RUNNING)
   const [commandState, setCommandState] = useState<CommandExecutionState>({ status: "IDLE" });
@@ -107,6 +114,7 @@ export function SmartPdfEditor() {
   useEffect(() => {
     historyStateRef.current = historyState;
   }, [historyState]);
+
 
   // Unsaved changes confirmation dialog
   const [showConfirmOpenModal, setShowConfirmOpenModal] = useState<boolean>(false);
@@ -726,8 +734,59 @@ export function SmartPdfEditor() {
     [sourceBytes],
   );
 
+  // Form Affordance Detection (Form Assist)
+  const currentCandidates = useMemo(() => {
+    if (!inspectionResult) return [];
+    const pageIndex = currentPage - 1;
+    const pageWidth = inspectionResult.pages[pageIndex]?.width || 612;
+    const pageHeight = inspectionResult.pages[pageIndex]?.height || 792;
+
+    const baseCandidates = detectFlatFormCandidates({
+      pageIndex,
+      pageWidth,
+      pageHeight,
+      acroFields: inspectionResult.fields,
+      vectorGraphics: pageGraphics,
+    });
+
+    const pageRaster = rasterCandidates[pageIndex] || [];
+    return deduplicateCandidates([...baseCandidates, ...pageRaster]);
+  }, [currentPage, inspectionResult, pageGraphics, rasterCandidates]);
+
+  const handleCanvasRendered = useCallback(
+    (canvas: HTMLCanvasElement) => {
+      if (!inspectionResult) return;
+      const pageIndex = currentPage - 1;
+      const pageWidth = inspectionResult.pages[pageIndex]?.width || 612;
+      const pageHeight = inspectionResult.pages[pageIndex]?.height || 792;
+
+      try {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (ctx) {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const fullCandidates = detectFlatFormCandidates({
+            pageIndex,
+            pageWidth,
+            pageHeight,
+            acroFields: inspectionResult.fields,
+            vectorGraphics: pageGraphics,
+            imageData: imgData,
+          });
+          setRasterCandidates((prev) => ({
+            ...prev,
+            [pageIndex]: fullCandidates,
+          }));
+        }
+      } catch {
+        // Ignore canvas read errors if tainted
+      }
+    },
+    [currentPage, inspectionResult, pageGraphics],
+  );
 
   const isFlatForm = Boolean(
+
+
     inspectionResult &&
       inspectionResult.fields.length === 0 &&
       pageTextSpans.filter((s) => s.text.trim().length > 0).length === 0 &&
@@ -889,7 +948,10 @@ export function SmartPdfEditor() {
             signatureInputRef.current?.click();
           }
         }}
+        formAssistEnabled={formAssistEnabled}
+        onToggleFormAssist={() => setFormAssistEnabled((prev) => !prev)}
       />
+
 
       {/* Page Operations Rail / Actions */}
       <PdfPageOperations
@@ -1045,8 +1107,12 @@ export function SmartPdfEditor() {
               graphics={pageGraphics}
               fields={inspectionResult.fields}
               annotations={inspectionResult.annotations}
+              candidates={currentCandidates}
+              formAssistEnabled={formAssistEnabled}
+
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
+              onCanvasRendered={handleCanvasRendered}
               mode={editorMode}
               fillAndSignTool={fillAndSignTool}
               onPlaceFreeText={handlePlaceFreeText}
@@ -1055,6 +1121,7 @@ export function SmartPdfEditor() {
               onPlaceSignature={handlePlaceSignature}
               onPlaceDrawing={handlePlaceDrawing}
             />
+
           </div>
         </main>
       </div>

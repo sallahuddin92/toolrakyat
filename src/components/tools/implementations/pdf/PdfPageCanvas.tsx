@@ -12,6 +12,7 @@ import type {
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
+import type { FlatFormCandidate } from "@/lib/pdf/detection";
 
 interface PdfPageCanvasProps {
   pdfDocument: PDFDocumentProxy | null;
@@ -25,10 +26,13 @@ interface PdfPageCanvasProps {
   graphics?: StarPdfVectorGraphicInfo[];
   fields?: AcroFormField[];
   annotations?: PdfMarkupAnnotation[];
+  candidates?: FlatFormCandidate[];
+  formAssistEnabled?: boolean;
   selectedItem?: SmartPdfSelection;
   onSelectItem?: (item: SmartPdfSelection) => void;
   className?: string;
   onPageRendered?: (pageNumber: number, width: number, height: number) => void;
+  onCanvasRendered?: (canvas: HTMLCanvasElement) => void;
   mode?: EditorMode;
   fillAndSignTool?: FillAndSignTool;
   onPlaceFreeText?: (pageIndex: number, pdfX: number, pdfY: number, text: string) => void;
@@ -54,10 +58,13 @@ export function PdfPageCanvas({
   graphics = [],
   fields = [],
   annotations = [],
+  candidates = [],
+  formAssistEnabled = true,
   selectedItem = null,
   onSelectItem,
   className = "",
   onPageRendered,
+  onCanvasRendered,
   mode = "SELECT",
   fillAndSignTool = "text",
   onPlaceFreeText,
@@ -66,6 +73,7 @@ export function PdfPageCanvas({
   onPlaceSignature,
   onPlaceDrawing,
 }: PdfPageCanvasProps) {
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isRendering, setIsRendering] = useState<boolean>(false);
   const [renderCompleted, setRenderCompleted] = useState<boolean>(false);
@@ -141,6 +149,9 @@ export function PdfPageCanvas({
           setIsRendering(false);
           setRenderCompleted(true);
           onPageRendered?.(pageNumber, viewport.width, viewport.height);
+          if (canvas) {
+            onCanvasRendered?.(canvas);
+          }
         }
       } catch (err: unknown) {
         if (!isCancelled) {
@@ -169,7 +180,7 @@ export function PdfPageCanvas({
       }
       setIsRendering(false);
     };
-  }, [pdfDocument, pageNumber, scale, rotation, onPageRendered]);
+  }, [pdfDocument, pageNumber, scale, rotation, onPageRendered, onCanvasRendered]);
 
   return (
     <div className={`relative inline-block shadow-lg rounded-md bg-white overflow-hidden ${className}`}>
@@ -190,6 +201,8 @@ export function PdfPageCanvas({
           graphics={graphics}
           fields={fields}
           annotations={annotations}
+          candidates={candidates}
+          formAssistEnabled={formAssistEnabled}
           pageNumber={pageNumber}
           selectedItem={selectedItem}
           onSelectItem={onSelectItem}
@@ -202,6 +215,7 @@ export function PdfPageCanvas({
           onPlaceDrawing={onPlaceDrawing}
         />
       )}
+
       {isRendering && (
         <div className="absolute inset-0 bg-white/60 backdrop-blur-xs flex items-center justify-center pointer-events-none">
           <Loader2 className="size-6 animate-spin text-sky-600" />

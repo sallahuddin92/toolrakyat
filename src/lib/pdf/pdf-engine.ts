@@ -9,7 +9,9 @@ import {
   PDFString,
   PDFNumber,
   PDFDict,
+  PDFRef,
 } from "pdf-lib";
+
 import {
   type AcroFormField,
   type AcroFormFieldType,
@@ -176,6 +178,16 @@ export async function inspectPdfDocument(
             author = (tEntry as unknown as { decodeText: () => string }).decodeText();
           }
 
+          let objectNumber: number | undefined;
+          let generationNumber: number | undefined;
+          if (annotRef instanceof PDFRef) {
+            objectNumber = annotRef.objectNumber;
+            generationNumber = annotRef.generationNumber;
+          } else if (annotRef && typeof annotRef === "object" && "objectNumber" in annotRef) {
+            objectNumber = Number((annotRef as { objectNumber: unknown }).objectNumber);
+            generationNumber = Number((annotRef as { generationNumber?: unknown }).generationNumber ?? 0);
+          }
+
           annotations.push({
             id: `annot-${i}-${j}`,
             subtype: subtypeRaw,
@@ -183,6 +195,8 @@ export async function inspectPdfDocument(
             rect,
             pageIndex: i,
             author,
+            objectNumber,
+            generationNumber,
           });
         } catch {
           // Ignore malformed individual annotation
@@ -242,12 +256,29 @@ export async function updateAcroFormFields(
         const annots = page.node.Annots();
         if (annots) {
           for (let j = 0; j < annots.size(); j++) {
-            const annotId = `annot-${i}-${j}`;
-            if (annotationValues[annotId] !== undefined) {
+            const annotRef = annots.get(j);
+            let objectNumber: number | undefined;
+            let generationNumber: number | undefined;
+            if (annotRef instanceof PDFRef) {
+              objectNumber = annotRef.objectNumber;
+              generationNumber = annotRef.generationNumber;
+            } else if (annotRef && typeof annotRef === "object" && "objectNumber" in annotRef) {
+              objectNumber = Number((annotRef as { objectNumber: unknown }).objectNumber);
+              generationNumber = Number((annotRef as { generationNumber?: unknown }).generationNumber ?? 0);
+            }
+
+            const idxId = `annot-${i}-${j}`;
+            const objId = objectNumber !== undefined ? `annot-obj-${objectNumber}-${generationNumber ?? 0}` : null;
+            const targetVal =
+              (objId && annotationValues[objId] !== undefined)
+                ? annotationValues[objId]
+                : annotationValues[idxId];
+
+            if (targetVal !== undefined) {
               try {
-                const annotDict = doc.context.lookup(annots.get(j));
+                const annotDict = doc.context.lookup(annotRef);
                 if (annotDict && annotDict instanceof PDFDict) {
-                  annotDict.set(PDFName.of("Contents"), PDFString.of(annotationValues[annotId]));
+                  annotDict.set(PDFName.of("Contents"), PDFString.of(targetVal));
                 }
               } catch {
                 // Ignore failure on specific annotation
@@ -257,6 +288,7 @@ export async function updateAcroFormFields(
         }
       }
     }
+
 
     // 2. Update AcroForm Fields
     let form = null;

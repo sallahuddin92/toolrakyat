@@ -10,12 +10,23 @@ async function uploadPdfBytes(
   name: string,
   bytes: Buffer,
 ) {
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[type="file"][accept*="pdf"]').first().setInputFiles({
     name,
     mimeType: "application/pdf",
     buffer: bytes,
   });
+
+  const confirmModalBtn = page.locator('[data-testid="confirm-dialog-confirm-btn"]');
+  try {
+    if (await confirmModalBtn.isVisible({ timeout: 500 })) {
+      await confirmModalBtn.click();
+    }
+  } catch {
+    // No confirm modal, continue
+  }
+
   const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+
   await expect(workspace).toBeVisible({ timeout: 10000 });
   const canvas = workspace.locator("main canvas");
   await expect
@@ -2796,7 +2807,158 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.keyboard.press("Escape");
     await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).not.toBeVisible();
   });
+
+  test("v0.20 Phase 3A.1: Flat-Form Affordance Detection & Auto-Centered Mark Placement", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "flat-form-assist.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Verify candidate checkbox is detected and clickable
+    const candidateCb = page.locator('[data-testid^="canvas-candidate-"]').first();
+    await expect(candidateCb).toBeVisible({ timeout: 10000 });
+
+    // 2. Click candidate checkbox to open smart contextual action popup
+    await candidateCb.click();
+    const actionPopup = page.locator('[data-testid="candidate-action-popup"]');
+    await expect(actionPopup).toBeVisible({ timeout: 5000 });
+
+    // 3. Verify contextual actions (Check & Cross)
+    const checkBtn = page.locator('[data-testid="candidate-action-check"]');
+    const crossBtn = page.locator('[data-testid="candidate-action-cross"]');
+    await expect(checkBtn).toBeVisible();
+    await expect(crossBtn).toBeVisible();
+
+    // 4. Click Check -> Auto-centers checkmark and registers mutation
+    await checkBtn.click();
+    await expect(actionPopup).not.toBeVisible();
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("v0.20 Phase 3A.1: 20-Operation Re-Edit Durability Torture Test with Multi-Round Export/Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const originalBytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "torture-doc.pdf", originalBytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+
+    // ROUND 1: 20 Sequential Operations
+    // 1. Switch to Fill & Sign
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible({ timeout: 5000 });
+
+    // 2. Add FreeText A
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 100 } });
+    const inlineInput = page.locator('[data-testid="inline-text-placement-input"]');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+    await inlineInput.fill("Patient Record A");
+    await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
+    await expect(inlineInput).not.toBeVisible();
+
+    // 3. Add Check B
+    await page.locator('[data-testid="fill-sign-tool-check-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 150 } });
+
+    // 4. Add Cross C
+    await page.locator('[data-testid="fill-sign-tool-cross-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 200 } });
+
+    // 5. Add FreeText D
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 250 } });
+    await inlineInput.fill("Patient Record D");
+    await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
+
+    // 6. Exit to Select mode
+    await page.locator('[data-testid="fill-sign-exit-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).not.toBeVisible();
+
+    // 7-11. Repeatedly Edit Annotation A
+    const annotA = page.locator('[data-testid^="canvas-annotation-"]').first();
+    await expect(annotA).toBeVisible({ timeout: 5000 });
+
+    await annotA.dispatchEvent("click");
+    const contextInput = page.locator('[data-testid="context-annotation-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+
+    await contextInput.fill("Patient Record A - Edit 1");
+    await contextInput.fill("Patient Record A - Edit 2");
+    await contextInput.fill("Patient Record A - Edit 3");
+    await contextInput.fill("Patient Record A - Edit 4");
+    await contextInput.fill("Patient Record A - Final Edit");
+
+    // 12. Deselect with Escape
+    await page.keyboard.press("Escape");
+    await expect(contextInput).not.toBeVisible();
+
+    // 13-16. Undo and Redo cycles
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+    await undoBtn.click();
+    await undoBtn.click();
+    await redoBtn.click();
+    await redoBtn.click();
+
+    // 17-20. Export Editable (Round 1)
+    const downloadPromise1 = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download1 = await downloadPromise1;
+    expect(download1.suggestedFilename()).toBe("torture-doc-edited.pdf");
+
+    const exportedPath1 = await download1.path();
+    expect(exportedPath1).not.toBeNull();
+    const exportedBytes1 = fs.readFileSync(exportedPath1!);
+    expect(exportedBytes1.length).toBeGreaterThan(0);
+
+    // ROUND 2: Reopen Exported PDF and Re-Edit
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "torture-round2.pdf", exportedBytes1);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Select and re-edit annotation on round 2
+    const round2Annot = page.locator('[data-testid^="canvas-annotation-"]').first();
+    await expect(round2Annot).toBeVisible({ timeout: 10000 });
+    await round2Annot.dispatchEvent("click");
+
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await contextInput.fill("Patient Record A - Round 2 Reopened & Edited");
+
+    // Export Round 2
+    const downloadPromise2 = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download2 = await downloadPromise2;
+    expect(download2.suggestedFilename()).toBe("torture-round2-edited.pdf");
+
+    const exportedPath2 = await download2.path();
+    expect(exportedPath2).not.toBeNull();
+    const exportedBytes2 = fs.readFileSync(exportedPath2!);
+    expect(exportedBytes2.length).toBeGreaterThan(0);
+
+    // ROUND 3: Reopen second exported PDF and verify stability
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "torture-round3.pdf", exportedBytes2);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const round3Annot = page.locator('[data-testid^="canvas-annotation-"]').first();
+    await expect(round3Annot).toBeVisible({ timeout: 10000 });
+    await round3Annot.dispatchEvent("click");
+
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+    await expect(contextInput).toHaveValue("Patient Record A - Round 2 Reopened & Edited");
+  });
+
 });
+
 
 
 
