@@ -3091,7 +3091,173 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const contextControls = page.locator('[data-testid="context-text-controls"]');
     await expect(contextControls).toBeVisible({ timeout: 5000 });
   });
+
+  test("v0.20 Phase 3B.1: Add Text Commit UX — Chrome Disappears, Subtle Selection & Clear/Delete Semantics", async ({
+    page,
+  }) => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const bytes = await doc.save();
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "freetext-commit-test.pdf", Buffer.from(bytes));
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Enter Fill & Sign mode and select text tool
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+
+    // 2. Click canvas to spawn inline text placement input
+    const canvas = page.locator('[data-testid="pdf-interactive-overlay"]');
+    await canvas.click({ position: { x: 120, y: 150 } });
+
+    const inlineInput = page.locator('[data-testid="inline-text-placement-input"]');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+    await inlineInput.fill("Patient: John Doe");
+
+    // 3. Commit text placement
+    await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
+
+    // Verify inline input is immediately dismissed
+    await expect(inlineInput).toBeHidden();
+
+    // 4. Switch back to SELECT mode and click the created annotation
+    await page.locator('[data-testid="toolbar-mode-select-btn"]').click();
+    const createdAnnot = page.locator('[data-testid^="canvas-annotation-"]').first();
+    await expect(createdAnnot).toBeVisible({ timeout: 10000 });
+    await createdAnnot.click();
+
+    // Verify contextual toolbar appears with input, Clear, and Delete buttons
+    const annotInput = page.locator('[data-testid="context-annotation-input"]');
+    await expect(annotInput).toBeVisible({ timeout: 5000 });
+    await expect(annotInput).toHaveValue("Patient: John Doe");
+
+    const clearBtn = page.locator('[data-testid="context-annotation-clear-btn"]');
+    await expect(clearBtn).toBeVisible({ timeout: 5000 });
+
+    const deleteBtn = page.locator('[data-testid="context-annotation-delete-btn"]');
+    await expect(deleteBtn).toBeVisible({ timeout: 5000 });
+
+    // 5. Test Clear button
+    await clearBtn.click();
+    await expect(annotInput).toHaveValue("");
+
+    // 6. Test Delete button
+    await deleteBtn.click();
+    await expect(createdAnnot).toBeHidden({ timeout: 5000 });
+    await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
+
+    // 7. Test Undo / Redo lifecycle
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+
+    await undoBtn.click();
+    await expect(createdAnnot).toBeVisible({ timeout: 5000 });
+
+    await redoBtn.click();
+    await expect(createdAnnot).toBeHidden({ timeout: 5000 });
+  });
+
+  test("v0.20 Phase 3B.1: Native Text Delete & Clear Semantics with Undo/Redo & Export/Reopen", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multicol-table.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "native-delete-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select editable native text
+    const approvalSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Sarah Lee"]');
+    await expect(approvalSpan).toBeVisible({ timeout: 5000 });
+    await approvalSpan.click();
+
+    const deleteBtn = page.locator('[data-testid="context-text-delete-btn"]');
+    await expect(deleteBtn).toBeVisible({ timeout: 5000 });
+
+    // 2. Delete native text
+    await deleteBtn.click();
+
+    // Contextual toolbar and selection should be dismissed
+    await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
+
+    // Status bar shows unsaved changes
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    await expect(statusBar).toContainText("Unsaved changes");
+
+    // 3. Test Undo restores exact text
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+
+    await undoBtn.click();
+    await expect(approvalSpan).toBeVisible({ timeout: 5000 });
+
+    await redoBtn.click();
+    await expect(approvalSpan).toBeHidden({ timeout: 5000 });
+
+    // 4. Export editable PDF and reopen
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("native-delete-test-edited.pdf");
+
+    const exportedPath = await download.path();
+    expect(exportedPath).not.toBeNull();
+    const exportedBytes = fs.readFileSync(exportedPath!);
+    expect(exportedBytes.length).toBeGreaterThan(0);
+
+    // 5. Reopen in fresh session
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "reopened-deleted.pdf", exportedBytes);
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Verify deleted text is absent while sibling text is intact
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Sarah Lee"]')).toBeHidden();
+    await expect(page.locator('[data-testid^="canvas-text-span-"][title*="Overview of Medical Devices"]')).toBeVisible({ timeout: 5000 });
+  });
+
+  test("v0.20 Phase 3B.1: Global Keyboard Delete / Backspace Shortcut & Typing Isolation", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-multicol-table.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "keyboard-delete-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select editable native text
+    const approvalSpan = page.locator('[data-testid^="canvas-text-span-"][title*="Report Approved by Dr. Sarah Lee"]');
+    await expect(approvalSpan).toBeVisible({ timeout: 5000 });
+    await approvalSpan.click();
+
+    const contextInput = page.locator('[data-testid="context-text-input"]');
+    await expect(contextInput).toBeVisible({ timeout: 5000 });
+
+    // 2. Type inside the input and press Backspace -> must edit input, NOT delete the PDF object prematurely
+    await contextInput.focus();
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Backspace");
+    await expect(contextInput).toHaveValue("Report Approved by Dr. Sarah L");
+
+    // 3. Focus outside input onto canvas and press Delete key -> deletes the selected object
+    await contextInput.blur();
+    await page.keyboard.press("Delete");
+
+    // Selection clears and text is deleted
+    await expect(page.locator('[data-testid="pdf-contextual-toolbar"]')).toBeHidden();
+    await expect(approvalSpan).toBeHidden({ timeout: 5000 });
+  });
 });
+
+
 
 
 
