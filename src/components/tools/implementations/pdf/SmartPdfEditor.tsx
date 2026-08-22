@@ -38,10 +38,14 @@ import {
   ReplaceTextCommand,
   ReplaceImageCommand,
   RemoveImageCommand,
+  AddImageCommand,
   UpdateVectorCommand,
   DeleteVectorCommand,
-  SetFormFieldValueCommand,
-  UpdateAnnotationCommand,
+  AddFreeTextCommand,
+  AddCheckMarkCommand,
+  AddCrossMarkCommand,
+  AddInkAnnotationCommand,
+  DeleteAnnotationCommand,
   MovePageCommand,
   DuplicatePageCommand,
   DeletePageCommand,
@@ -51,8 +55,11 @@ import {
   ExportDocumentCommand,
 } from "@/lib/pdf/commands";
 
+
+import { Button } from "@/components/ui/button";
 import { PdfDropzone } from "./PdfDropzone";
-import { PdfToolbar } from "./PdfToolbar";
+
+import { PdfToolbar, type EditorMode, type FillAndSignTool } from "./PdfToolbar";
 import { PdfThumbnailRail } from "./PdfThumbnailRail";
 import { PdfPageCanvas } from "./PdfPageCanvas";
 import { PdfDocumentInfo } from "./PdfDocumentInfo";
@@ -78,8 +85,16 @@ export function SmartPdfEditor() {
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
 
+  // Application Tool Mode System (Phase 3A)
+  const [editorMode, setEditorMode] = useState<EditorMode>("SELECT");
+  const [fillAndSignTool, setFillAndSignTool] = useState<FillAndSignTool>("text");
+  const [showFlatFormBanner, setShowFlatFormBanner] = useState<boolean>(true);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const signatureInputRef = useRef<HTMLInputElement | null>(null);
+
   // Unified selection state on canvas
   const [selectedItem, setSelectedItem] = useState<SmartPdfSelection>(null);
+
 
   // Command Execution State (IDLE vs RUNNING)
   const [commandState, setCommandState] = useState<CommandExecutionState>({ status: "IDLE" });
@@ -258,23 +273,28 @@ export function SmartPdfEditor() {
 
   const executeCommand = useCallback(
     async (command: SmartPdfCommand): Promise<void> => {
-      // If currently running a previous operation, wait up to 2.5s for it to settle
-      let waitCount = 0;
-      while (isBusyRef.current && waitCount < 50) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        waitCount++;
-      }
+      const isLightweight = command.id === "form.set_value" || command.id === "annotation.update";
 
-      if (isBusyRef.current) {
-        console.warn(`Command "${command.label}" rejected: executor is currently busy.`);
-        return;
-      }
 
-      setCommandState({
-        status: "RUNNING",
-        commandId: command.id,
-        label: command.label,
-      });
+      if (!isLightweight) {
+        // If currently running a previous operation, wait up to 2.5s for it to settle
+        let waitCount = 0;
+        while (isBusyRef.current && waitCount < 50) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          waitCount++;
+        }
+
+        if (isBusyRef.current) {
+          console.warn(`Command "${command.label}" rejected: executor is currently busy.`);
+          return;
+        }
+
+        setCommandState({
+          status: "RUNNING",
+          commandId: command.id,
+          label: command.label,
+        });
+      }
 
       const context: SmartPdfCommandContext = {
         sourceBytes,
@@ -324,20 +344,26 @@ export function SmartPdfEditor() {
         } else {
           // Non-byte mutating state updates (e.g. form fields, annotations)
           if (result.fieldValues) {
-            setFieldValues(result.fieldValues);
-            if (command.isMutating && sourceBytes) {
-              setHistoryState((prev) =>
-                pushHistorySnapshot(prev, sourceBytes, command.label),
-              );
+            const updatedFields = result.fieldValues;
+            setFieldValues((prev) => ({ ...prev, ...updatedFields }));
+            if (command.isMutating) {
+              if (sourceBytes) {
+                setHistoryState((prev) =>
+                  pushHistorySnapshot(prev, sourceBytes, command.label),
+                );
+              }
               setIsModified(true);
             }
           }
           if (result.annotationValues) {
-            setAnnotationValues(result.annotationValues);
-            if (command.isMutating && sourceBytes) {
-              setHistoryState((prev) =>
-                pushHistorySnapshot(prev, sourceBytes, command.label),
-              );
+            const updatedAnnots = result.annotationValues;
+            setAnnotationValues((prev) => ({ ...prev, ...updatedAnnots }));
+            if (command.isMutating) {
+              if (sourceBytes) {
+                setHistoryState((prev) =>
+                  pushHistorySnapshot(prev, sourceBytes, command.label),
+                );
+              }
               setIsModified(true);
             }
           }
@@ -367,19 +393,21 @@ export function SmartPdfEditor() {
         }
 
         // 4. Concise user feedback
-        if (result.message) {
+        if (result.message && !isLightweight) {
           toast.success(result.message);
         }
       } catch (err: unknown) {
         const friendly = formatPdfErrorMessage(err);
         toast.error(friendly.userMessage);
       } finally {
-        setCommandState({ status: "IDLE" });
+        if (!isLightweight) {
+          setCommandState({ status: "IDLE" });
+        }
       }
     },
+
     [
       annotationValues,
-      commandState.status,
       currentPage,
       fieldValues,
       filename,
@@ -392,6 +420,7 @@ export function SmartPdfEditor() {
       sourceBytes,
       starPdfDoc,
     ],
+
   );
 
   const handleUndo = useCallback(async () => {
@@ -591,6 +620,10 @@ export function SmartPdfEditor() {
     setSearchResults([]);
     setHistoryState(createInitialHistoryState(new Uint8Array(0)));
     setSelectedItem(null);
+    setEditorMode("SELECT");
+    setFillAndSignTool("text");
+    setSignatureFile(null);
+    setShowFlatFormBanner(true);
   }, [cleanupProxy]);
 
   const handleOpenNewFileClick = useCallback(() => {
@@ -600,6 +633,107 @@ export function SmartPdfEditor() {
       performOpenNewFile();
     }
   }, [isModified, performOpenNewFile]);
+
+  // Global Keyboard Shortcuts (Escape to cancel tool mode or selection)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (editorMode === "FILL_AND_SIGN") {
+          setEditorMode("SELECT");
+        } else if (selectedItem) {
+          setSelectedItem(null);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editorMode, selectedItem]);
+
+  // Creation & Placement Handlers
+  const handlePlaceFreeText = useCallback(
+    (pageIndex: number, x: number, y: number, text: string) => {
+      void executeCommand(new AddFreeTextCommand(pageIndex, x, y, text, 12, [0, 0, 0]));
+    },
+    [executeCommand],
+  );
+
+  const handlePlaceCheck = useCallback(
+    (pageIndex: number, x: number, y: number) => {
+      void executeCommand(new AddCheckMarkCommand(pageIndex, x, y, 16));
+    },
+    [executeCommand],
+  );
+
+  const handlePlaceCross = useCallback(
+    (pageIndex: number, x: number, y: number) => {
+      void executeCommand(new AddCrossMarkCommand(pageIndex, x, y, 16));
+    },
+    [executeCommand],
+  );
+
+  const handlePlaceSignature = useCallback(
+    (pageIndex: number, x: number, y: number) => {
+      if (signatureFile) {
+        void executeCommand(new AddImageCommand(pageIndex, x, y, 120, 40, signatureFile));
+      } else {
+        signatureInputRef.current?.click();
+      }
+    },
+    [signatureFile, executeCommand],
+  );
+
+  const handlePlaceDrawing = useCallback(
+    (
+      pageIndex: number,
+      inkList: [number, number][][],
+      rect: [number, number, number, number],
+    ) => {
+      void executeCommand(new AddInkAnnotationCommand(pageIndex, inkList, rect, [0, 0, 0.8], 2));
+    },
+    [executeCommand],
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (annotId: string) => {
+      await executeCommand(new DeleteAnnotationCommand(currentPage - 1, annotId));
+    },
+    [currentPage, executeCommand],
+  );
+
+  const handleFormFieldChange = useCallback(
+    (fieldName: string, value: string | boolean | string[]) => {
+      setFieldValues((prev) => ({ ...prev, [fieldName]: value }));
+      setIsModified(true);
+      if (sourceBytes) {
+        setHistoryState((prev) =>
+          pushHistorySnapshot(prev, sourceBytes, `Update field "${fieldName}"`),
+        );
+      }
+    },
+    [sourceBytes],
+  );
+
+  const handleAnnotationChange = useCallback(
+    (annotId: string, value: string) => {
+      setAnnotationValues((prev) => ({ ...prev, [annotId]: value }));
+      setIsModified(true);
+      if (sourceBytes) {
+        setHistoryState((prev) =>
+          pushHistorySnapshot(prev, sourceBytes, "Update annotation"),
+        );
+      }
+    },
+    [sourceBytes],
+  );
+
+
+  const isFlatForm = Boolean(
+    inspectionResult &&
+      inspectionResult.fields.length === 0 &&
+      pageTextSpans.filter((s) => s.text.trim().length > 0).length === 0 &&
+      pageImages.length >= 1,
+  );
+
 
   // Dropzone screen when no document is active
   if (!sourceBytes || !inspectionResult) {
@@ -678,6 +812,43 @@ export function SmartPdfEditor() {
         </div>
       ) : null}
 
+      {/* Flat Form Suggestion Banner */}
+      {showFlatFormBanner && isFlatForm && (
+        <div
+          role="status"
+          className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-900 shrink-0 select-none animate-in fade-in duration-100"
+          data-testid="flat-form-suggestion-banner"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-[11px]">Notice</span>
+            <span className="truncate">This appears to be a flat form. Use Fill & Sign to type anywhere on the page.</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setEditorMode("FILL_AND_SIGN");
+                setShowFlatFormBanner(false);
+              }}
+              className="h-7 text-xs bg-white border-amber-300 text-amber-900 hover:bg-amber-100"
+              data-testid="flat-form-fill-sign-btn"
+            >
+              Use Fill & Sign
+            </Button>
+            <button
+              type="button"
+              onClick={() => setShowFlatFormBanner(false)}
+              className="text-amber-600 hover:text-amber-900 p-1 text-xs"
+              aria-label="Dismiss flat form notice"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Application Toolbar */}
       <PdfToolbar
         filename={filename}
@@ -709,6 +880,15 @@ export function SmartPdfEditor() {
         onMergeClick={() => mergeInputRef.current?.click()}
         isThumbnailsOpen={isThumbnailsOpen}
         onToggleThumbnails={() => setIsThumbnailsOpen(!isThumbnailsOpen)}
+        mode={editorMode}
+        onModeChange={setEditorMode}
+        fillAndSignTool={fillAndSignTool}
+        onFillAndSignToolChange={(tool) => {
+          setFillAndSignTool(tool);
+          if (tool === "signature" && !signatureFile) {
+            signatureInputRef.current?.click();
+          }
+        }}
       />
 
       {/* Page Operations Rail / Actions */}
@@ -776,6 +956,22 @@ export function SmartPdfEditor() {
         }}
       />
 
+      {/* Hidden File Input for Signature Image */}
+      <input
+        ref={signatureInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/jpg"
+        className="hidden"
+        aria-label="Upload signature image"
+        onChange={(e) => {
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            setSignatureFile(files[0]);
+            toast.success("Signature image selected. Click anywhere on the document to place it.");
+          }
+        }}
+      />
+
       {/* Main Workspace Body */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Collapsible Thumbnail Rail */}
@@ -795,7 +991,11 @@ export function SmartPdfEditor() {
           ref={viewportContainerRef}
           className="flex-1 bg-slate-100/90 overflow-auto p-6 sm:p-8 flex items-center justify-center min-w-0 relative"
           aria-label="PDF Document Page Viewport"
-          onClick={() => setSelectedItem(null)}
+          onClick={() => {
+            if (editorMode === "SELECT") {
+              setSelectedItem(null);
+            }
+          }}
         >
           {/* Floating Contextual Object Action Bar */}
           {selectedItem && (
@@ -817,18 +1017,18 @@ export function SmartPdfEditor() {
               onDeleteGraphic={async (graphicId) => {
                 await executeCommand(new DeleteVectorCommand(graphicId));
               }}
-              onFormFieldChange={(fieldName, value) => {
-                void executeCommand(new SetFormFieldValueCommand(fieldName, value));
-              }}
+              onFormFieldChange={handleFormFieldChange}
               formFieldValue={
                 selectedItem.type === "form" ? fieldValues[selectedItem.id] : undefined
               }
-              onAnnotationChange={(annotId, value) => {
-                void executeCommand(new UpdateAnnotationCommand(annotId, value));
-              }}
+              onAnnotationChange={handleAnnotationChange}
+
+
+
               annotationValue={
                 selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
               }
+              onDeleteAnnotation={handleDeleteAnnotation}
             />
           )}
 
@@ -847,10 +1047,18 @@ export function SmartPdfEditor() {
               annotations={inspectionResult.annotations}
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
+              mode={editorMode}
+              fillAndSignTool={fillAndSignTool}
+              onPlaceFreeText={handlePlaceFreeText}
+              onPlaceCheck={handlePlaceCheck}
+              onPlaceCross={handlePlaceCross}
+              onPlaceSignature={handlePlaceSignature}
+              onPlaceDrawing={handlePlaceDrawing}
             />
           </div>
         </main>
       </div>
+
 
       {/* Bottom Application Status Bar */}
       <footer

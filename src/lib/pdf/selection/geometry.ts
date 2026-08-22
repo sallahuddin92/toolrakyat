@@ -64,3 +64,82 @@ export function isPointInRect(
     y <= rect.y + rect.height
   );
 }
+
+/**
+ * Converts a screen pixel coordinate (origin top-left of page canvas)
+ * to standard PDF user-space point (origin bottom-left).
+ * Correctly accounts for zoom scale and page rotation.
+ */
+export function convertPixelsToPdfPoint(
+  pixelX: number,
+  pixelY: number,
+  page: PageDimensions,
+  scale: number,
+  rotation = 0,
+): { x: number; y: number } {
+  const rot = ((rotation % 360) + 360) % 360;
+  const unscaledX = pixelX / Math.max(0.01, scale);
+  const unscaledY = pixelY / Math.max(0.01, scale);
+
+  if (rot === 90) {
+    return {
+      x: unscaledY,
+      y: unscaledX,
+    };
+  }
+  if (rot === 180) {
+    return {
+      x: page.width - unscaledX,
+      y: unscaledY,
+    };
+  }
+  if (rot === 270) {
+    return {
+      x: page.width - unscaledY,
+      y: page.height - unscaledX,
+    };
+  }
+
+  // 0 degrees default
+  return {
+    x: unscaledX,
+    y: Math.max(0, page.height - unscaledY),
+  };
+}
+
+/**
+ * Converts a PDF point (origin bottom-left) to screen pixel coordinate (origin top-left).
+ */
+export function convertPdfPointToPixels(
+  pdfX: number,
+  pdfY: number,
+  page: PageDimensions,
+  scale: number,
+  rotation = 0,
+): { x: number; y: number } {
+  const rot = ((rotation % 360) + 360) % 360;
+  if (rot === 90) {
+    return {
+      x: pdfY * scale,
+      y: pdfX * scale,
+    };
+  }
+  if (rot === 180) {
+    return {
+      x: (page.width - pdfX) * scale,
+      y: pdfY * scale,
+    };
+  }
+  if (rot === 270) {
+    return {
+      x: (page.height - pdfY) * scale,
+      y: (page.width - pdfX) * scale,
+    };
+  }
+
+  return {
+    x: pdfX * scale,
+    y: (page.height - pdfY) * scale,
+  };
+}
+
