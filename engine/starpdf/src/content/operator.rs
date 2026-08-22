@@ -3,19 +3,27 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentOperator {
-    Q,          // q: Save graphics state
-    QEnd,       // Q: Restore graphics state
-    Cm,         // cm: Current transformation matrix
-    Bt,         // BT: Begin text object
-    Et,         // ET: End text object
-    Tf,         // Tf: Set text font and size
-    Tm,         // Tm: Set text matrix
-    Td,         // Td: Move text position
-    TD,         // TD: Move text position and set leading
-    TStar,      // T*: Move to start of next line
-    Tj,         // Tj: Show text string
-    TJ,         // TJ: Show text with glyph positioning
-    Do,         // Do: Invoke named XObject
+    Q,           // q: Save graphics state
+    QEnd,        // Q: Restore graphics state
+    Cm,          // cm: Current transformation matrix
+    Bt,          // BT: Begin text object
+    Et,          // ET: End text object
+    Tf,          // Tf: Set text font and size
+    Tc,          // Tc: Set character spacing
+    Tw,          // Tw: Set word spacing
+    Tz,          // Tz: Set horizontal scaling
+    TL,          // TL: Set text leading
+    Ts,          // Ts: Set text rise
+    Tm,          // Tm: Set text matrix
+    Td,          // Td: Move text position
+    TD,          // TD: Move text position and set leading
+    TStar,       // T*: Move to start of next line
+    Tj,          // Tj: Show text string
+    TJ,          // TJ: Show text with glyph positioning
+    Quote,       // ': Move to next line and show text
+    DoubleQuote, // ": Set word and char spacing, move to next line and show text
+    Do,          // Do: Invoke named XObject
+
     Re,         // re: Append rectangle to path
     M,          // m: Move to
     L,          // l: Line to
@@ -68,13 +76,21 @@ impl ContentOperator {
             "BT" => Self::Bt,
             "ET" => Self::Et,
             "Tf" => Self::Tf,
+            "Tc" => Self::Tc,
+            "Tw" => Self::Tw,
+            "Tz" => Self::Tz,
+            "TL" => Self::TL,
+            "Ts" => Self::Ts,
             "Tm" => Self::Tm,
             "Td" => Self::Td,
             "TD" => Self::TD,
             "T*" => Self::TStar,
             "Tj" => Self::Tj,
             "TJ" => Self::TJ,
+            "'" => Self::Quote,
+            "\"" => Self::DoubleQuote,
             "Do" => Self::Do,
+
             "re" => Self::Re,
             "m" => Self::M,
             "l" => Self::L,
@@ -127,13 +143,21 @@ impl ContentOperator {
             Self::Bt => "BT",
             Self::Et => "ET",
             Self::Tf => "Tf",
+            Self::Tc => "Tc",
+            Self::Tw => "Tw",
+            Self::Tz => "Tz",
+            Self::TL => "TL",
+            Self::Ts => "Ts",
             Self::Tm => "Tm",
             Self::Td => "Td",
             Self::TD => "TD",
             Self::TStar => "T*",
             Self::Tj => "Tj",
             Self::TJ => "TJ",
+            Self::Quote => "'",
+            Self::DoubleQuote => "\"",
             Self::Do => "Do",
+
             Self::Re => "re",
             Self::M => "m",
             Self::L => "l",

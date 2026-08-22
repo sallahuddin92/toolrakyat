@@ -79,9 +79,9 @@ fn test_replace_tj_kerning_array_item() {
     assert_eq!(page_text.spans[1].text, "PDF");
     assert_eq!(page_text.spans[2].text, "Engine");
 
-    // Replace span #1 ("PDF") with "Document"
+    // Replace span #1 ("PDF") with "Doc" (fits within box, exact layout compensation)
     let target = TextEditTarget::from_span(&page_text.spans[1]);
-    let edit_plan = reopened.replace_text(0, &target, "Document").unwrap();
+    let edit_plan = reopened.replace_text(0, &target, "Doc").unwrap();
     let mutated = reopened.export_incremental(&edit_plan).unwrap();
 
     // Verify roundtrip
@@ -89,7 +89,7 @@ fn test_replace_tj_kerning_array_item() {
     let verified_text = verified_doc.extract_page_text(0).unwrap();
     assert_eq!(verified_text.spans.len(), 3);
     assert_eq!(verified_text.spans[0].text, "Star");
-    assert_eq!(verified_text.spans[1].text, "Document");
+    assert_eq!(verified_text.spans[1].text, "Doc");
     assert_eq!(verified_text.spans[2].text, "Engine");
 }
 

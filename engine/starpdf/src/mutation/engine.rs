@@ -388,17 +388,29 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             )));
         }
 
-        // Find active font in content stream up to instruction_index
+        // Find active font and text state in content stream up to instruction_index
         let mut active_font_name: Option<String> = None;
         let mut active_font_size = 12.0;
-        let char_spacing = 0.0;
-        let word_spacing = 0.0;
-        let horiz_scaling = 100.0;
+        let mut char_spacing = 0.0;
+        let mut word_spacing = 0.0;
+        let mut horiz_scaling = 100.0;
 
         for instr in &instructions[0..=target.instruction_index] {
-            if instr.operator == crate::content::ContentOperator::Tf && instr.operands.len() >= 2 {
-                active_font_name = instr.operands[0].as_name().map(ToString::to_string);
-                active_font_size = instr.operands[1].as_f64().unwrap_or(12.0);
+            match instr.operator {
+                crate::content::ContentOperator::Tf if instr.operands.len() >= 2 => {
+                    active_font_name = instr.operands[0].as_name().map(ToString::to_string);
+                    active_font_size = instr.operands[1].as_f64().unwrap_or(12.0);
+                }
+                crate::content::ContentOperator::Tc if !instr.operands.is_empty() => {
+                    char_spacing = instr.operands[0].as_f64().unwrap_or(0.0);
+                }
+                crate::content::ContentOperator::Tw if !instr.operands.is_empty() => {
+                    word_spacing = instr.operands[0].as_f64().unwrap_or(0.0);
+                }
+                crate::content::ContentOperator::Tz if !instr.operands.is_empty() => {
+                    horiz_scaling = instr.operands[0].as_f64().unwrap_or(100.0);
+                }
+                _ => {}
             }
         }
 
@@ -432,7 +444,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
 
         let encoded_replacement = font.encode_text(replacement)?;
 
-        // 6. Evaluate layout / width policy
+        // 6. Evaluate layout / width policy & downstream dependencies
         let target_instr = &instructions[target.instruction_index];
         let original_bytes = match target_instr.operator {
             crate::content::ContentOperator::Tj => target_instr
@@ -476,8 +488,62 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             horiz_scaling,
         )?;
 
+        // Check if downstream text in the same text block depends on this text advance
+        let has_downstream_tj_elements =
+            if target_instr.operator == crate::content::ContentOperator::TJ {
+                target_instr
+                    .operands
+                    .first()
+                    .and_then(crate::content::ContentOperand::as_array)
+                    .is_some_and(|arr| target.operand_index + 1 < arr.len())
+            } else {
+                false
+            };
+
+        let mut has_dependent_downstream_instructions = false;
+        for instr in &instructions[(target.instruction_index + 1)..] {
+            match instr.operator {
+                crate::content::ContentOperator::Et
+                | crate::content::ContentOperator::Bt
+                | crate::content::ContentOperator::Tm
+                | crate::content::ContentOperator::Td
+                | crate::content::ContentOperator::TD
+                | crate::content::ContentOperator::TStar => {
+                    break;
+                }
+                crate::content::ContentOperator::Tj
+                | crate::content::ContentOperator::TJ
+                | crate::content::ContentOperator::Quote
+                | crate::content::ContentOperator::DoubleQuote => {
+                    has_dependent_downstream_instructions = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let has_dependent_downstream =
+            has_downstream_tj_elements || has_dependent_downstream_instructions;
+        let mut compensation = None;
+
         let layout_result = if (orig_width - new_width).abs() < 0.01 {
             LayoutPolicyResult::ExactFit
+        } else if has_dependent_downstream {
+            if new_width > orig_width + 0.5 {
+                return Err(PdfError::UnsupportedLayout(
+                    "Other text in this PDF depends on the spacing of this text run.".into(),
+                ));
+            }
+            // Compensate exact difference using TJ numeric displacement so downstream text does not move
+            let scale_factor = active_font_size * (horiz_scaling / 100.0);
+            if scale_factor > 0.0001 {
+                let n_comp = ((new_width - orig_width) / scale_factor) * 1000.0;
+                compensation = Some(n_comp);
+            }
+            LayoutPolicyResult::FitWithinOriginalBox {
+                original_width: orig_width,
+                new_width,
+            }
         } else if new_width <= orig_width + 0.5 {
             LayoutPolicyResult::FitWithinOriginalBox {
                 original_width: orig_width,
@@ -496,10 +562,11 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         };
 
         // 7. Mutate content stream
-        let modified_decompressed = ContentStreamEditor::replace_in_stream(
+        let modified_decompressed = ContentStreamEditor::replace_in_stream_with_compensation(
             &decompressed_data,
             target,
             &encoded_replacement,
+            compensation,
         )?;
 
         // 8. Re-compress or update stream data
@@ -698,18 +765,30 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             }
         }
 
-        // Find active font for first target
+        // Find active font and text state in content stream up to first target instruction
         let first_target = &targets[0];
         let mut active_font_name: Option<String> = None;
         let mut active_font_size = 12.0;
-        let char_spacing = 0.0;
-        let word_spacing = 0.0;
-        let horiz_scaling = 100.0;
+        let mut char_spacing = 0.0;
+        let mut word_spacing = 0.0;
+        let mut horiz_scaling = 100.0;
 
         for instr in &instructions[0..=first_target.instruction_index] {
-            if instr.operator == crate::content::ContentOperator::Tf && instr.operands.len() >= 2 {
-                active_font_name = instr.operands[0].as_name().map(ToString::to_string);
-                active_font_size = instr.operands[1].as_f64().unwrap_or(12.0);
+            match instr.operator {
+                crate::content::ContentOperator::Tf if instr.operands.len() >= 2 => {
+                    active_font_name = instr.operands[0].as_name().map(ToString::to_string);
+                    active_font_size = instr.operands[1].as_f64().unwrap_or(12.0);
+                }
+                crate::content::ContentOperator::Tc if !instr.operands.is_empty() => {
+                    char_spacing = instr.operands[0].as_f64().unwrap_or(0.0);
+                }
+                crate::content::ContentOperator::Tw if !instr.operands.is_empty() => {
+                    word_spacing = instr.operands[0].as_f64().unwrap_or(0.0);
+                }
+                crate::content::ContentOperator::Tz if !instr.operands.is_empty() => {
+                    horiz_scaling = instr.operands[0].as_f64().unwrap_or(100.0);
+                }
+                _ => {}
             }
         }
 
@@ -743,9 +822,15 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
 
         let encoded_replacement = font.encode_text(replacement)?;
 
-        // 7. Calculate combined original text width across all targets
-        let mut orig_text_combined = String::new();
+        // 7. Calculate combined original text advance across all targets including intermediate TJ adjustments
+        let mut orig_total_advance = 0.0;
+        let mut last_instr_index = 0;
+        let mut last_operand_index = 0;
+
         for t in targets {
+            last_instr_index = last_instr_index.max(t.instruction_index);
+            last_operand_index = last_operand_index.max(t.operand_index);
+
             let target_instr = &instructions[t.instruction_index];
             let original_bytes = match target_instr.operator {
                 crate::content::ContentOperator::Tj => target_instr
@@ -771,18 +856,51 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 _ => &[],
             };
             let decoded = font.decode_bytes(original_bytes);
+            let mut span_text = String::new();
             for (s, _) in decoded {
-                orig_text_combined.push_str(&s);
+                span_text.push_str(&s);
+            }
+            let span_width = font.calculate_text_width(
+                &span_text,
+                active_font_size,
+                char_spacing,
+                word_spacing,
+                horiz_scaling,
+            )?;
+            orig_total_advance += span_width;
+        }
+
+        // Account for any TJ numeric adjustments between the first and last target in the same TJ instruction
+        if first_target.instruction_index == last_instr_index {
+            let instr = &instructions[first_target.instruction_index];
+            if instr.operator == crate::content::ContentOperator::TJ {
+                if let Some(arr) = instr
+                    .operands
+                    .first()
+                    .and_then(crate::content::ContentOperand::as_array)
+                {
+                    let start_op = first_target.operand_index;
+                    let end_op = last_operand_index.min(arr.len().saturating_sub(1));
+                    for op_idx in start_op..=end_op {
+                        match &arr[op_idx] {
+                            crate::content::ContentOperand::Integer(n) => {
+                                let adj = -(*n as f64 / 1000.0)
+                                    * active_font_size
+                                    * (horiz_scaling / 100.0);
+                                orig_total_advance += adj;
+                            }
+                            crate::content::ContentOperand::Real(r) => {
+                                let adj =
+                                    -(*r / 1000.0) * active_font_size * (horiz_scaling / 100.0);
+                                orig_total_advance += adj;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
 
-        let orig_width = font.calculate_text_width(
-            &orig_text_combined,
-            active_font_size,
-            char_spacing,
-            word_spacing,
-            horiz_scaling,
-        )?;
         let new_width = font.calculate_text_width(
             replacement,
             active_font_size,
@@ -791,21 +909,77 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             horiz_scaling,
         )?;
 
-        let layout_result = if (orig_width - new_width).abs() < 0.01 {
+        // Check if downstream text in the same text block depends on this text advance
+        let last_target = targets.last().unwrap();
+        let last_target_instr = &instructions[last_target.instruction_index];
+        let has_downstream_tj_elements =
+            if last_target_instr.operator == crate::content::ContentOperator::TJ {
+                last_target_instr
+                    .operands
+                    .first()
+                    .and_then(crate::content::ContentOperand::as_array)
+                    .is_some_and(|arr| last_target.operand_index + 1 < arr.len())
+            } else {
+                false
+            };
+
+        let mut has_dependent_downstream_instructions = false;
+        for instr in &instructions[(last_instr_index + 1)..] {
+            match instr.operator {
+                crate::content::ContentOperator::Et
+                | crate::content::ContentOperator::Bt
+                | crate::content::ContentOperator::Tm
+                | crate::content::ContentOperator::Td
+                | crate::content::ContentOperator::TD
+                | crate::content::ContentOperator::TStar => {
+                    break;
+                }
+                crate::content::ContentOperator::Tj
+                | crate::content::ContentOperator::TJ
+                | crate::content::ContentOperator::Quote
+                | crate::content::ContentOperator::DoubleQuote => {
+                    has_dependent_downstream_instructions = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let has_dependent_downstream =
+            has_downstream_tj_elements || has_dependent_downstream_instructions;
+        let mut compensation = None;
+
+        let layout_result = if (orig_total_advance - new_width).abs() < 0.01 {
             LayoutPolicyResult::ExactFit
-        } else if new_width <= orig_width + 0.5 {
+        } else if has_dependent_downstream {
+            if new_width > orig_total_advance + 0.5 {
+                return Err(PdfError::UnsupportedLayout(
+                    "Other text in this PDF depends on the spacing of this text run.".into(),
+                ));
+            }
+            // Compensate exact difference using TJ numeric displacement so downstream text does not move
+            let scale_factor = active_font_size * (horiz_scaling / 100.0);
+            if scale_factor > 0.0001 {
+                let n_comp = ((new_width - orig_total_advance) / scale_factor) * 1000.0;
+                compensation = Some(n_comp);
+            }
             LayoutPolicyResult::FitWithinOriginalBox {
-                original_width: orig_width,
+                original_width: orig_total_advance,
+                new_width,
+            }
+        } else if new_width <= orig_total_advance + 0.5 {
+            LayoutPolicyResult::FitWithinOriginalBox {
+                original_width: orig_total_advance,
                 new_width,
             }
         } else {
-            if new_width > orig_width * 3.0 && (new_width - orig_width) > 150.0 {
+            if new_width > orig_total_advance * 3.0 && (new_width - orig_total_advance) > 150.0 {
                 return Err(PdfError::UnsupportedLayout(format!(
-                    "Replacement text advance ({new_width:.1}pt) significantly exceeds original width ({orig_width:.1}pt) and would require complex line reflow"
+                    "Replacement text advance ({new_width:.1}pt) significantly exceeds original width ({orig_total_advance:.1}pt) and would require complex line reflow"
                 )));
             }
             LayoutPolicyResult::WidthChanged {
-                original_width: orig_width,
+                original_width: orig_total_advance,
                 new_width,
             }
         };
@@ -818,7 +992,11 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         }
 
         let modified_decompressed =
-            ContentStreamEditor::replace_multiple_in_stream(&decompressed_data, &edits)?;
+            ContentStreamEditor::replace_multiple_in_stream_with_compensation(
+                &decompressed_data,
+                &edits,
+                compensation,
+            )?;
 
         // 9. Re-compress or update stream data
         let final_stream_data = if target_stream_obj.dict.contains_key("Filter") {

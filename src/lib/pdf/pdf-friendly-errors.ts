@@ -44,11 +44,26 @@ export function formatPdfErrorMessage(error: unknown): FriendlyErrorResult {
     };
   }
 
-  // 3. Complex Script / Vertical Writing
+  // 3. Layout / Spacing Dependencies
+  if (
+    rawMessage.includes("depends on the spacing of this text run") ||
+    rawMessage.includes("UNSUPPORTED_LAYOUT") ||
+    rawMessage.includes("UnsupportedLayout")
+  ) {
+    return {
+      userMessage: "This text can't be safely edited in place.",
+      technicalDetails: "Other text in this PDF depends on the spacing of this text run.",
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 4. Complex Script / Vertical Writing
   if (
     rawMessage.includes("UNSUPPORTED_COMPLEX_SCRIPT") ||
     rawMessage.includes("UNSUPPORTED_VERTICAL_WRITING")
   ) {
+
     return {
       userMessage:
         "This text uses complex script shaping or vertical writing layout, which is currently read-only.",
