@@ -28,12 +28,12 @@ import {
   X as CrossIcon,
   Image as ImageIcon,
   PenTool,
+  Sparkles,
 } from "lucide-react";
 import type { ExportMode } from "@/lib/pdf/pdf-types";
 
 export type EditorMode = "SELECT" | "TEXT" | "FILL_AND_SIGN" | "ANNOTATE" | "PAGES";
 export type FillAndSignTool = "text" | "check" | "cross" | "signature" | "draw";
-
 
 interface PdfToolbarProps {
   filename: string;
@@ -67,8 +67,9 @@ interface PdfToolbarProps {
   onModeChange?: (mode: EditorMode) => void;
   fillAndSignTool?: FillAndSignTool;
   onFillAndSignToolChange?: (tool: FillAndSignTool) => void;
+  formAssistEnabled?: boolean;
+  onToggleFormAssist?: () => void;
 }
-
 
 export function PdfToolbar({
   filename,
@@ -102,7 +103,10 @@ export function PdfToolbar({
   onModeChange,
   fillAndSignTool = "text",
   onFillAndSignToolChange,
+  formAssistEnabled = true,
+  onToggleFormAssist,
 }: PdfToolbarProps) {
+
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
   const zoomPercentage = Math.round(scale * 100);
@@ -624,6 +628,23 @@ export function PdfToolbar({
               <PenTool className="size-3 text-purple-400" />
               <span>Draw</span>
             </Button>
+
+            {onToggleFormAssist && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={onToggleFormAssist}
+                className={`h-7 text-xs gap-1 rounded-md text-slate-200 hover:text-white ${
+                  formAssistEnabled ? "bg-amber-600 text-white font-semibold" : "hover:bg-slate-800 text-slate-300"
+                }`}
+                title="Toggle Form Assist (Geometric Field Detection)"
+                data-testid="toolbar-form-assist-toggle-btn"
+              >
+                <Sparkles className="size-3 text-amber-300" />
+                <span>Form Assist {formAssistEnabled ? "ON" : "OFF"}</span>
+              </Button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -642,6 +663,7 @@ export function PdfToolbar({
               <span>Exit</span>
             </Button>
           </div>
+
         </div>
       )}
     </div>

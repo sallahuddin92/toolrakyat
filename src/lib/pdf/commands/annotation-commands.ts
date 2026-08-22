@@ -2,8 +2,13 @@ import type { SmartPdfCommand, SmartPdfCommandContext, SmartPdfCommandResult } f
 
 interface ExtendedStarPdfDoc {
   getAnnotations?: (pageIndex: number) => Promise<Array<{ object_num: number; object_gen: number; contents?: string }>>;
-  updateAnnotation?: (pageIndex: number, annotId: string, value: string) => Promise<void>;
+  updateAnnotation?: (
+    objectNum: number,
+    objectGen: number,
+    input: { contents?: string },
+  ) => Promise<void>;
 }
+
 
 export class AddFreeTextCommand implements SmartPdfCommand {
   readonly id = "annotation.add_freetext";
@@ -188,7 +193,7 @@ export class DeleteAnnotationCommand implements SmartPdfCommand {
   ) {}
 
   async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
-    const { starPdfDoc } = context;
+    const { starPdfDoc, inspectionResult } = context;
     if (!starPdfDoc) {
       throw new Error("No active StarPDF document handle available.");
     }
@@ -197,27 +202,43 @@ export class DeleteAnnotationCommand implements SmartPdfCommand {
     let targetGen = this.objectGen;
 
     if (targetNum === undefined && this.annotationId) {
-      // Check if annotationId contains numbers, e.g. "annot-42-0", "annot-0-42", "42"
-      const parts = this.annotationId.match(/\d+/g);
-      if (parts && parts.length > 0) {
-        targetNum = parseInt(parts[parts.length - (parts.length > 1 ? 2 : 1)], 10);
-        targetGen = parts.length > 1 ? parseInt(parts[parts.length - 1], 10) : 0;
-      } else {
-        const extendedDoc = starPdfDoc as unknown as ExtendedStarPdfDoc;
-        if (typeof extendedDoc.getAnnotations === "function") {
-          const annots = await extendedDoc.getAnnotations(this.pageIndex);
-          const match = annots.find(
-            (a) =>
-              `${a.object_num}` === this.annotationId ||
-              `annot-${this.pageIndex}-${a.object_num}` === this.annotationId ||
-              a.contents === this.annotationId,
-          );
-          if (match) {
-            targetNum = match.object_num;
-            targetGen = match.object_gen;
-          } else if (annots.length > 0) {
-            targetNum = annots[0].object_num;
-            targetGen = annots[0].object_gen;
+      // 1. First check inspectionResult for exact match with objectNumber
+      if (inspectionResult) {
+        const match = inspectionResult.annotations.find(
+          (a) =>
+            a.id === this.annotationId ||
+            (a.objectNumber !== undefined &&
+              `annot-obj-${a.objectNumber}-${a.generationNumber ?? 0}` === this.annotationId),
+        );
+        if (match && match.objectNumber !== undefined) {
+          targetNum = match.objectNumber;
+          targetGen = match.generationNumber ?? 0;
+        }
+      }
+
+      // 2. Check if annotationId contains object numbers, e.g. "annot-obj-42-0"
+      if (targetNum === undefined) {
+        const parts = this.annotationId.match(/\d+/g);
+        if (parts && parts.length > 0) {
+          targetNum = parseInt(parts[parts.length - (parts.length > 1 ? 2 : 1)], 10);
+          targetGen = parts.length > 1 ? parseInt(parts[parts.length - 1], 10) : 0;
+        } else {
+          const extendedDoc = starPdfDoc as unknown as ExtendedStarPdfDoc;
+          if (typeof extendedDoc.getAnnotations === "function") {
+            const annots = await extendedDoc.getAnnotations(this.pageIndex);
+            const match = annots.find(
+              (a) =>
+                `${a.object_num}` === this.annotationId ||
+                `annot-${this.pageIndex}-${a.object_num}` === this.annotationId ||
+                a.contents === this.annotationId,
+            );
+            if (match) {
+              targetNum = match.object_num;
+              targetGen = match.object_gen;
+            } else if (annots.length > 0) {
+              targetNum = annots[0].object_num;
+              targetGen = annots[0].object_gen;
+            }
           }
         }
       }
@@ -248,23 +269,45 @@ export class UpdateAnnotationCommand implements SmartPdfCommand {
   ) {}
 
   async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
-    const { starPdfDoc, currentPage } = context;
+    const { starPdfDoc, inspectionResult } = context;
+
+    let targetNum: number | undefined;
+    let targetGen = 0;
+
+    if (inspectionResult) {
+      const match = inspectionResult.annotations.find(
+        (a) =>
+          a.id === this.annotId ||
+          (a.objectNumber !== undefined &&
+            `annot-obj-${a.objectNumber}-${a.generationNumber ?? 0}` === this.annotId),
+      );
+      if (match && match.objectNumber !== undefined) {
+        targetNum = match.objectNumber;
+        targetGen = match.generationNumber ?? 0;
+      }
+    }
 
     const extendedDoc = starPdfDoc as unknown as ExtendedStarPdfDoc;
-    if (extendedDoc && typeof extendedDoc.updateAnnotation === "function") {
-      const pageIndex = currentPage - 1;
-      await extendedDoc.updateAnnotation(pageIndex, this.annotId, this.value);
+    if (extendedDoc && typeof extendedDoc.updateAnnotation === "function" && targetNum !== undefined) {
+      await extendedDoc.updateAnnotation(targetNum, targetGen, { contents: this.value });
       const updatedBytes = await starPdfDoc!.exportIncremental();
       return {
         bytes: updatedBytes,
-        annotationValues: { [this.annotId]: this.value },
+        annotationValues: {
+          [this.annotId]: this.value,
+          ...(targetNum !== undefined ? { [`annot-obj-${targetNum}-${targetGen}`]: this.value } : {}),
+        },
         message: `Annotation updated.`,
       };
     }
 
     return {
-      annotationValues: { [this.annotId]: this.value },
+      annotationValues: {
+        [this.annotId]: this.value,
+        ...(targetNum !== undefined ? { [`annot-obj-${targetNum}-${targetGen}`]: this.value } : {}),
+      },
       message: `Annotation updated.`,
     };
   }
 }
+

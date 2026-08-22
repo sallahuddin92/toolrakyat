@@ -14,8 +14,11 @@ export interface AcroFormField {
   options?: string[];
   isReadOnly: boolean;
   isRequired: boolean;
+  pageNumber?: number;
+  pageIndex?: number;
   rect?: { x: number; y: number; width: number; height: number };
 }
+
 
 export interface PdfDocumentMetadata {
   filename: string;
@@ -44,7 +47,10 @@ export interface PdfMarkupAnnotation {
   rect: { x: number; y: number; width: number; height: number };
   pageIndex: number;
   author?: string;
+  objectNumber?: number;
+  generationNumber?: number;
 }
+
 
 export interface DocumentInspectionResult {
   metadata: PdfDocumentMetadata;
