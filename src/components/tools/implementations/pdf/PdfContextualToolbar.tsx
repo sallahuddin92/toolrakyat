@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef } from "react";
+
 import { Button } from "@/components/ui/button";
+
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -39,7 +41,9 @@ interface PdfContextualToolbarProps {
   formFieldValue?: string | boolean | string[];
   onAnnotationChange?: (annotId: string, value: string) => void;
   annotationValue?: string;
+  onDeleteAnnotation?: (annotId: string) => Promise<void>;
 }
+
 
 function TextControls({
   span,
@@ -307,6 +311,69 @@ function VectorControls({
   );
 }
 
+function AnnotationControls({
+  annot,
+  annotationValue,
+  onAnnotationChange,
+  onDeleteAnnotation,
+}: {
+  annot: PdfMarkupAnnotation;
+  annotationValue?: string;
+  onAnnotationChange?: (annotId: string, value: string) => void;
+  onDeleteAnnotation?: (annotId: string) => Promise<void>;
+}) {
+  const [localText, setLocalText] = useState<string | null>(null);
+  const displayVal = localText ?? annotationValue ?? annot.contents ?? "";
+
+  if (annot.subtype === "Link") {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="context-annotation-controls">
+        <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+          Link
+        </Badge>
+        <span className="truncate max-w-[260px] text-slate-500 italic">
+          Interactive Link Destination (Read-Only)
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+      <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+        {annot.subtype}
+      </Badge>
+      <Input
+        type="text"
+        value={displayVal}
+        onChange={(e) => {
+          setLocalText(e.target.value);
+          onAnnotationChange?.(annot.id, e.target.value);
+        }}
+        className="h-8 text-xs w-48 sm:w-64 bg-white"
+        placeholder="Annotation text / contents..."
+        data-testid="context-annotation-input"
+        autoFocus
+      />
+
+      {onDeleteAnnotation && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => void onDeleteAnnotation(annot.id)}
+          className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+          title="Delete annotation"
+          data-testid="context-annotation-delete-btn"
+        >
+          <Trash2 className="size-3.5" />
+          <span>Delete</span>
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function PdfContextualToolbar({
   selection,
   onDeselect,
@@ -319,6 +386,7 @@ export function PdfContextualToolbar({
   formFieldValue,
   onAnnotationChange,
   annotationValue,
+  onDeleteAnnotation,
 }: PdfContextualToolbarProps) {
   if (!selection) return null;
 
@@ -368,7 +436,7 @@ export function PdfContextualToolbar({
         />
       )}
 
-      {/* VECTOR SELECTION CONTROLS */}
+      {/* VECTOR GRAPHIC SELECTION CONTROLS */}
       {selection.type === "vector" && (
         <VectorControls
           key={selection.id}
@@ -442,54 +510,30 @@ export function PdfContextualToolbar({
           );
         }
 
+        // Default text-like form field
         return (
           <Input
             type="text"
-            value={String(currentVal ?? "")}
+            value={typeof currentVal === "string" ? currentVal : ""}
             onChange={(e) => onFormFieldChange(field.name, e.target.value)}
+            disabled={field.isReadOnly}
             className="h-8 text-xs w-48 sm:w-64 bg-white"
             placeholder="Field value..."
             data-testid="context-form-input"
-            autoFocus
           />
         );
       })()}
 
       {/* MARKUP ANNOTATION SELECTION CONTROLS */}
-      {selection.type === "annotation" && (() => {
-        const annot = selection.data as PdfMarkupAnnotation;
-        const currentVal = annotationValue ?? annot.contents;
-
-        if (annot.subtype === "Link") {
-          return (
-            <div className="flex items-center gap-2 text-xs text-slate-600" data-testid="context-annotation-controls">
-              <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
-                Link
-              </Badge>
-              <span className="truncate max-w-[260px] text-slate-500 italic">
-                Interactive Link Destination (Read-Only)
-              </span>
-            </div>
-          );
-        }
-
-        return (
-          <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
-            <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
-              {annot.subtype}
-            </Badge>
-            <Input
-              type="text"
-              value={currentVal}
-              onChange={(e) => onAnnotationChange?.(annot.id, e.target.value)}
-              className="h-8 text-xs w-48 sm:w-64 bg-white"
-              placeholder="Annotation text / contents..."
-              data-testid="context-annotation-input"
-              autoFocus
-            />
-          </div>
-        );
-      })()}
+      {selection.type === "annotation" && (
+        <AnnotationControls
+          key={selection.id}
+          annot={selection.data as PdfMarkupAnnotation}
+          annotationValue={annotationValue}
+          onAnnotationChange={onAnnotationChange}
+          onDeleteAnnotation={onDeleteAnnotation}
+        />
+      )}
 
       {/* Close / Deselect Button */}
       <Button

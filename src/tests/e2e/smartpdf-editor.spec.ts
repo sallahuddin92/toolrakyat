@@ -2645,6 +2645,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     page,
   }) => {
     const fixturePath = path.join(process.cwd(), "test-assets/multi-page.test.pdf");
+
     const bytes = fs.readFileSync(fixturePath);
     await uploadPdfBytes(page, "phase2-atomicity.pdf", bytes);
 
@@ -2665,7 +2666,138 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(thumbRail).toBeVisible();
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
   });
+
+  test("v0.20 Phase 3A: Flat Form Detection & Fill & Sign Suggestion Activation", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "flat-form-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Verify non-blocking flat form suggestion banner is visible
+    const banner = page.locator('[data-testid="flat-form-suggestion-banner"]');
+    await expect(banner).toBeVisible({ timeout: 5000 });
+    await expect(banner).toContainText("This appears to be a flat form");
+
+    // Click "Use Fill & Sign" CTA
+    const fillSignBtn = page.locator('[data-testid="flat-form-fill-sign-btn"]');
+    await fillSignBtn.click();
+
+    // Verify Fill & Sign sub-toolbar is displayed and banner is dismissed
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible({ timeout: 5000 });
+    await expect(banner).not.toBeVisible();
+  });
+
+  test("v0.20 Phase 3A: Fill & Sign — Type Anywhere (Add FreeText Annotation) with Undo & Redo", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "flat-form-typing.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Switch to Fill & Sign mode
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible({ timeout: 5000 });
+
+    // Select Add Text tool
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+
+    // Click on canvas overlay to open inline placement input
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+    await overlay.click({ position: { x: 150, y: 150 } });
+
+    const inlineInput = page.locator('[data-testid="inline-text-placement-input"]');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+
+    // Type text and commit
+    await inlineInput.fill("Jane Doe 12345");
+    await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
+
+    // Verify input closed and document is modified
+    await expect(inlineInput).not.toBeVisible();
+    const statusBar = page.locator('[data-testid="smartpdf-status-bar"]');
+    await expect(statusBar).toContainText("Unsaved changes");
+
+    // Verify Undo works
+    await page.locator('[data-testid="toolbar-undo-btn"]').click();
+    await page.waitForTimeout(300);
+
+    // Verify Redo works
+    await page.locator('[data-testid="toolbar-redo-btn"]').click();
+    await page.waitForTimeout(300);
+    await expect(statusBar).toContainText("Unsaved changes");
+  });
+
+  test("v0.20 Phase 3A: Fill & Sign — Checkmark and Crossmark Placement", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "flat-form-marks.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Switch to Fill & Sign mode
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible({ timeout: 5000 });
+
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+
+    // 1. Place Checkmark
+    await page.locator('[data-testid="fill-sign-tool-check-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 120 } });
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+    // 2. Place Crossmark
+    await page.locator('[data-testid="fill-sign-tool-cross-btn"]').click();
+    await overlay.click({ position: { x: 100, y: 160 } });
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+    // 3. Exit Fill & Sign mode
+    await page.locator('[data-testid="fill-sign-exit-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).not.toBeVisible();
+  });
+
+  test("v0.20 Phase 3A: Fill & Sign — Escape Cancellation and Mode Toggling", async ({
+    page,
+  }) => {
+    const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+    await uploadPdfBytes(page, "flat-form-escape.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // Switch to Fill & Sign mode
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible({ timeout: 5000 });
+
+    // Open inline text input
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+    await overlay.click({ position: { x: 120, y: 120 } });
+
+    const inlineInput = page.locator('[data-testid="inline-text-placement-input"]');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+
+    // Press Escape -> Closes inline input without mutating
+    await page.keyboard.press("Escape");
+    await expect(inlineInput).not.toBeVisible();
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).not.toContainText("Unsaved changes");
+
+    // Press Escape again -> Exits Fill & Sign mode
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).not.toBeVisible();
+  });
 });
+
 
 
 

@@ -11,6 +11,7 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
+import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
 
 interface PdfPageCanvasProps {
   pdfDocument: PDFDocumentProxy | null;
@@ -28,6 +29,17 @@ interface PdfPageCanvasProps {
   onSelectItem?: (item: SmartPdfSelection) => void;
   className?: string;
   onPageRendered?: (pageNumber: number, width: number, height: number) => void;
+  mode?: EditorMode;
+  fillAndSignTool?: FillAndSignTool;
+  onPlaceFreeText?: (pageIndex: number, pdfX: number, pdfY: number, text: string) => void;
+  onPlaceCheck?: (pageIndex: number, pdfX: number, pdfY: number) => void;
+  onPlaceCross?: (pageIndex: number, pdfX: number, pdfY: number) => void;
+  onPlaceSignature?: (pageIndex: number, pdfX: number, pdfY: number) => void;
+  onPlaceDrawing?: (
+    pageIndex: number,
+    inkList: [number, number][][],
+    rect: [number, number, number, number],
+  ) => void;
 }
 
 export function PdfPageCanvas({
@@ -46,6 +58,13 @@ export function PdfPageCanvas({
   onSelectItem,
   className = "",
   onPageRendered,
+  mode = "SELECT",
+  fillAndSignTool = "text",
+  onPlaceFreeText,
+  onPlaceCheck,
+  onPlaceCross,
+  onPlaceSignature,
+  onPlaceDrawing,
 }: PdfPageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isRendering, setIsRendering] = useState<boolean>(false);
@@ -159,7 +178,7 @@ export function PdfPageCanvas({
         data-rendered={renderCompleted && !isRendering ? "true" : "false"}
         className="block transition-all"
       />
-      {/* Interactive Selection Overlay */}
+      {/* Interactive Selection & Creation Overlay */}
       {onSelectItem && !isRendering && (
         <PdfInteractiveOverlay
           pageWidth={pageWidth}
@@ -174,6 +193,13 @@ export function PdfPageCanvas({
           pageNumber={pageNumber}
           selectedItem={selectedItem}
           onSelectItem={onSelectItem}
+          mode={mode}
+          fillAndSignTool={fillAndSignTool}
+          onPlaceFreeText={onPlaceFreeText}
+          onPlaceCheck={onPlaceCheck}
+          onPlaceCross={onPlaceCross}
+          onPlaceSignature={onPlaceSignature}
+          onPlaceDrawing={onPlaceDrawing}
         />
       )}
       {isRendering && (

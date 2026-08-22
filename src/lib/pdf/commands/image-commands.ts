@@ -1,4 +1,45 @@
 import type { SmartPdfCommand, SmartPdfCommandContext, SmartPdfCommandResult } from "./types";
+import { convertToJpegBytes } from "../image-utils";
+
+export class AddImageCommand implements SmartPdfCommand {
+  readonly id = "image.add";
+  readonly label = "Insert signature image";
+  readonly isMutating = true;
+
+  constructor(
+    public readonly pageIndex: number,
+    public readonly x: number,
+    public readonly y: number,
+    public readonly width: number,
+    public readonly height: number,
+    public readonly fileOrBytes: File | Uint8Array,
+  ) {}
+
+  async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
+    const { starPdfDoc } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
+
+    const { bytes } = await convertToJpegBytes(this.fileOrBytes);
+
+    await starPdfDoc.addImage(
+      this.pageIndex,
+      bytes,
+      this.x,
+      this.y,
+      this.width,
+      this.height,
+    );
+    const updatedBytes = await starPdfDoc.exportIncremental();
+
+
+    return {
+      bytes: updatedBytes,
+      message: "Signature image inserted.",
+    };
+  }
+}
 
 export class ReplaceImageCommand implements SmartPdfCommand {
   readonly id = "image.replace";
@@ -16,16 +57,10 @@ export class ReplaceImageCommand implements SmartPdfCommand {
       throw new Error("No active StarPDF document handle available.");
     }
 
-    let imageBytes: Uint8Array;
-    if (this.fileOrBytes instanceof Uint8Array) {
-      imageBytes = this.fileOrBytes;
-    } else {
-      const buffer = await this.fileOrBytes.arrayBuffer();
-      imageBytes = new Uint8Array(buffer);
-    }
+    const { bytes } = await convertToJpegBytes(this.fileOrBytes);
 
     const pageIndex = currentPage - 1;
-    await starPdfDoc.replaceImage(pageIndex, this.imageId, imageBytes, true);
+    await starPdfDoc.replaceImage(pageIndex, this.imageId, bytes, true);
     const updatedBytes = await starPdfDoc.exportIncremental();
 
     return {
