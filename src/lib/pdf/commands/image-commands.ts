@@ -70,6 +70,45 @@ export class ReplaceImageCommand implements SmartPdfCommand {
   }
 }
 
+export class UpdateImageCommand implements SmartPdfCommand {
+  readonly id = "image.update";
+  readonly label = "Transform image";
+  readonly isMutating = true;
+
+  constructor(
+    public readonly imageId: string,
+    public readonly x: number,
+    public readonly y: number,
+    public readonly width: number,
+    public readonly height: number,
+    public readonly pageIndex?: number,
+  ) {}
+
+  async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
+    const { starPdfDoc, currentPage } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
+
+    const pageIdx = this.pageIndex !== undefined ? this.pageIndex : currentPage - 1;
+    await starPdfDoc.updateImage(
+      pageIdx,
+      this.imageId,
+      this.x,
+      this.y,
+      this.width,
+      this.height,
+      true,
+    );
+    const updatedBytes = await starPdfDoc.exportIncremental();
+
+    return {
+      bytes: updatedBytes,
+      message: "Image updated successfully.",
+    };
+  }
+}
+
 export class RemoveImageCommand implements SmartPdfCommand {
   readonly id = "image.remove";
   readonly label = "Remove image";
@@ -94,3 +133,4 @@ export class RemoveImageCommand implements SmartPdfCommand {
     };
   }
 }
+

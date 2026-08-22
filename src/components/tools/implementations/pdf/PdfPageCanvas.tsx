@@ -40,9 +40,17 @@ interface PdfPageCanvasProps {
   onPlaceCross?: (pageIndex: number, pdfX: number, pdfY: number) => void;
   onPlaceSignature?: (pageIndex: number, pdfX: number, pdfY: number) => void;
   onPlaceDrawing?: (
+
     pageIndex: number,
     inkList: [number, number][][],
     rect: [number, number, number, number],
+  ) => void;
+  onTransformImage?: (pageIndex: number, imageId: string, pdfRect: import("@/lib/pdf/selection").PdfRect) => void;
+  onTransformVector?: (
+    pageIndex: number,
+    graphicId: string,
+    pdfRect: import("@/lib/pdf/selection").PdfRect,
+    linePoints?: { x1: number; y1: number; x2: number; y2: number },
   ) => void;
 }
 
@@ -72,7 +80,10 @@ export function PdfPageCanvas({
   onPlaceCross,
   onPlaceSignature,
   onPlaceDrawing,
+  onTransformImage,
+  onTransformVector,
 }: PdfPageCanvasProps) {
+
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isRendering, setIsRendering] = useState<boolean>(false);
@@ -213,7 +224,10 @@ export function PdfPageCanvas({
           onPlaceCross={onPlaceCross}
           onPlaceSignature={onPlaceSignature}
           onPlaceDrawing={onPlaceDrawing}
+          onTransformImage={onTransformImage}
+          onTransformVector={onTransformVector}
         />
+
       )}
 
       {isRendering && (

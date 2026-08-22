@@ -683,3 +683,38 @@ fn test_invalid_image_format_refusal() {
         other => panic!("Expected UnsupportedImageFormat, got {:?}", other),
     }
 }
+
+#[test]
+fn test_image_move_and_resize_roundtrip() {
+    let img1 = make_minimal_jpeg(0x10, 0x20, 0x30);
+    let pdf_bytes = make_pdf_with_image(&img1);
+
+    let mut doc = PdfDocument::from_bytes(&pdf_bytes).expect("Valid PDF");
+    let images = doc.enumerate_images(0).expect("Enumerate");
+    assert_eq!(images.len(), 1);
+    let orig_id = images[0].image_id.clone();
+
+    // Move to (200, 400) and resize to (150, 180)
+    let plan = doc
+        .update_image(&starpdf::image::UpdateImageSpec {
+            page_index: 0,
+            image_id: orig_id,
+            new_x: 200.0,
+            new_y: 400.0,
+            new_width: 150.0,
+            new_height: 180.0,
+            clone_if_shared: true,
+        })
+        .expect("Update image position/size");
+
+    let exported = doc.export_incremental(&plan).expect("Export");
+    let mut reopened = PdfDocument::from_bytes(&exported).expect("Reopen");
+    let reopened_images = reopened.enumerate_images(0).expect("Enumerate reopened");
+
+    assert_eq!(reopened_images.len(), 1);
+    let updated_img = &reopened_images[0];
+    assert!((updated_img.rect[0] - 200.0).abs() < 1e-2);
+    assert!((updated_img.rect[1] - 400.0).abs() < 1e-2);
+    assert!((updated_img.rect[2] - 350.0).abs() < 1e-2);
+    assert!((updated_img.rect[3] - 580.0).abs() < 1e-2);
+}

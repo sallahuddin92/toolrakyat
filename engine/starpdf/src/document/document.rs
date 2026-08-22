@@ -457,6 +457,14 @@ impl<'a> PdfDocument<'a> {
         self.apply_mutation(&[crate::mutation::PdfChange::AddImage { spec: spec.clone() }])
     }
 
+    /// Moves and/or resizes an existing Image XObject on a page.
+    pub fn update_image(
+        &mut self,
+        spec: &crate::image::UpdateImageSpec,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::UpdateImage { spec: spec.clone() }])
+    }
+
     /// Removes an Image XObject draw operation from a page.
     pub fn remove_image(
         &mut self,

@@ -226,12 +226,23 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     modified_objects.extend(plan.modified_objects);
                     overall_status = overall_status.combine(plan.appearance_status);
                 }
+                PdfChange::UpdateImage { spec } => {
+                    let plan = crate::image::ImageEditor::update_image(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
+                    modified_objects.extend(plan.modified_objects);
+                    overall_status = overall_status.combine(plan.appearance_status);
+                }
                 PdfChange::RemoveImage { spec } => {
                     let plan =
                         crate::image::ImageEditor::remove_image(self.store, &self.page_refs, spec)?;
                     modified_objects.extend(plan.modified_objects);
                     overall_status = overall_status.combine(plan.appearance_status);
                 }
+
                 PdfChange::UpdateVectorGraphic { spec } => {
                     let plan = crate::vector::VectorEditor::update_graphic(
                         self.store,

@@ -672,6 +672,27 @@ export function starpdf_update_graphic(handle, input_val) {
 
 /**
  * @param {number} handle
+ * @param {number} page_index
+ * @param {string} image_id
+ * @param {number} new_x
+ * @param {number} new_y
+ * @param {number} new_width
+ * @param {number} new_height
+ * @param {boolean} clone_if_shared
+ * @returns {any}
+ */
+export function starpdf_update_image(handle, page_index, image_id, new_x, new_y, new_width, new_height, clone_if_shared) {
+    const ptr0 = passStringToWasm0(image_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_update_image(handle, page_index, ptr0, len0, new_x, new_y, new_width, new_height, clone_if_shared);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {boolean}
  */
 export function starpdf_validate(handle) {

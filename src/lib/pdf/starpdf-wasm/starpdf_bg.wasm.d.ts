@@ -45,6 +45,7 @@ export const starpdf_set_text_field: (a: number, b: bigint, c: number, d: number
 export const starpdf_split_document: (a: number, b: any) => [number, number, number];
 export const starpdf_update_annotation: (a: number, b: bigint, c: number, d: any) => [number, number, number];
 export const starpdf_update_graphic: (a: number, b: any) => [number, number, number];
+export const starpdf_update_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
 export const starpdf_validate: (a: number) => [number, number, number];
 export const starpdf_version: () => [number, number];
 export const __wbindgen_malloc: (a: number, b: number) => number;

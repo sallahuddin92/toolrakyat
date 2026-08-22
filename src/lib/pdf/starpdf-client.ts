@@ -52,7 +52,9 @@ import initWasm, {
   starpdf_enumerate_images,
   starpdf_replace_image,
   starpdf_add_image,
+  starpdf_update_image,
   starpdf_remove_image,
+
   starpdf_enumerate_graphics,
   starpdf_enumerate_all_graphics,
   starpdf_update_graphic,
@@ -395,10 +397,34 @@ export class StarPdfDocumentHandle {
     ) as StarPdfImageMutationResult;
   }
 
+  async updateImage(
+    pageIndex: number,
+    imageId: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    cloneIfShared = true
+  ): Promise<StarPdfImageMutationResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_update_image(
+      this._handle,
+      pageIndex,
+      imageId,
+      x,
+      y,
+      width,
+      height,
+      cloneIfShared
+    ) as StarPdfImageMutationResult;
+  }
+
   async removeImage(
     pageIndex: number,
     imageId: string
   ): Promise<StarPdfImageMutationResult> {
+
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_remove_image(

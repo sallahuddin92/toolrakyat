@@ -4,7 +4,8 @@ import {
   resolveSelectionAfterMutation,
   type SmartPdfSelection,
 } from "./types";
-import { convertPdfRectToPixels, isPointInRect } from "./geometry";
+import { convertPdfRectToPixels, convertPixelsToPdfRect, isPointInRect } from "./geometry";
+
 import type {
   StarPdfTextSpan,
   StarPdfImageInfo,
@@ -64,7 +65,20 @@ describe("SmartPDF Selection Model & Geometry", () => {
       expect(r270.left).toBe(792 - (200 + 30));
       expect(r270.top).toBe(612 - (100 + 50));
     });
+
+    it("convertPixelsToPdfRect accurately inverses convertPdfRectToPixels", () => {
+      const pdfRect = { x: 120, y: 350, width: 180, height: 90 };
+      const pixelRect = convertPdfRectToPixels(pdfRect, page, 1.5, 0);
+
+      const inverted = convertPixelsToPdfRect(pixelRect, page, 1.5, 0);
+      expect(Math.abs(inverted.x - pdfRect.x)).toBeLessThanOrEqual(0.01);
+      expect(Math.abs(inverted.y - pdfRect.y)).toBeLessThanOrEqual(0.01);
+      expect(Math.abs(inverted.width - pdfRect.width)).toBeLessThanOrEqual(0.01);
+      expect(Math.abs(inverted.height - pdfRect.height)).toBeLessThanOrEqual(0.01);
+    });
+
   });
+
 
   describe("isPointInRect", () => {
     const rect = { x: 10, y: 20, width: 100, height: 50 };
