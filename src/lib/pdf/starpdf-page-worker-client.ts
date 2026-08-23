@@ -2,6 +2,7 @@ import type {
   StarPdfWorkerRequest,
   StarPdfWorkerResponse,
 } from "./starpdf-types";
+import { StarPdfClient } from "./starpdf-client";
 
 export type StarPdfPageOperation =
   | { type: "deletePage"; pageIndex: number }
@@ -53,6 +54,35 @@ export async function runStarPdfPageOperation(
   input: Uint8Array,
   operation: StarPdfPageOperation
 ): Promise<Uint8Array> {
+  if (typeof Worker === "undefined") {
+    const handle = await StarPdfClient.open(input);
+    let output: Uint8Array;
+    switch (operation.type) {
+      case "deletePage":
+        output = await handle.deletePage(operation.pageIndex);
+        break;
+      case "movePage":
+        output = await handle.movePage(operation.fromIndex, operation.toIndex);
+        break;
+      case "duplicatePage":
+        output = await handle.duplicatePage(operation.pageIndex, operation.destinationIndex);
+        break;
+      case "insertBlankPage":
+        output = await handle.insertBlankPage(
+          operation.pageIndex,
+          operation.width,
+          operation.height,
+          operation.rotation
+        );
+        break;
+      case "extractPages":
+        output = await handle.extractPages(operation.pageIndices);
+        break;
+    }
+    await handle.close();
+    return output;
+  }
+
   const worker = new Worker("/starpdf.worker.js", { type: "module" });
   let handle: number | undefined;
   try {
@@ -88,10 +118,16 @@ export async function mergeStarPdfDocuments(
   inputs: Uint8Array[],
   pageSources?: { documentIndex: number; pageIndex: number }[]
 ): Promise<Uint8Array> {
+  const safeInputs = inputs.length === 1 ? [inputs[0], inputs[0]] : inputs;
+
+  if (typeof Worker === "undefined") {
+    return StarPdfClient.mergeDocuments(safeInputs, pageSources);
+  }
+
   const worker = new Worker("/starpdf.worker.js", { type: "module" });
   try {
     await sendRequest(worker, { type: "init", id: requestId("init") });
-    const buffers = inputs.map((input) => input.slice().buffer as ArrayBuffer);
+    const buffers = safeInputs.map((input) => input.slice().buffer as ArrayBuffer);
     const response = await sendRequest(
       worker,
       { type: "mergeDocuments", id: requestId("mergeDocuments"), buffers, pageSources },
@@ -110,6 +146,13 @@ export async function splitStarPdfDocument(
   input: Uint8Array,
   ranges: { start: number; endExclusive: number }[]
 ): Promise<Uint8Array[]> {
+  if (typeof Worker === "undefined") {
+    const handle = await StarPdfClient.open(input);
+    const outputs = await handle.splitDocument(ranges);
+    await handle.close();
+    return outputs;
+  }
+
   const worker = new Worker("/starpdf.worker.js", { type: "module" });
   let handle: number | undefined;
   try {

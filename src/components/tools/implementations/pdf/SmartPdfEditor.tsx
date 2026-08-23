@@ -53,10 +53,15 @@ import {
   UpdateAnnotationPropertiesCommand,
   UpdateAnnotationRectCommand,
   MovePageCommand,
+  ReorderPagesCommand,
   DuplicatePageCommand,
+  DuplicatePagesBatchCommand,
   DeletePageCommand,
+  DeletePagesBatchCommand,
   InsertBlankPageCommand,
   ExtractPagesCommand,
+  InsertImportedPagesCommand,
+  SplitDocumentCommand,
   MergeDocumentsCommand,
   ExportDocumentCommand,
 } from "@/lib/pdf/commands";
@@ -77,6 +82,8 @@ import { PdfDocumentInfo } from "./PdfDocumentInfo";
 import { PdfPageOperations } from "./PdfPageOperations";
 import { PdfContextualToolbar } from "./PdfContextualToolbar";
 import { PdfConfirmDialog } from "./PdfConfirmDialog";
+import { SmartPdfImportModal } from "./SmartPdfImportModal";
+import { SmartPdfSplitModal } from "./SmartPdfSplitModal";
 
 export function SmartPdfEditor() {
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
@@ -124,6 +131,10 @@ export function SmartPdfEditor() {
 
   // Unsaved changes confirmation dialog
   const [showConfirmOpenModal, setShowConfirmOpenModal] = useState<boolean>(false);
+
+  // Multi-document / page organizer modals (Phase 6)
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [showSplitModal, setShowSplitModal] = useState<boolean>(false);
 
   // Layout Panel Visibility (Desktop Workspace)
   const [isThumbnailsOpen, setIsThumbnailsOpen] = useState<boolean>(true);
@@ -616,6 +627,102 @@ export function SmartPdfEditor() {
       return next;
     });
   }, []);
+
+  const handleSelectPageRange = useCallback((startPage: number, endPage: number) => {
+    const min = Math.min(startPage, endPage);
+    const max = Math.max(startPage, endPage);
+    const newSet = new Set<number>();
+    for (let p = min; p <= max; p++) {
+      newSet.add(p);
+    }
+    setSelectedPages(newSet);
+  }, []);
+
+  const handleSelectAllPages = useCallback(() => {
+    if (!inspectionResult) return;
+    const total = inspectionResult.metadata.pageCount;
+    setSelectedPages(new Set(Array.from({ length: total }, (_, i) => i + 1)));
+  }, [inspectionResult]);
+
+  const handleClearSelectedPages = useCallback(() => {
+    setSelectedPages(new Set());
+  }, []);
+
+  const handleReorderPages = useCallback(
+    async (movingPages: number[], targetPage: number, placeBefore: boolean) => {
+      if (!inspectionResult) return;
+      const movingZero = movingPages.map((p) => p - 1);
+      const targetZero = targetPage - 1;
+      const cmd = ReorderPagesCommand.fromMoveBlock(
+        inspectionResult.metadata.pageCount,
+        movingZero,
+        targetZero,
+        placeBefore,
+      );
+      await executeCommand(cmd);
+    },
+    [executeCommand, inspectionResult],
+  );
+
+  const handleDuplicateSelected = useCallback(async () => {
+    if (selectedPages.size > 1) {
+      const zeroIndices = Array.from(selectedPages).map((p) => p - 1);
+      await executeCommand(new DuplicatePagesBatchCommand(zeroIndices));
+    } else {
+      await executeCommand(new DuplicatePageCommand(currentPage - 1));
+    }
+  }, [currentPage, executeCommand, selectedPages]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (!inspectionResult) return;
+    if (selectedPages.size > 1) {
+      if (selectedPages.size >= inspectionResult.metadata.pageCount) {
+        toast.error("Cannot delete all pages in a document. At least one page must remain.");
+        return;
+      }
+      const zeroIndices = Array.from(selectedPages).map((p) => p - 1);
+      await executeCommand(new DeletePagesBatchCommand(zeroIndices));
+    } else {
+      if (inspectionResult.metadata.pageCount <= 1) {
+        toast.error("Cannot delete the only page in a document.");
+        return;
+      }
+      await executeCommand(new DeletePageCommand(currentPage - 1));
+    }
+  }, [currentPage, executeCommand, inspectionResult, selectedPages]);
+
+  const handleExtractSelected = useCallback(async () => {
+    const pages = selectedPages.size > 1 ? Array.from(selectedPages) : [currentPage];
+    const zeroIndices = pages.map((p) => p - 1);
+    await executeCommand(new ExtractPagesCommand(zeroIndices));
+  }, [currentPage, executeCommand, selectedPages]);
+
+  const handleImportPages = useCallback(
+    async (
+      importedBytes: Uint8Array,
+      selectedPageIndices: number[],
+      position: "start" | "end" | "before" | "after",
+      sourceFilename: string,
+    ) => {
+      await executeCommand(
+        new InsertImportedPagesCommand(
+          importedBytes,
+          selectedPageIndices,
+          position,
+          currentPage - 1,
+          sourceFilename,
+        ),
+      );
+    },
+    [currentPage, executeCommand],
+  );
+
+  const handleSplitRanges = useCallback(
+    async (ranges: { start: number; endExclusive: number }[]) => {
+      await executeCommand(new SplitDocumentCommand(ranges));
+    },
+    [executeCommand],
+  );
 
   const performOpenNewFile = useCallback(() => {
     cleanupProxy();
@@ -1110,13 +1217,7 @@ export function SmartPdfEditor() {
         pageCount={inspectionResult.metadata.pageCount}
         selectedCount={selectedPages.size}
         isProcessing={isBusy}
-        onDelete={() => {
-          if (inspectionResult.metadata.pageCount <= 1) {
-            toast.error("Cannot delete the only page in a document.");
-            return;
-          }
-          void executeCommand(new DeletePageCommand(currentPage - 1));
-        }}
+        onDelete={handleDeleteSelected}
         onMoveLeft={() => {
           if (currentPage <= 1) return;
           void executeCommand(new MovePageCommand(currentPage - 1, currentPage - 2));
@@ -1125,9 +1226,7 @@ export function SmartPdfEditor() {
           if (currentPage >= inspectionResult.metadata.pageCount) return;
           void executeCommand(new MovePageCommand(currentPage - 1, currentPage));
         }}
-        onDuplicate={() => {
-          void executeCommand(new DuplicatePageCommand(currentPage - 1));
-        }}
+        onDuplicate={handleDuplicateSelected}
         onInsertBlank={() => {
           const currentPageInfo = inspectionResult.pages[currentPage - 1] || {
             width: 612,
@@ -1136,17 +1235,19 @@ export function SmartPdfEditor() {
           };
           void executeCommand(
             new InsertBlankPageCommand(
-              currentPage, // insert after current page
+              currentPage - 1, // insert after current page (0-indexed)
               currentPageInfo.width,
               currentPageInfo.height,
               currentPageInfo.rotation as 0 | 90 | 180 | 270,
             ),
           );
         }}
-        onExtract={() => {
-          void executeCommand(new ExtractPagesCommand(Array.from(selectedPages)));
+        onExtract={handleExtractSelected}
+        onMergeFiles={async (additions) => {
+          await executeCommand(new MergeDocumentsCommand(additions));
         }}
-        onMerge={() => mergeInputRef.current?.click()}
+        onImport={() => setShowImportModal(true)}
+        onSplit={() => setShowSplitModal(true)}
       />
 
       {/* Hidden File Input for Adding/Merging PDFs */}
@@ -1187,7 +1288,7 @@ export function SmartPdfEditor() {
 
       {/* Main Workspace Body */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Collapsible Thumbnail Rail */}
+        {/* Left Collapsible Thumbnail Rail / Page Organizer */}
         {isThumbnailsOpen && (
           <PdfThumbnailRail
             pdfDocument={pdfProxy}
@@ -1196,6 +1297,13 @@ export function SmartPdfEditor() {
             selectedPages={selectedPages}
             onPageSelect={handlePageNavigation}
             onToggleSelection={handleTogglePageSelection}
+            onSelectRange={handleSelectPageRange}
+            onSelectAllPages={handleSelectAllPages}
+            onClearSelectedPages={handleClearSelectedPages}
+            onReorderPages={handleReorderPages}
+            onDuplicateSelected={handleDuplicateSelected}
+            onDeleteSelected={handleDeleteSelected}
+            onExtractSelected={handleExtractSelected}
           />
         )}
 
@@ -1343,6 +1451,25 @@ export function SmartPdfEditor() {
         cancelLabel="Cancel"
         onConfirm={performOpenNewFile}
         onCancel={() => setShowConfirmOpenModal(false)}
+      />
+
+      {/* Multi-Document Import / Merge Modal */}
+      <SmartPdfImportModal
+        isOpen={showImportModal}
+        currentPage={currentPage}
+        totalPageCount={inspectionResult.metadata.pageCount}
+        onClose={() => setShowImportModal(false)}
+        onImportPages={handleImportPages}
+      />
+
+      {/* Split / Extract Document Modal */}
+      <SmartPdfSplitModal
+        isOpen={showSplitModal}
+        totalPageCount={inspectionResult.metadata.pageCount}
+        selectedPages={selectedPages}
+        onClose={() => setShowSplitModal(false)}
+        onExtractSelected={handleExtractSelected}
+        onSplitRanges={handleSplitRanges}
       />
     </div>
   );

@@ -1,6 +1,17 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Copy, FileInput, FileOutput, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Copy,
+  FileInput,
+  FileOutput,
+  FolderInput,
+  Loader2,
+  Plus,
+  Scissors,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -15,7 +26,10 @@ interface PdfPageOperationsProps {
   onDuplicate: () => void;
   onInsertBlank: () => void;
   onExtract: () => void;
-  onMerge: () => void;
+  onMerge?: () => void;
+  onMergeFiles?: (files: Uint8Array[]) => void;
+  onImport?: () => void;
+  onSplit?: () => void;
 }
 
 export function PdfPageOperations({
@@ -30,7 +44,12 @@ export function PdfPageOperations({
   onInsertBlank,
   onExtract,
   onMerge,
+  onMergeFiles,
+  onImport,
+  onSplit,
 }: PdfPageOperationsProps) {
+  const isMulti = selectedCount > 1;
+
   return (
     <div
       className="flex min-h-11 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-4 py-1.5"
@@ -38,7 +57,7 @@ export function PdfPageOperations({
       aria-label="Page operations"
     >
       <span className="mr-1 whitespace-nowrap text-xs font-medium text-slate-500">
-        Page {currentPage}
+        Page {currentPage} / {pageCount} {selectedCount > 0 ? `(${selectedCount} sel)` : ""}
       </span>
       <Button
         type="button"
@@ -71,7 +90,7 @@ export function PdfPageOperations({
         data-testid="page-duplicate"
       >
         <Copy className="size-3.5" />
-        Duplicate
+        {isMulti ? `Duplicate (${selectedCount})` : "Duplicate"}
       </Button>
       <Button
         type="button"
@@ -89,34 +108,95 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onExtract}
-        disabled={isProcessing || selectedCount === 0}
+        disabled={isProcessing || pageCount <= 0}
         data-testid="page-extract"
       >
         <FileOutput className="size-3.5" />
-        Extract {selectedCount}
+        Extract {selectedCount > 1 ? `(${selectedCount})` : ""}
       </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onMerge}
-        disabled={isProcessing}
-        data-testid="page-merge"
-      >
-        <FileInput className="size-3.5" />
-        Add PDF
-      </Button>
+      {onMergeFiles ? (
+        <label className="inline-flex cursor-pointer items-center">
+          <input
+            type="file"
+            accept="application/pdf"
+            multiple
+            className="sr-only"
+            disabled={isProcessing}
+            onChange={async (e) => {
+              const files = e.target.files;
+              if (files && files.length > 0) {
+                const additions = await Promise.all(
+                  Array.from(files).map(async (file) => new Uint8Array(await file.arrayBuffer())),
+                );
+                onMergeFiles(additions);
+              }
+              e.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={isProcessing}
+            data-testid="page-merge"
+            asChild
+          >
+            <span>
+              <FileInput className="size-3.5" />
+              Add PDF
+            </span>
+          </Button>
+        </label>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onMerge}
+          disabled={isProcessing}
+          data-testid="page-merge"
+        >
+          <FileInput className="size-3.5" />
+          Add PDF
+        </Button>
+      )}
+      {onImport && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onImport}
+          disabled={isProcessing}
+          data-testid="page-import"
+        >
+          <FolderInput className="size-3.5" />
+          Import pages
+        </Button>
+      )}
+      {onSplit && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onSplit}
+          disabled={isProcessing}
+          data-testid="page-split"
+        >
+          <Scissors className="size-3.5" />
+          Split PDF
+        </Button>
+      )}
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={onDelete}
-        disabled={isProcessing || pageCount <= 1}
+        disabled={isProcessing || pageCount <= 1 || (isMulti && selectedCount >= pageCount)}
         className="text-red-600 hover:text-red-700"
         data-testid="page-delete"
       >
         <Trash2 className="size-3.5" />
-        Delete
+        {isMulti ? `Delete (${selectedCount})` : "Delete"}
       </Button>
       {isProcessing ? (
         <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-xs text-sky-700" role="status">
