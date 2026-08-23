@@ -95,6 +95,12 @@ export interface StarPdfReplaceTextResult {
   modified_object_count: number;
 }
 
+export interface StarPdfMoveTextResult {
+  success: boolean;
+  modified_object_count: number;
+}
+
+
 export interface StarPdfPageText {
   page_index: number;
   plain_text: string;
@@ -346,6 +352,8 @@ export type StarPdfWorkerRequest =
   | { type: "removeAnnotation"; id: string; handle: number; pageIndex: number; objNum: number; objGen: number }
   | { type: "replaceText"; id: string; handle: number; pageIndex: number; spanId: string; newText: string }
   | { type: "replaceTextGroup"; id: string; handle: number; pageIndex: number; spanIds: string[]; newText: string }
+  | { type: "moveText"; id: string; handle: number; pageIndex: number; spanId: string; dx: number; dy: number }
+  | { type: "moveTextGroup"; id: string; handle: number; pageIndex: number; spanIds: string[]; dx: number; dy: number }
   | { type: "getTextEditability"; id: string; handle: number; pageIndex: number; spanId: string }
 
   | { type: "enumerateImages"; id: string; handle: number; pageIndex: number }
@@ -397,7 +405,10 @@ export type StarPdfWorkerResponse =
   | { type: "removeAnnotation"; id: string; success: true }
   | { type: "replaceText"; id: string; success: true; result: StarPdfReplaceTextResult }
   | { type: "replaceTextGroup"; id: string; success: true; result: StarPdfReplaceTextResult }
+  | { type: "moveText"; id: string; success: true; result: StarPdfMoveTextResult }
+  | { type: "moveTextGroup"; id: string; success: true; result: StarPdfMoveTextResult }
   | { type: "getTextEditability"; id: string; success: true; span: StarPdfTextSpan }
+
 
   | { type: "enumerateImages"; id: string; success: true; images: StarPdfImageInfo[] }
   | { type: "replaceImage"; id: string; success: true; result: StarPdfImageMutationResult }

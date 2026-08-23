@@ -8,6 +8,7 @@ import type {
   StarPdfFormField,
   StarPdfImageInfo,
   StarPdfImageMutationResult,
+  StarPdfMoveTextResult,
   StarPdfPageText,
   StarPdfReplaceTextResult,
   StarPdfSearchOptions,
@@ -47,7 +48,10 @@ import initWasm, {
   starpdf_remove_annotation,
   starpdf_replace_text,
   starpdf_replace_text_group,
+  starpdf_move_text,
+  starpdf_move_text_group,
   starpdf_get_text_editability,
+
 
   starpdf_enumerate_images,
   starpdf_replace_image,
@@ -335,6 +339,41 @@ export class StarPdfDocumentHandle {
       newText
     ) as StarPdfReplaceTextResult;
   }
+
+  async moveText(
+    pageIndex: number,
+    spanId: string,
+    dx: number,
+    dy: number
+  ): Promise<StarPdfMoveTextResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_move_text(
+      this._handle,
+      pageIndex,
+      spanId,
+      dx,
+      dy
+    ) as StarPdfMoveTextResult;
+  }
+
+  async moveTextGroup(
+    pageIndex: number,
+    spanIds: string[],
+    dx: number,
+    dy: number
+  ): Promise<StarPdfMoveTextResult> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_move_text_group(
+      this._handle,
+      pageIndex,
+      spanIds,
+      dx,
+      dy
+    ) as StarPdfMoveTextResult;
+  }
+
 
 
   async getTextEditability(

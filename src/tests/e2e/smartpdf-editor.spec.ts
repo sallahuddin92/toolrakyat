@@ -3577,7 +3577,94 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
   });
+
+  test("v0.21 Phase 4.1: Native Text Drag Move & Floating Contextual Toolbar", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "text-move-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select a text span
+    const textSpans = page.locator('[data-testid^="canvas-text-span-"]');
+    await expect(textSpans.first()).toBeVisible({ timeout: 5000 });
+    const targetSpan = textSpans.first();
+    await targetSpan.click();
+
+    // 2. Verify Floating Contextual Toolbar appears
+    const toolbar = page.locator('[data-testid="pdf-contextual-toolbar"]');
+    await expect(toolbar).toBeVisible({ timeout: 5000 });
+
+    // 3. Verify Direct Manipulation Move Handle appears
+    const moveHandle = page.locator('[data-testid="direct-manipulation-move-handle"]');
+    await expect(moveHandle).toBeVisible({ timeout: 5000 });
+
+    // 4. Drag to move the text span
+    const handleBox = await moveHandle.boundingBox();
+    expect(handleBox).not.toBeNull();
+
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 25, handleBox!.y + handleBox!.height / 2 + 20, {
+      steps: 5,
+    });
+    await page.mouse.up();
+
+    // 5. Verify Unsaved changes state
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+    // 6. Test Undo restores original position
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await undoBtn.click();
+    await page.waitForTimeout(400);
+
+    // 7. Click empty background to deselect
+    await workspace.click({ position: { x: 10, y: 10 } });
+    await expect(toolbar).toBeHidden({ timeout: 5000 });
+  });
+
+  test("v0.21 Phase 4.1: FreeText UX Fix (Clean Appearance, Dismiss on Apply, Deselect on Canvas Click)", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "freetext-ux-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Switch to FILL_AND_SIGN mode with Text tool
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+
+    // 2. Click on canvas to open inline text input
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+    await overlay.click({ position: { x: 150, y: 150 } });
+
+
+    const inlineInput = page.locator('[data-testid="inline-text-placement-input"]');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+    await inlineInput.fill("Clean FreeText");
+
+    // 3. Commit text
+    const commitBtn = page.locator('[data-testid="inline-text-placement-commit-btn"]');
+    await commitBtn.click();
+
+    // 4. Verify inline input disappears immediately
+    await expect(inlineInput).toBeHidden({ timeout: 5000 });
+
+    // 5. Verify Unsaved changes state
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
 });
+
 
 
 

@@ -52,7 +52,19 @@ interface PdfPageCanvasProps {
     pdfRect: import("@/lib/pdf/selection").PdfRect,
     linePoints?: { x1: number; y1: number; x2: number; y2: number },
   ) => void;
+  onMoveText?: (
+    pageIndex: number,
+    spanId: string | string[],
+    dx: number,
+    dy: number,
+  ) => void;
+  onTransformAnnotation?: (
+    pageIndex: number,
+    annotId: string,
+    pdfRect: import("@/lib/pdf/selection").PdfRect,
+  ) => void;
 }
+
 
 export function PdfPageCanvas({
   pdfDocument,
@@ -82,7 +94,10 @@ export function PdfPageCanvas({
   onPlaceDrawing,
   onTransformImage,
   onTransformVector,
+  onMoveText,
+  onTransformAnnotation,
 }: PdfPageCanvasProps) {
+
 
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -226,7 +241,10 @@ export function PdfPageCanvas({
           onPlaceDrawing={onPlaceDrawing}
           onTransformImage={onTransformImage}
           onTransformVector={onTransformVector}
+          onMoveText={onMoveText}
+          onTransformAnnotation={onTransformAnnotation}
         />
+
 
       )}
 

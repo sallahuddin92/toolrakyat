@@ -17,9 +17,10 @@ use crate::validate::StructuralValidator;
 use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAddLineInput, WasmAddRectangleInput, WasmAnnotation,
     WasmChoiceOption, WasmDeleteVectorGraphicInput, WasmDocumentInfo, WasmFormField, WasmImageInfo,
-    WasmImageMutationResult, WasmPageText, WasmReplaceTextResult, WasmSearchBoundingBox,
-    WasmSearchResult, WasmSecurityInfo, WasmTextSpan, WasmUpdateAnnotationInput,
-    WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo, WasmVectorMutationResult, WasmWidget,
+    WasmImageMutationResult, WasmMoveTextResult, WasmPageText, WasmReplaceTextResult,
+    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
+    WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo,
+    WasmVectorMutationResult, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -276,6 +277,65 @@ pub fn starpdf_replace_text_group(
     let dto = WasmReplaceTextResult {
         success: true,
         layout_result: layout_str,
+        modified_object_count: mod_count,
+    };
+
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_move_text(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+    dx: f64,
+    dy: f64,
+) -> Result<JsValue, JsValue> {
+    let mut mod_count = 0;
+
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.move_text_span(page_index as usize, span_id, dx, dy)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmMoveTextResult {
+        success: true,
+        modified_object_count: mod_count,
+    };
+
+    serde_wasm_bindgen::to_value(&dto)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_move_text_group(
+    handle: u32,
+    page_index: u32,
+    span_ids: JsValue,
+    dx: f64,
+    dy: f64,
+) -> Result<JsValue, JsValue> {
+    let ids: Vec<String> = serde_wasm_bindgen::from_value(span_ids)
+        .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))?;
+
+    let mut mod_count = 0;
+
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let plan = doc.move_text_group(page_index as usize, &ids, dx, dy)?;
+            mod_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+
+    let dto = WasmMoveTextResult {
+        success: true,
         modified_object_count: mod_count,
     };
 

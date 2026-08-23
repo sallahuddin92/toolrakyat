@@ -311,3 +311,60 @@ export class UpdateAnnotationCommand implements SmartPdfCommand {
   }
 }
 
+export class UpdateAnnotationRectCommand implements SmartPdfCommand {
+  readonly id = "annotation.update_rect";
+  readonly label = "Move/resize annotation";
+  readonly isMutating = true;
+
+  constructor(
+    public readonly annotId: string,
+    public readonly rect: [number, number, number, number],
+    public readonly pageNumber?: number,
+  ) {}
+
+  async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
+    const { starPdfDoc, inspectionResult } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
+
+    let targetNum: number | undefined;
+    let targetGen = 0;
+
+    if (inspectionResult) {
+      const match = inspectionResult.annotations.find(
+        (a) =>
+          a.id === this.annotId ||
+          (a.objectNumber !== undefined &&
+            `annot-obj-${a.objectNumber}-${a.generationNumber ?? 0}` === this.annotId),
+      );
+      if (match && match.objectNumber !== undefined) {
+        targetNum = match.objectNumber;
+        targetGen = match.generationNumber ?? 0;
+      }
+    }
+
+    if (targetNum === undefined) {
+      const parts = this.annotId.match(/\d+/g);
+      if (parts && parts.length > 0) {
+        targetNum = parseInt(parts[parts.length - (parts.length > 1 ? 2 : 1)], 10);
+        targetGen = parts.length > 1 ? parseInt(parts[parts.length - 1], 10) : 0;
+      }
+    }
+
+    if (targetNum !== undefined) {
+      await starPdfDoc.updateAnnotation(targetNum, targetGen, { rect: this.rect });
+      const updatedBytes = await starPdfDoc.exportIncremental();
+      return {
+        bytes: updatedBytes,
+        message: "Annotation moved/resized.",
+      };
+    }
+
+    return {
+      message: "Annotation position updated.",
+    };
+  }
+}
+
+

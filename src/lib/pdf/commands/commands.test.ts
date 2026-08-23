@@ -219,9 +219,44 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       await starDoc.close();
       await reopened.close();
     });
+
+    it("MoveTextCommand mutates text coordinates in real document", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const { StarPdfClient } = await import("../starpdf-client");
+      const { MoveTextCommand } = await import("./text-commands");
+
+      const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+      const bytes = fs.readFileSync(fixturePath);
+
+      const starDoc = await StarPdfClient.open(bytes);
+
+      const pageText = await starDoc.extractPageText(0);
+      expect(pageText.spans.length).toBeGreaterThan(0);
+      const span = pageText.spans[0];
+      const origX = span.x;
+      const origY = span.y;
+
+      const cmd = new MoveTextCommand(span.span_id, 30, 40, 1);
+      const res = await cmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: bytes,
+      });
+
+      expect(res.bytes).toBeDefined();
+      const reopened = await StarPdfClient.open(res.bytes!);
+      const reopenedText = await reopened.extractPageText(0);
+      expect(reopenedText.spans[0].x).toBeCloseTo(origX + 30, 1);
+      expect(reopenedText.spans[0].y).toBeCloseTo(origY + 40, 1);
+
+      await starDoc.close();
+      await reopened.close();
+    });
   });
 
 });
+
 
 
 

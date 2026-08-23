@@ -198,6 +198,17 @@ self.onmessage = async (event) => {
         self.postMessage({ type: "replaceTextGroup", id: req.id, success: true, result });
         break;
       }
+      case "moveText": {
+        const result = starpdf_move_text(req.handle, req.pageIndex, req.spanId, req.dx, req.dy);
+        self.postMessage({ type: "moveText", id: req.id, success: true, result });
+        break;
+      }
+      case "moveTextGroup": {
+        const result = starpdf_move_text_group(req.handle, req.pageIndex, req.spanIds, req.dx, req.dy);
+        self.postMessage({ type: "moveTextGroup", id: req.id, success: true, result });
+        break;
+      }
+
 
       case "getTextEditability": {
         const span = starpdf_get_text_editability(req.handle, req.pageIndex, req.spanId);

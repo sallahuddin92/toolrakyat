@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -31,6 +31,7 @@ export type SelectedItem = NonNullable<SmartPdfSelection>;
 
 interface PdfContextualToolbarProps {
   selection: SmartPdfSelection;
+  containerRef?: React.RefObject<HTMLElement | null>;
   onDeselect: () => void;
   onReplaceText: (spanId: string | string[], newText: string) => Promise<void>;
   onDeleteText?: (spanId: string | string[]) => Promise<void>;
@@ -45,6 +46,7 @@ interface PdfContextualToolbarProps {
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
   onAddTextInstead?: () => void;
 }
+
 
 function TextControls({
   span,
@@ -484,6 +486,7 @@ function AnnotationControls({
 
 export function PdfContextualToolbar({
   selection,
+  containerRef,
   onDeselect,
   onReplaceText,
   onDeleteText,
@@ -498,17 +501,125 @@ export function PdfContextualToolbar({
   onDeleteAnnotation,
   onAddTextInstead,
 }: PdfContextualToolbarProps) {
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    visible: boolean;
+  }>({
+    top: 12,
+    left: 12,
+    visible: true,
+  });
+
+  const updatePosition = useCallback(() => {
+    if (!selection || !selection.bounds) return;
+
+    const container = containerRef?.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const canvasOverlay = container.querySelector(
+      "[data-testid='pdf-interactive-overlay']",
+    ) as HTMLElement | null;
+    const canvasElem = (canvasOverlay || container.querySelector("canvas")) as HTMLElement | null;
+
+    if (!canvasElem) return;
+
+    const canvasRect = canvasElem.getBoundingClientRect();
+
+    // Selected item position in screen coordinates
+    const itemScreenLeft = canvasRect.left + selection.bounds.left;
+    const itemScreenTop = canvasRect.top + selection.bounds.top;
+    const itemWidth = selection.bounds.width;
+    const itemHeight = selection.bounds.height;
+
+    // Selected item position relative to viewport container
+    const relLeft = itemScreenLeft - containerRect.left;
+    const relTop = itemScreenTop - containerRect.top;
+    const relRight = relLeft + itemWidth;
+    const relBottom = relTop + itemHeight;
+
+    // Hide if scrolled completely offscreen
+    if (
+      relBottom < -10 ||
+      relTop > containerRect.height + 10 ||
+      relRight < -10 ||
+      relLeft > containerRect.width + 10
+    ) {
+      setPosition((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+      return;
+    }
+
+    const toolbarWidth = toolbarRef.current?.offsetWidth || 380;
+    const toolbarHeight = toolbarRef.current?.offsetHeight || 48;
+    const gap = 10;
+
+    // Prefer above selection: relTop - toolbarHeight - gap
+    let targetTop = relTop - toolbarHeight - gap;
+
+    // Flip below if not enough room above
+    if (targetTop < 8) {
+      targetTop = relBottom + gap;
+    }
+
+    // Clamp top inside viewport
+    targetTop = Math.max(8, Math.min(targetTop, containerRect.height - toolbarHeight - 8));
+
+    // Center horizontally on selected object
+    let targetLeft = relLeft + itemWidth / 2 - toolbarWidth / 2;
+
+    // Clamp left inside viewport
+    targetLeft = Math.max(8, Math.min(targetLeft, containerRect.width - toolbarWidth - 8));
+
+    setPosition({
+      top: Math.round(targetTop),
+      left: Math.round(targetLeft),
+      visible: true,
+    });
+  }, [selection, containerRef]);
+
+  useEffect(() => {
+    updatePosition();
+
+    const container = containerRef?.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      updatePosition();
+    };
+    const handleResize = () => {
+      updatePosition();
+    };
+
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      container.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [updatePosition, containerRef]);
 
   if (!selection) return null;
 
   return (
     <div
+      ref={toolbarRef}
       onClick={(e) => e.stopPropagation()}
-      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 max-w-2xl w-[92%] sm:w-auto bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl p-2.5 flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-150"
+      style={{
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        opacity: position.visible ? 1 : 0,
+        pointerEvents: position.visible ? "auto" : "none",
+        transition: "opacity 120ms ease-out, transform 75ms ease-out",
+      }}
+      className="absolute z-30 max-w-2xl w-[92%] sm:w-auto bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl p-2.5 flex items-center gap-2.5 select-none"
       data-testid="pdf-contextual-toolbar"
       role="region"
       aria-label="Contextual edit toolbar"
     >
+
       {/* Selection Type Badge */}
       <div className="flex items-center gap-1.5 pl-1.5 pr-2 border-r border-slate-200 shrink-0">
         {selection.type === "text" && <Type className="size-4 text-sky-600" />}

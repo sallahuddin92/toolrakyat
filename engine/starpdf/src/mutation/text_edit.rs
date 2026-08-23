@@ -148,6 +148,20 @@ impl ContentStreamEditor {
         Self::replace_multiple_in_stream_with_compensation(stream_bytes, edits, None)
     }
 
+    /// Moves multiple targeted text spans in raw content stream data atomically by (dx, dy).
+    pub fn move_multiple_in_stream(
+        stream_bytes: &[u8],
+        targets: &[&TextEditTarget],
+        dx: f64,
+        dy: f64,
+    ) -> PdfResult<Vec<u8>> {
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let mut instructions = parser.parse_instructions()?;
+        let edits = crate::mutation::text_move::plan_move_edits(&instructions, targets, dx, dy)?;
+        crate::mutation::text_move::apply_move_edits(&mut instructions, &edits)?;
+        Ok(Self::serialize_instructions(&instructions))
+    }
+
     /// Replaces multiple targeted text bytes in raw content stream data atomically with optional layout advance compensation.
     pub fn replace_multiple_in_stream_with_compensation(
         stream_bytes: &[u8],

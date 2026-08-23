@@ -65,6 +65,13 @@ pub struct WasmReplaceTextResult {
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmMoveTextResult {
+    pub success: bool,
+    pub modified_object_count: usize,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmPageText {
     pub page_index: usize,
     pub plain_text: String,
@@ -300,7 +307,6 @@ pub struct WasmUpdateVectorGraphicInput {
     #[serde(default)]
     pub clone_if_shared: bool,
 }
-
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]

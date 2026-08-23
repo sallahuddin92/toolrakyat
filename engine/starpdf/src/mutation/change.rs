@@ -57,6 +57,20 @@ pub enum PdfChange {
         targets: Vec<crate::mutation::text_edit::TextEditTarget>,
         replacement: String,
     },
+    /// Moves native existing content-stream text by (dx, dy) in PDF default user space.
+    MoveText {
+        page_index: usize,
+        target: crate::mutation::text_edit::TextEditTarget,
+        dx: f64,
+        dy: f64,
+    },
+    /// Moves a group of native existing content-stream text spans atomically by (dx, dy).
+    MoveTextGroup {
+        page_index: usize,
+        targets: Vec<crate::mutation::text_edit::TextEditTarget>,
+        dx: f64,
+        dy: f64,
+    },
 
     /// Replaces an existing Image XObject in-stream or with shared clone.
     ReplaceImage {

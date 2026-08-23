@@ -100,14 +100,20 @@ impl AnnotationGenerator {
                     ),
                 );
 
-                let mut content = Vec::new();
-                content.extend_from_slice(b"q\n1 1 1 rg\n");
-                let bg_op = format!("0 0 {:.2} {:.2} re\nf\n", width, height);
-                content.extend_from_slice(bg_op.as_bytes());
+                // Transparent appearance: only the text itself is painted.
+                // No opaque background fill and no rectangle border stroke.
+                // /Border [0 0 0] additionally suppresses viewer-synthesized borders.
+                dict.insert(
+                    "Border".to_string(),
+                    PdfObject::Array(vec![
+                        PdfObject::Integer(0),
+                        PdfObject::Integer(0),
+                        PdfObject::Integer(0),
+                    ]),
+                );
 
-                content.extend_from_slice(b"0 0 0 RG\n1 w\n");
-                let border_op = format!("0.5 0.5 {:.2} {:.2} re\nS\n", width - 1.0, height - 1.0);
-                content.extend_from_slice(border_op.as_bytes());
+                let mut content = Vec::new();
+                content.extend_from_slice(b"q\n");
 
                 let color_op = format!("{}\n", col.to_fill_ops());
                 content.extend_from_slice(color_op.as_bytes());
