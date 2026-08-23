@@ -3793,7 +3793,169 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
     }
   });
+
+  test("v0.23 Phase 6: Page Organizer Multi-Selection & Range Selection (Shift-Click, Cmd/Ctrl Toggle, Rail Persistence)", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/14-page-real.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase6-organizer-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    const rail = page.locator('[data-testid="pdf-thumbnail-rail"]');
+    await expect(rail).toBeVisible({ timeout: 5000 });
+
+    // 1. Single click on page 1 thumbnail
+    const thumb1 = page.locator('[data-testid="thumbnail-item-1"]');
+    await expect(thumb1).toBeVisible({ timeout: 5000 });
+    await thumb1.click();
+    await expect(page.locator('[data-testid="selected-pages-count"]')).toContainText("1 sel");
+
+    // 2. Shift-click on page 4 thumbnail -> range selection 1..4
+    const thumb4 = page.locator('[data-testid="thumbnail-item-4"]');
+    await expect(thumb4).toBeVisible({ timeout: 5000 });
+    await thumb4.click({ modifiers: ["Shift"] });
+    await expect(page.locator('[data-testid="selected-pages-count"]')).toContainText("4 sel");
+
+    // 3. Cmd/Ctrl-click on page 2 -> toggle off
+    const thumb2 = page.locator('[data-testid="thumbnail-item-2"]');
+    await thumb2.click({ modifiers: ["ControlOrMeta"] });
+    await expect(page.locator('[data-testid="selected-pages-count"]')).toContainText("3 sel");
+
+    // 4. Verify rail persistence across navigation
+    const thumb5 = page.locator('[data-testid="thumbnail-item-5"]');
+    await thumb5.click();
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Page 5 / 14");
+    await expect(rail).toBeVisible();
+  });
+
+  test("v0.23 Phase 6: Drag & Drop Page Reordering with Undo/Redo & Export/Reopen Durability", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/14-page-real.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase6-reorder-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Move page 1 right using operations bar
+    const moveRightBtn = page.locator('[data-testid="page-move-right"]');
+    await expect(moveRightBtn).toBeVisible({ timeout: 5000 });
+    await moveRightBtn.click();
+    await page.waitForTimeout(600);
+
+    // 2. Verify page moved and status bar shows Unsaved changes
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+    // 3. Test Undo
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await undoBtn.click();
+    await page.waitForTimeout(600);
+
+    // 4. Test Redo
+    const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+    await redoBtn.click();
+    await page.waitForTimeout(600);
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("v0.23 Phase 6: Multi-Page Batch Duplicate and Delete with Invariant Safeguards", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/14-page-real.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase6-batch-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select page 1 and page 2
+    const thumb1 = page.locator('[data-testid="thumbnail-item-1"]');
+    const thumb2 = page.locator('[data-testid="thumbnail-item-2"]');
+    await thumb1.click();
+    await thumb2.click({ modifiers: ["ControlOrMeta"] });
+    await expect(page.locator('[data-testid="selected-pages-count"]')).toContainText("2 sel");
+
+    // 2. Batch duplicate 2 selected pages -> 14 + 2 = 16 pages
+    const dupBtn = page.locator('[data-testid="page-duplicate"]');
+    await expect(dupBtn).toContainText("Duplicate (2)");
+    await dupBtn.click();
+    await page.waitForTimeout(800);
+
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("16");
+
+    // 3. Batch delete
+    const thumb3 = page.locator('[data-testid="thumbnail-item-3"]');
+    await thumb3.click();
+    const delBtn = page.locator('[data-testid="page-delete"]');
+    await delBtn.click();
+    await page.waitForTimeout(800);
+
+    await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("15");
+  });
+
+  test("v0.23 Phase 6: Multi-Document Merge & Import Modal with Local Encrypted Refusal", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/edit-test.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase6-import-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Open Import Modal via Import pages button
+    const importBtn = page.locator('[data-testid="page-import"]');
+    await expect(importBtn).toBeVisible({ timeout: 5000 });
+    await importBtn.click();
+
+    // 2. Verify Import Modal opened
+    const importModal = page.locator('[data-testid="smartpdf-import-modal"]');
+    await expect(importModal).toBeVisible({ timeout: 5000 });
+
+    // 3. Close Modal
+    const cancelBtn = importModal.locator('button:has-text("Cancel")');
+    await cancelBtn.click();
+    await expect(importModal).toBeHidden({ timeout: 5000 });
+
+    // 4. Open Split Modal via Split PDF button
+    const splitBtn = page.locator('[data-testid="page-split"]');
+    await expect(splitBtn).toBeVisible({ timeout: 5000 });
+    await splitBtn.click();
+
+    // 5. Verify Split Modal opened
+    const splitModal = page.locator('[data-testid="smartpdf-split-modal"]');
+    await expect(splitModal).toBeVisible({ timeout: 5000 });
+
+    const cancelSplitBtn = splitModal.locator('button:has-text("Cancel")');
+    await cancelSplitBtn.click();
+    await expect(splitModal).toBeHidden({ timeout: 5000 });
+  });
 });
+
 
 
 

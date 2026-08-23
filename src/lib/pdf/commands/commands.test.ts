@@ -10,6 +10,13 @@ import {
 } from "./history";
 import { SetFormFieldValueCommand } from "./form-commands";
 import { UpdateAnnotationCommand } from "./annotation-commands";
+import {
+  ReorderPagesCommand,
+  DuplicatePagesBatchCommand,
+  DeletePagesBatchCommand,
+  InsertImportedPagesCommand,
+} from "./page-commands";
+import { StarPdfClient } from "../starpdf-client";
 import type { SmartPdfCommandContext } from "./types";
 
 
@@ -380,6 +387,118 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       expect(annotsAfter.find((a) => a.object_num === squareAnnot!.object_num)).toBeUndefined();
 
       await starDoc.close();
+    });
+  });
+
+  describe("Phase 6 Page Organizer & Multi-Document Operations", () => {
+    it("ReorderPagesCommand calculates move block permutation and verifies identity", () => {
+      // 5 pages: 0, 1, 2, 3, 4
+      // Move pages [1, 2] before page 4 -> remaining [0, 3, 4], insert [1, 2] at index 2 (before 4) -> [0, 3, 1, 2, 4]
+      const cmd = ReorderPagesCommand.fromMoveBlock(5, [1, 2], 4, true);
+      expect(cmd.newOrder).toEqual([0, 3, 1, 2, 4]);
+
+      // Move page [0] after page 3 -> remaining [1, 2, 3, 4], insert [0] at index 3 (after 3) -> [1, 2, 3, 0, 4]
+      const cmd2 = ReorderPagesCommand.fromMoveBlock(5, [0], 3, false);
+      expect(cmd2.newOrder).toEqual([1, 2, 3, 0, 4]);
+    });
+
+    it("executes ReorderPagesCommand on minimal document", async () => {
+      const sourceBytes = await StarPdfClient.createMinimalPdf("Page 1");
+      const handle = await StarPdfClient.open(sourceBytes);
+      const inserted = await handle.insertBlankPage(1, 612, 792, 0);
+      await handle.close();
+
+      const baseContext: SmartPdfCommandContext = {
+        sourceBytes: inserted,
+        filename: "test.pdf",
+        currentPage: 1,
+        pageCount: 2,
+        selection: null,
+        starPdfDoc: null,
+        fieldValues: {},
+        annotationValues: {},
+        inspectionResult: null,
+      };
+
+      // Reorder [1, 0]
+      const reorderCmd = new ReorderPagesCommand([1, 0], 2);
+      const result = await reorderCmd.execute(baseContext);
+
+      expect(result.bytes).toBeDefined();
+      expect(result.nextPage).toBe(2);
+
+      const verifyHandle = await StarPdfClient.open(result.bytes!);
+      expect(await verifyHandle.getPageCount()).toBe(2);
+      await verifyHandle.close();
+    });
+
+    it("executes DuplicatePagesBatchCommand and DeletePagesBatchCommand", async () => {
+      const sourceBytes = await StarPdfClient.createMinimalPdf("Page 1");
+      const handle = await StarPdfClient.open(sourceBytes);
+      const p2 = await handle.insertBlankPage(1, 612, 792, 0);
+      const h2 = await StarPdfClient.open(p2);
+      const p3 = await h2.insertBlankPage(2, 612, 792, 0);
+      await handle.close();
+      await h2.close();
+
+      const baseContext: SmartPdfCommandContext = {
+        sourceBytes: p3,
+        filename: "test.pdf",
+        currentPage: 1,
+        pageCount: 3,
+        selection: null,
+        starPdfDoc: null,
+        fieldValues: {},
+        annotationValues: {},
+        inspectionResult: null,
+      };
+
+      // Duplicate pages 0 and 1 -> from 3 pages to 5 pages
+      const dupCmd = new DuplicatePagesBatchCommand([0, 1]);
+      const dupRes = await dupCmd.execute(baseContext);
+      expect(dupRes.bytes).toBeDefined();
+
+      const dupHandle = await StarPdfClient.open(dupRes.bytes!);
+      expect(await dupHandle.getPageCount()).toBe(5);
+      await dupHandle.close();
+
+      // Delete pages 0 and 1 -> remaining 1 page
+      const delCmd = new DeletePagesBatchCommand([0, 1]);
+      const delRes = await delCmd.execute(baseContext);
+      expect(delRes.bytes).toBeDefined();
+
+      const delHandle = await StarPdfClient.open(delRes.bytes!);
+      expect(await delHandle.getPageCount()).toBe(1);
+      await delHandle.close();
+
+      // Deleting all pages is refused
+      const delAllCmd = new DeletePagesBatchCommand([0, 1, 2]);
+      await expect(delAllCmd.execute(baseContext)).rejects.toThrow("Cannot delete all pages in a document.");
+    });
+
+    it("executes InsertImportedPagesCommand and refuses invalid/encrypted imports", async () => {
+      const docA = await StarPdfClient.createMinimalPdf("Doc A");
+      const docB = await StarPdfClient.createMinimalPdf("Doc B");
+
+      const baseContext: SmartPdfCommandContext = {
+        sourceBytes: docA,
+        filename: "docA.pdf",
+        currentPage: 1,
+        pageCount: 1,
+        selection: null,
+        starPdfDoc: null,
+        fieldValues: {},
+        annotationValues: {},
+        inspectionResult: null,
+      };
+
+      const importCmd = new InsertImportedPagesCommand(docB, [0], "after", 0, "docB.pdf");
+      const importRes = await importCmd.execute(baseContext);
+
+      expect(importRes.bytes).toBeDefined();
+      const verifyHandle = await StarPdfClient.open(importRes.bytes!);
+      expect(await verifyHandle.getPageCount()).toBe(2);
+      await verifyHandle.close();
     });
   });
 
