@@ -253,6 +253,134 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       await starDoc.close();
       await reopened.close();
     });
+
+    it("SetFormFieldValueCommand mutates AcroForm text field and checkbox in real document", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const { StarPdfClient } = await import("../starpdf-client");
+      const { SetFormFieldValueCommand } = await import("./form-commands");
+
+      const fixturePath = path.resolve(process.cwd(), "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf");
+      const bytes = fs.readFileSync(fixturePath);
+
+      const starDoc = await StarPdfClient.open(bytes);
+      const fields = await starDoc.getFormFields();
+      expect(fields.length).toBeGreaterThan(0);
+
+      const textField = fields.find((f) => f.field_type.toLowerCase() === "text");
+      expect(textField).toBeDefined();
+
+      const cmd = new SetFormFieldValueCommand(textField!.name, "Phase 5 Form Test");
+      const res = await cmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: bytes,
+      });
+
+      expect(res.bytes).toBeDefined();
+      expect(res.fieldValues).toBeDefined();
+      expect(res.fieldValues![textField!.name]).toBe("Phase 5 Form Test");
+
+      // Verify in reopened document
+      const reopened = await StarPdfClient.open(res.bytes!);
+      const reopenedFields = await reopened.getFormFields();
+      const reopenedTextField = reopenedFields.find((f) => f.name === textField!.name);
+      expect(reopenedTextField?.value).toBe("Phase 5 Form Test");
+
+      await starDoc.close();
+      await reopened.close();
+    });
+
+    it("AddSquareAnnotationCommand, AddCircleAnnotationCommand, and UpdateAnnotationPropertiesCommand mutate annotations", async () => {
+      const fs = await import("fs");
+      const path = await import("path");
+      const { StarPdfClient } = await import("../starpdf-client");
+      const {
+        AddSquareAnnotationCommand,
+        AddCircleAnnotationCommand,
+        UpdateAnnotationPropertiesCommand,
+        UpdateAnnotationRectCommand,
+        DeleteAnnotationCommand,
+      } = await import("./annotation-commands");
+
+      const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+      const bytes = fs.readFileSync(fixturePath);
+
+      let starDoc = await StarPdfClient.open(bytes);
+
+      // 1. Add Square & Circle
+      const addSquareCmd = new AddSquareAnnotationCommand(0, [50, 50, 200, 150], [1, 0, 0], [0, 0, 1], 2);
+      const res1 = await addSquareCmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: bytes,
+      });
+      expect(res1.bytes).toBeDefined();
+
+      await starDoc.close();
+      starDoc = await StarPdfClient.open(res1.bytes!);
+
+      const addCircleCmd = new AddCircleAnnotationCommand(0, [100, 100, 250, 250], [0, 1, 0], undefined, 1.5);
+      const resCircle = await addCircleCmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: res1.bytes!,
+      });
+      expect(resCircle.bytes).toBeDefined();
+
+      await starDoc.close();
+      starDoc = await StarPdfClient.open(resCircle.bytes!);
+
+      const annots1 = await starDoc.getAnnotations(0);
+      expect(annots1.length).toBeGreaterThan(1);
+      const squareAnnot = annots1.find((a) => a.subtype === "Square");
+      const circleAnnot = annots1.find((a) => a.subtype === "Circle");
+      expect(squareAnnot).toBeDefined();
+      expect(circleAnnot).toBeDefined();
+
+      // 2. Move & Resize Square
+      const moveSquareCmd = new UpdateAnnotationRectCommand(`annot-obj-${squareAnnot!.object_num}-${squareAnnot!.object_gen}`, [80, 80, 250, 200], 1);
+      const res2 = await moveSquareCmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: res1.bytes!,
+      });
+      expect(res2.bytes).toBeDefined();
+
+      await starDoc.close();
+      starDoc = await StarPdfClient.open(res2.bytes!);
+
+      // 3. Style Square
+      const styleSquareCmd = new UpdateAnnotationPropertiesCommand(`annot-obj-${squareAnnot!.object_num}-${squareAnnot!.object_gen}`, {
+        border_width: 4,
+        color: [0, 1, 0],
+      });
+      const res3 = await styleSquareCmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: res2.bytes!,
+      });
+      expect(res3.bytes).toBeDefined();
+
+      await starDoc.close();
+      starDoc = await StarPdfClient.open(res3.bytes!);
+
+      // 4. Delete Square
+      const deleteCmd = new DeleteAnnotationCommand(0, `annot-obj-${squareAnnot!.object_num}-${squareAnnot!.object_gen}`);
+      const res4 = await deleteCmd.execute({
+        ...baseContext,
+        starPdfDoc: starDoc,
+        sourceBytes: res3.bytes!,
+      });
+      expect(res4.bytes).toBeDefined();
+
+      await starDoc.close();
+      starDoc = await StarPdfClient.open(res4.bytes!);
+      const annotsAfter = await starDoc.getAnnotations(0);
+      expect(annotsAfter.find((a) => a.object_num === squareAnnot!.object_num)).toBeUndefined();
+
+      await starDoc.close();
+    });
   });
 
 });

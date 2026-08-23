@@ -88,7 +88,7 @@ export function PdfDropzone({
         } ${isLoading ? "pointer-events-none opacity-80" : ""}`}
       >
         <CardContent className="flex flex-col items-center justify-center p-0 space-y-4">
-          <input {...getInputProps()} />
+          <input {...getInputProps()} data-testid="pdf-dropzone-input" />
 
           <div className="size-16 sm:size-20 rounded-2xl bg-white shadow-xs border border-slate-200 flex items-center justify-center text-sky-600">
             {isLoading ? (

@@ -22,6 +22,7 @@ import type {
   StarPdfImageInfo,
   StarPdfVectorGraphicInfo,
   StarPdfUpdateVectorGraphicInput,
+  StarPdfUpdateAnnotationInput,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { SmartPdfSelection, SelectionType } from "@/lib/pdf/selection";
@@ -43,6 +44,7 @@ interface PdfContextualToolbarProps {
   formFieldValue?: string | boolean | string[];
   onAnnotationChange?: (annotId: string, value: string) => void;
   annotationValue?: string;
+  onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
   onAddTextInstead?: () => void;
 }
@@ -409,15 +411,42 @@ function AnnotationControls({
   annot,
   annotationValue,
   onAnnotationChange,
+  onUpdateAnnotationProperties,
   onDeleteAnnotation,
 }: {
   annot: PdfMarkupAnnotation;
   annotationValue?: string;
   onAnnotationChange?: (annotId: string, value: string) => void;
+  onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
 }) {
   const [localText, setLocalText] = useState<string | null>(null);
-  const displayVal = localText ?? annotationValue ?? annot.contents ?? "";
+  const [strokeColor, setStrokeColor] = useState("#000000");
+  const [fillColor, setFillColor] = useState("#3b82f6");
+  const [borderWidth, setBorderWidth] = useState(1.5);
+  const [highlightColor, setHighlightColor] = useState("#ffeb3b");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const displayVal = localText !== null ? localText : (annotationValue ?? annot.contents ?? "");
+
+  const hexToRgb = (hex: string): [number, number, number] => {
+    const clean = hex.replace("#", "");
+    return [
+      parseInt(clean.substring(0, 2), 16) / 255,
+      parseInt(clean.substring(2, 4), 16) / 255,
+      parseInt(clean.substring(4, 6), 16) / 255,
+    ];
+  };
+
+  const handleUpdateProps = async (update: StarPdfUpdateAnnotationInput) => {
+    if (!onUpdateAnnotationProperties) return;
+    setIsSubmitting(true);
+    try {
+      await onUpdateAnnotationProperties(annot.id, update);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (annot.subtype === "Link") {
     return (
@@ -425,9 +454,193 @@ function AnnotationControls({
         <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
           Link
         </Badge>
-        <span className="truncate max-w-[260px] text-slate-500 italic">
-          Interactive Link Destination (Read-Only)
+        <span className="truncate max-w-[260px] text-slate-500 italic" title={annot.contents || "Interactive Link"}>
+          {annot.contents ? `Destination: ${annot.contents}` : "Interactive Link Destination (Read-Only)"}
         </span>
+        {onDeleteAnnotation && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void onDeleteAnnotation(annot.id)}
+            disabled={isSubmitting}
+            className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+            title="Delete link annotation"
+            data-testid="context-annotation-delete-btn"
+          >
+            <Trash2 className="size-3.5" />
+            <span>Delete</span>
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (annot.subtype === "Square" || annot.subtype === "Circle") {
+    return (
+      <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+        <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+          {annot.subtype}
+        </Badge>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Stroke:</span>
+          <input
+            type="color"
+            value={strokeColor}
+            onChange={(e) => {
+              setStrokeColor(e.target.value);
+              void handleUpdateProps({ color: hexToRgb(e.target.value), border_width: borderWidth });
+            }}
+            className="size-6 rounded border border-slate-300 cursor-pointer p-0"
+            title="Stroke Color"
+            data-testid="context-annotation-stroke-color"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Fill:</span>
+          <input
+            type="color"
+            value={fillColor}
+            onChange={(e) => {
+              setFillColor(e.target.value);
+              void handleUpdateProps({ fill_color: hexToRgb(e.target.value) });
+            }}
+            className="size-6 rounded border border-slate-300 cursor-pointer p-0"
+            title="Fill Color"
+            data-testid="context-annotation-fill-color"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Width:</span>
+          <select
+            value={borderWidth}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setBorderWidth(val);
+              void handleUpdateProps({ border_width: val });
+            }}
+            className="h-7 text-xs rounded border border-slate-300 bg-white px-1.5 text-slate-700"
+            data-testid="context-annotation-border-width"
+          >
+            <option value="0.5">0.5 pt</option>
+            <option value="1.0">1.0 pt</option>
+            <option value="1.5">1.5 pt</option>
+            <option value="2.0">2.0 pt</option>
+            <option value="3.0">3.0 pt</option>
+            <option value="5.0">5.0 pt</option>
+          </select>
+        </div>
+        {onDeleteAnnotation && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void onDeleteAnnotation(annot.id)}
+            disabled={isSubmitting}
+            className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+            title="Delete annotation"
+            data-testid="context-annotation-delete-btn"
+          >
+            <Trash2 className="size-3.5" />
+            <span>Delete</span>
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (annot.subtype === "Ink") {
+    return (
+      <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+        <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+          Drawing
+        </Badge>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Color:</span>
+          <input
+            type="color"
+            value={strokeColor}
+            onChange={(e) => {
+              setStrokeColor(e.target.value);
+              void handleUpdateProps({ color: hexToRgb(e.target.value) });
+            }}
+            className="size-6 rounded border border-slate-300 cursor-pointer p-0"
+            title="Stroke Color"
+            data-testid="context-annotation-ink-color"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Width:</span>
+          <select
+            value={borderWidth}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setBorderWidth(val);
+              void handleUpdateProps({ border_width: val });
+            }}
+            className="h-7 text-xs rounded border border-slate-300 bg-white px-1.5 text-slate-700"
+            data-testid="context-annotation-ink-width"
+          >
+            <option value="1.0">1.0 pt</option>
+            <option value="2.0">2.0 pt</option>
+            <option value="3.0">3.0 pt</option>
+            <option value="5.0">5.0 pt</option>
+          </select>
+        </div>
+        {onDeleteAnnotation && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void onDeleteAnnotation(annot.id)}
+            disabled={isSubmitting}
+            className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+            title="Delete drawing"
+            data-testid="context-annotation-delete-btn"
+          >
+            <Trash2 className="size-3.5" />
+            <span>Delete</span>
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  if (annot.subtype === "Highlight") {
+    return (
+      <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+        <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
+          Highlight
+        </Badge>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] text-slate-500">Color:</span>
+          <input
+            type="color"
+            value={highlightColor}
+            onChange={(e) => {
+              setHighlightColor(e.target.value);
+              void handleUpdateProps({ color: hexToRgb(e.target.value) });
+            }}
+            className="size-6 rounded border border-slate-300 cursor-pointer p-0"
+            title="Highlight Color"
+            data-testid="context-annotation-highlight-color"
+          />
+        </div>
+        {onDeleteAnnotation && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void onDeleteAnnotation(annot.id)}
+            disabled={isSubmitting}
+            className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
+            title="Delete highlight"
+            data-testid="context-annotation-delete-btn"
+          >
+            <Trash2 className="size-3.5" />
+            <span>Delete</span>
+          </Button>
+        )}
       </div>
     );
   }
@@ -445,26 +658,24 @@ function AnnotationControls({
           onAnnotationChange?.(annot.id, e.target.value);
         }}
         className="h-8 text-xs w-48 sm:w-64 bg-white"
-        placeholder="Annotation text / contents..."
+        placeholder="Annotation contents..."
         data-testid="context-annotation-input"
         autoFocus
       />
-      {displayVal && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setLocalText("");
-            onAnnotationChange?.(annot.id, "");
-          }}
-          className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
-          title="Clear annotation contents"
-          data-testid="context-annotation-clear-btn"
-        >
-          Clear
-        </Button>
-      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          setLocalText("");
+          onAnnotationChange?.(annot.id, "");
+        }}
+        className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+        title="Clear annotation contents"
+        data-testid="context-annotation-clear-btn"
+      >
+        Clear
+      </Button>
 
       {onDeleteAnnotation && (
         <Button
@@ -472,6 +683,7 @@ function AnnotationControls({
           variant="ghost"
           size="sm"
           onClick={() => void onDeleteAnnotation(annot.id)}
+          disabled={isSubmitting}
           className="h-8 text-xs gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 shrink-0"
           title="Delete annotation"
           data-testid="context-annotation-delete-btn"
@@ -498,6 +710,7 @@ export function PdfContextualToolbar({
   formFieldValue,
   onAnnotationChange,
   annotationValue,
+  onUpdateAnnotationProperties,
   onDeleteAnnotation,
   onAddTextInstead,
 }: PdfContextualToolbarProps) {
@@ -719,20 +932,82 @@ export function PdfContextualToolbar({
           );
         }
 
+        if (field.type === "radio") {
+          return (
+            <div className="flex items-center gap-2 text-xs text-slate-700" data-testid="context-form-radio-group">
+              {field.options && field.options.length > 0 ? (
+                field.options.map((opt) => (
+                  <label key={opt} className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={field.name}
+                      value={opt}
+                      checked={currentVal === opt}
+                      onChange={() => onFormFieldChange(field.name, opt)}
+                      className="size-3.5 accent-amber-600"
+                      data-testid={`context-form-radio-${opt}`}
+                    />
+                    <span>{opt}</span>
+                  </label>
+                ))
+              ) : (
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    checked={Boolean(currentVal)}
+                    onChange={() => onFormFieldChange(field.name, !currentVal)}
+                    className="size-3.5 accent-amber-600"
+                    data-testid="context-form-radio"
+                  />
+                  <span>{currentVal ? "Selected" : "Unselected"}</span>
+                </label>
+              )}
+              {Boolean(currentVal) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onFormFieldChange(field.name, "")}
+                  className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+                  title="Clear selection"
+                  data-testid="context-form-clear-btn"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          );
+        }
+
         if (field.type === "dropdown" || field.type === "optionList") {
           return (
-            <select
-              value={String(currentVal)}
-              onChange={(e) => onFormFieldChange(field.name, e.target.value)}
-              className="h-8 text-xs rounded border border-slate-300 bg-white px-2 text-slate-700"
-              data-testid="context-form-select"
-            >
-              {field.options?.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={String(currentVal)}
+                onChange={(e) => onFormFieldChange(field.name, e.target.value)}
+                className="h-8 text-xs rounded border border-slate-300 bg-white px-2 text-slate-700"
+                data-testid="context-form-select"
+              >
+                {field.options?.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              {Boolean(currentVal) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onFormFieldChange(field.name, "")}
+                  className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
+                  title="Clear field value"
+                  data-testid="context-form-clear-btn"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
           );
         }
 
@@ -773,6 +1048,7 @@ export function PdfContextualToolbar({
           annot={selection.data as PdfMarkupAnnotation}
           annotationValue={annotationValue}
           onAnnotationChange={onAnnotationChange}
+          onUpdateAnnotationProperties={onUpdateAnnotationProperties}
           onDeleteAnnotation={onDeleteAnnotation}
         />
       )}
