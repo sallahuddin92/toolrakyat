@@ -1855,12 +1855,13 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(confirmDialog).not.toBeVisible();
     await expect(workspace).toBeVisible();
 
-    // Click Open -> Click Discard & Open -> Returns to Dropzone
+    // Click Open -> Click Discard & Open -> triggers file chooser
     await page.locator('[data-testid="toolbar-open-file-btn"]').click();
     await expect(confirmDialog).toBeVisible();
+    const fileChooserPromise = page.waitForEvent("filechooser");
     await page.locator('[data-testid="confirm-dialog-confirm-btn"]').click();
-
-    await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
+    const fileChooser = await fileChooserPromise;
+    expect(fileChooser).toBeDefined();
   });
 
   test("v0.19 Workflow K: Open -> Select/Edit Supported Annotation -> Export -> Reopen", async ({
@@ -2083,22 +2084,9 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[data-testid="canvas-field-full_name"]')).toBeVisible();
 
-    // 2. Close & Reset via Open Toolbar button
-    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
-    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
-    const fileInput = page.locator('input[type="file"]');
-    await expect(fileInput).toBeAttached({ timeout: 5000 });
-
-    // 3. Open Doc B (Multi-page, non-form)
+    // 2. Open Doc B (Multi-page, non-form)
     const docBBytes = fs.readFileSync(path.join(process.cwd(), "test-assets/multi-page.test.pdf"));
-    await fileInput.setInputFiles({
-      name: "doc-b.pdf",
-      mimeType: "application/pdf",
-      buffer: docBBytes,
-    });
+    await uploadPdfBytes(page, "doc-b.pdf", docBBytes);
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
     // 4. Verify no stale field overlays from Doc A
@@ -2264,10 +2252,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       await expect(page.locator('[data-testid="smartpdf-editor-workspace"]')).toBeVisible();
       await expect(page.getByRole("button", { name: "Export Editable" })).toBeVisible();
       await expect(page.locator('[data-testid="canvas-field-full_name"]')).toBeVisible();
-
-      // Close document to reset for next viewport
-      await page.locator('[data-testid="toolbar-open-file-btn"]').click();
-      await expect(page.locator('input[type="file"]')).toBeAttached({ timeout: 5000 });
     }
   });
 
