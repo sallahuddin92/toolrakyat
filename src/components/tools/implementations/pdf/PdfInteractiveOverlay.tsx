@@ -56,6 +56,17 @@ interface PdfInteractiveOverlayProps {
     pdfRect: PdfRect,
     linePoints?: { x1: number; y1: number; x2: number; y2: number },
   ) => void;
+  onMoveText?: (
+    pageIndex: number,
+    spanId: string | string[],
+    dx: number,
+    dy: number,
+  ) => void;
+  onTransformAnnotation?: (
+    pageIndex: number,
+    annotId: string,
+    pdfRect: PdfRect,
+  ) => void;
 }
 
 interface DragTransformState {
@@ -108,7 +119,10 @@ export function PdfInteractiveOverlay({
   onPlaceDrawing,
   onTransformImage,
   onTransformVector,
+  onMoveText,
+  onTransformAnnotation,
 }: PdfInteractiveOverlayProps) {
+
 
   const pageDims = useMemo(() => ({ width: pageWidth, height: pageHeight, rotation }), [pageWidth, pageHeight, rotation]);
   const pageIdx = pageNumber - 1;
@@ -285,6 +299,20 @@ export function PdfInteractiveOverlay({
           const newPdfRect = convertPixelsToPdfRect(currentRect, pageDims, scale, rotation);
           onTransformVector?.(pageIdx, selectedItem.id, newPdfRect);
         }
+      } else if (selectedItem?.type === "text") {
+        const origPdfRect = convertPixelsToPdfRect(startRect, pageDims, scale, rotation);
+        const newPdfRect = convertPixelsToPdfRect(currentRect, pageDims, scale, rotation);
+        const dx = newPdfRect.x - origPdfRect.x;
+        const dy = newPdfRect.y - origPdfRect.y;
+        if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
+          const spanIds = selectedItem.group?.sourceSpans?.length
+            ? selectedItem.group.sourceSpans.map((s) => s.span_id)
+            : selectedItem.id;
+          onMoveText?.(pageIdx, spanIds, dx, dy);
+        }
+      } else if (selectedItem?.type === "annotation") {
+        const newPdfRect = convertPixelsToPdfRect(currentRect, pageDims, scale, rotation);
+        onTransformAnnotation?.(pageIdx, selectedItem.id, newPdfRect);
       }
     };
 
@@ -311,7 +339,10 @@ export function PdfInteractiveOverlay({
     pageIdx,
     onTransformImage,
     onTransformVector,
+    onMoveText,
+    onTransformAnnotation,
   ]);
+
 
 
   const isFillAndSign = mode === "FILL_AND_SIGN";
@@ -882,10 +913,13 @@ export function PdfInteractiveOverlay({
         </svg>
       )}
 
-      {/* DIRECT MANIPULATION TRANSFORM BOX FOR SELECTED IMAGE / VECTOR */}
+      {/* DIRECT MANIPULATION TRANSFORM BOX FOR SELECTED IMAGE / VECTOR / TEXT / ANNOTATION */}
       {!isFillAndSign &&
         selectedItem &&
-        (selectedItem.type === "image" || selectedItem.type === "vector") &&
+        (selectedItem.type === "image" ||
+          selectedItem.type === "vector" ||
+          selectedItem.type === "text" ||
+          selectedItem.type === "annotation") &&
         selectedItem.pageIndex === pageIdx &&
         (() => {
           const isVectorLine =
@@ -962,12 +996,24 @@ export function PdfInteractiveOverlay({
           const activeRect = dragTransform?.currentRect || selectedItem.bounds;
           if (!activeRect) return null;
 
-          const ringColor =
-            selectedItem.type === "image"
-              ? "ring-emerald-500 bg-emerald-400/10"
-              : "ring-indigo-500 bg-indigo-400/10";
-          const borderColor =
-            selectedItem.type === "image" ? "border-emerald-600" : "border-indigo-600";
+          const isText = selectedItem.type === "text";
+          const isAnnot = selectedItem.type === "annotation";
+          const isImage = selectedItem.type === "image";
+
+          const ringColor = isImage
+            ? "ring-emerald-500 bg-emerald-400/10"
+            : isAnnot
+              ? "ring-purple-500 bg-purple-400/10"
+              : isText
+                ? "ring-sky-500 bg-sky-400/10"
+                : "ring-indigo-500 bg-indigo-400/10";
+          const borderColor = isImage
+            ? "border-emerald-600"
+            : isAnnot
+              ? "border-purple-600"
+              : isText
+                ? "border-sky-600"
+                : "border-indigo-600";
 
           return (
             <div
@@ -990,46 +1036,51 @@ export function PdfInteractiveOverlay({
                 title="Drag to move"
                 data-testid="direct-manipulation-move-handle"
               />
-              {/* Corner resize handles */}
-              <div
-                onPointerDown={(e) => startDrag(e, "resize", "nw")}
-                className={cn(
-                  "absolute -top-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
-                  borderColor,
-                )}
-                title="Resize top-left"
-                data-testid="direct-manipulation-handle-nw"
-              />
-              <div
-                onPointerDown={(e) => startDrag(e, "resize", "ne")}
-                className={cn(
-                  "absolute -top-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
-                  borderColor,
-                )}
-                title="Resize top-right"
-                data-testid="direct-manipulation-handle-ne"
-              />
-              <div
-                onPointerDown={(e) => startDrag(e, "resize", "se")}
-                className={cn(
-                  "absolute -bottom-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
-                  borderColor,
-                )}
-                title="Resize bottom-right"
-                data-testid="direct-manipulation-handle-se"
-              />
-              <div
-                onPointerDown={(e) => startDrag(e, "resize", "sw")}
-                className={cn(
-                  "absolute -bottom-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
-                  borderColor,
-                )}
-                title="Resize bottom-left"
-                data-testid="direct-manipulation-handle-sw"
-              />
+              {/* Corner resize handles (for image, vector rect, annotation) */}
+              {!isText && (
+                <>
+                  <div
+                    onPointerDown={(e) => startDrag(e, "resize", "nw")}
+                    className={cn(
+                      "absolute -top-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
+                      borderColor,
+                    )}
+                    title="Resize top-left"
+                    data-testid="direct-manipulation-handle-nw"
+                  />
+                  <div
+                    onPointerDown={(e) => startDrag(e, "resize", "ne")}
+                    className={cn(
+                      "absolute -top-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
+                      borderColor,
+                    )}
+                    title="Resize top-right"
+                    data-testid="direct-manipulation-handle-ne"
+                  />
+                  <div
+                    onPointerDown={(e) => startDrag(e, "resize", "se")}
+                    className={cn(
+                      "absolute -bottom-1.5 -right-1.5 size-3 bg-white border-2 rounded-xs cursor-nwse-resize shadow-sm hover:scale-125 transition-transform",
+                      borderColor,
+                    )}
+                    title="Resize bottom-right"
+                    data-testid="direct-manipulation-handle-se"
+                  />
+                  <div
+                    onPointerDown={(e) => startDrag(e, "resize", "sw")}
+                    className={cn(
+                      "absolute -bottom-1.5 -left-1.5 size-3 bg-white border-2 rounded-xs cursor-nesw-resize shadow-sm hover:scale-125 transition-transform",
+                      borderColor,
+                    )}
+                    title="Resize bottom-left"
+                    data-testid="direct-manipulation-handle-sw"
+                  />
+                </>
+              )}
             </div>
           );
         })()}
+
 
     </div>
   );

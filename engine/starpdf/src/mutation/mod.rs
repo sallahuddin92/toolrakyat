@@ -2,6 +2,7 @@ pub mod change;
 pub mod engine;
 pub mod result;
 pub mod text_edit;
+pub mod text_move;
 
 pub use crate::appearance::status::AppearanceStatus;
 pub use change::PdfChange;

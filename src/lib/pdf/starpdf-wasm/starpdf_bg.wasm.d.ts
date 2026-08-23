@@ -30,6 +30,8 @@ export const starpdf_insert_imported_page: (a: number, b: number, c: number, d: 
 export const starpdf_merge_documents: (a: any) => [number, number, number, number];
 export const starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
 export const starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
+export const starpdf_move_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+export const starpdf_move_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
 export const starpdf_open: (a: number, b: number) => [number, number, number];
 export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
 export const starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];

@@ -426,6 +426,77 @@ impl<'a> PdfDocument<'a> {
         }])
     }
 
+    /// Moves native existing content-stream text at a specific target.
+    pub fn move_text(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+        dx: f64,
+        dy: f64,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.apply_mutation(&[crate::mutation::PdfChange::MoveText {
+            page_index,
+            target: target.clone(),
+            dx,
+            dy,
+        }])
+    }
+
+    /// Moves native existing content-stream text specified by a structural span ID.
+    pub fn move_text_span(
+        &mut self,
+        page_index: usize,
+        span_id: &str,
+        dx: f64,
+        dy: f64,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        let target = crate::mutation::text_edit::TextEditTarget::from_span_id(span_id)?;
+        if target.page_index != page_index {
+            return Err(PdfError::TargetTextNotFound(format!(
+                "Span ID page mismatch: target is page {}, requested page {page_index}",
+                target.page_index
+            )));
+        }
+        self.move_text(page_index, &target, dx, dy)
+    }
+
+    /// Moves a group of native existing content-stream text spans atomically.
+    pub fn move_text_group(
+        &mut self,
+        page_index: usize,
+        span_ids: &[String],
+        dx: f64,
+        dy: f64,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        if span_ids.is_empty() {
+            return Err(PdfError::TargetTextNotFound(
+                "No span IDs provided for text group move".into(),
+            ));
+        }
+        if span_ids.len() == 1 {
+            return self.move_text_span(page_index, &span_ids[0], dx, dy);
+        }
+
+        let mut targets = Vec::with_capacity(span_ids.len());
+        for span_id in span_ids {
+            let target = crate::mutation::text_edit::TextEditTarget::from_span_id(span_id)?;
+            if target.page_index != page_index {
+                return Err(PdfError::TargetTextNotFound(format!(
+                    "Span ID page mismatch: target is page {}, requested page {page_index}",
+                    target.page_index
+                )));
+            }
+            targets.push(target);
+        }
+
+        self.apply_mutation(&[crate::mutation::PdfChange::MoveTextGroup {
+            page_index,
+            targets,
+            dx,
+            dy,
+        }])
+    }
+
     /// Discovers all Image XObjects on a specific page.
     pub fn enumerate_images(
         &mut self,

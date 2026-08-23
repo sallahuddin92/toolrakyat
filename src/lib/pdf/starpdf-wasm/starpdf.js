@@ -430,6 +430,40 @@ export function starpdf_move_page(handle, from_index, to_index) {
 }
 
 /**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @param {number} dx
+ * @param {number} dy
+ * @returns {any}
+ */
+export function starpdf_move_text(handle, page_index, span_id, dx, dy) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_move_text(handle, page_index, ptr0, len0, dx, dy);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {any} span_ids
+ * @param {number} dx
+ * @param {number} dy
+ * @returns {any}
+ */
+export function starpdf_move_text_group(handle, page_index, span_ids, dx, dy) {
+    const ret = wasm.starpdf_move_text_group(handle, page_index, span_ids, dx, dy);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {Uint8Array} bytes
  * @returns {number}
  */

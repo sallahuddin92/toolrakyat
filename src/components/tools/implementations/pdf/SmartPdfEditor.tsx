@@ -38,10 +38,10 @@ import {
   redoHistory,
   ReplaceTextCommand,
   DeleteTextCommand,
+  MoveTextCommand,
   ReplaceImageCommand,
   UpdateImageCommand,
   RemoveImageCommand,
-
   AddImageCommand,
   UpdateVectorCommand,
   DeleteVectorCommand,
@@ -50,6 +50,7 @@ import {
   AddCrossMarkCommand,
   AddInkAnnotationCommand,
   DeleteAnnotationCommand,
+  UpdateAnnotationRectCommand,
   MovePageCommand,
   DuplicatePageCommand,
   DeletePageCommand,
@@ -58,6 +59,7 @@ import {
   MergeDocumentsCommand,
   ExportDocumentCommand,
 } from "@/lib/pdf/commands";
+
 import {
   type FlatFormCandidate,
   detectFlatFormCandidates,
@@ -739,7 +741,38 @@ export function SmartPdfEditor() {
     [executeCommand],
   );
 
+  const handleMoveText = useCallback(
+    async (pageIndex: number, spanId: string | string[], dx: number, dy: number) => {
+      try {
+        await executeCommand(new MoveTextCommand(spanId, dx, dy, pageIndex + 1));
+      } catch (err: unknown) {
+        console.error("Text move failed:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        toast.error(
+          errMsg.includes("TEXT_MOVE")
+            ? `Cannot move text: ${errMsg}`
+            : "Cannot move this text safely. Surrounding layout depends on its position.",
+        );
+      }
+    },
+    [executeCommand],
+  );
+
+  const handleTransformAnnotation = useCallback(
+    async (pageIndex: number, annotId: string, pdfRect: import("@/lib/pdf/selection").PdfRect) => {
+      await executeCommand(
+        new UpdateAnnotationRectCommand(
+          annotId,
+          [pdfRect.x, pdfRect.y, pdfRect.x + pdfRect.width, pdfRect.y + pdfRect.height],
+          pageIndex + 1,
+        ),
+      );
+    },
+    [executeCommand],
+  );
+
   const handleDeleteAnnotation = useCallback(
+
     async (annotId: string) => {
       await executeCommand(new DeleteAnnotationCommand(currentPage - 1, annotId));
     },
@@ -1162,6 +1195,7 @@ export function SmartPdfEditor() {
           {selectedItem && (
             <PdfContextualToolbar
               selection={selectedItem}
+              containerRef={viewportContainerRef}
               onDeselect={() => setSelectedItem(null)}
               onReplaceText={async (spanId, newText) => {
                 await executeCommand(new ReplaceTextCommand(spanId, newText));
@@ -1171,7 +1205,6 @@ export function SmartPdfEditor() {
                 await executeCommand(new DeleteTextCommand(spanId));
               }}
               onReplaceImage={async (imageId, file) => {
-
                 await executeCommand(new ReplaceImageCommand(imageId, file));
               }}
               onRemoveImage={async (imageId) => {
@@ -1188,9 +1221,6 @@ export function SmartPdfEditor() {
                 selectedItem.type === "form" ? fieldValues[selectedItem.id] : undefined
               }
               onAnnotationChange={handleAnnotationChange}
-
-
-
               annotationValue={
                 selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
               }
@@ -1201,7 +1231,6 @@ export function SmartPdfEditor() {
               }}
             />
           )}
-
 
           <div className="my-auto transition-transform duration-75">
             <PdfPageCanvas
@@ -1218,7 +1247,6 @@ export function SmartPdfEditor() {
               annotations={inspectionResult.annotations}
               candidates={currentCandidates}
               formAssistEnabled={formAssistEnabled}
-
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
               onCanvasRendered={handleCanvasRendered}
@@ -1231,10 +1259,11 @@ export function SmartPdfEditor() {
               onPlaceDrawing={handlePlaceDrawing}
               onTransformImage={handleTransformImage}
               onTransformVector={handleTransformVector}
+              onMoveText={handleMoveText}
+              onTransformAnnotation={handleTransformAnnotation}
             />
-
-
           </div>
+
         </main>
       </div>
 

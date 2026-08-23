@@ -76,4 +76,46 @@ export class DeleteTextCommand implements SmartPdfCommand {
   }
 }
 
+export class MoveTextCommand implements SmartPdfCommand {
+  readonly id = "text.move";
+  readonly label: string;
+  readonly isMutating = true;
+
+  constructor(
+    public readonly spanId: string | string[],
+    public readonly dx: number,
+    public readonly dy: number,
+    public readonly pageNumber?: number,
+  ) {
+    this.label = `Move text by (${dx.toFixed(1)}, ${dy.toFixed(1)}) pt`;
+  }
+
+  async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
+    const { starPdfDoc, currentPage } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
+
+    const pageIndex = (this.pageNumber ?? currentPage) - 1;
+    if (Array.isArray(this.spanId)) {
+      if (this.spanId.length === 1) {
+        await starPdfDoc.moveText(pageIndex, this.spanId[0], this.dx, this.dy);
+      } else {
+        await (starPdfDoc.moveTextGroup
+          ? starPdfDoc.moveTextGroup(pageIndex, this.spanId, this.dx, this.dy)
+          : starPdfDoc.moveText(pageIndex, this.spanId[0], this.dx, this.dy));
+      }
+    } else {
+      await starPdfDoc.moveText(pageIndex, this.spanId, this.dx, this.dy);
+    }
+    const updatedBytes = await starPdfDoc.exportIncremental();
+
+    return {
+      bytes: updatedBytes,
+      message: `Text moved (${this.dx > 0 ? "+" : ""}${this.dx.toFixed(1)}, ${this.dy > 0 ? "+" : ""}${this.dy.toFixed(1)} pt). Native content stream modified.`,
+    };
+  }
+}
+
+
 

@@ -59,6 +59,10 @@ export function starpdf_merge_selected(documents: any, page_sources: any): Uint8
 
 export function starpdf_move_page(handle: number, from_index: number, to_index: number): Uint8Array;
 
+export function starpdf_move_text(handle: number, page_index: number, span_id: string, dx: number, dy: number): any;
+
+export function starpdf_move_text_group(handle: number, page_index: number, span_ids: any, dx: number, dy: number): any;
+
 export function starpdf_open(bytes: Uint8Array): number;
 
 export function starpdf_remove_annotation(handle: number, page_index: number, obj_num: bigint, obj_gen: number): boolean;
@@ -128,6 +132,8 @@ export interface InitOutput {
     readonly starpdf_merge_documents: (a: any) => [number, number, number, number];
     readonly starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
     readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly starpdf_move_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly starpdf_move_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
