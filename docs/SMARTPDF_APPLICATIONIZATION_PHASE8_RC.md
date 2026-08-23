@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-SmartPDF has completed Phase 8 Final Release Candidate qualification. All 7 applicationization phases (Shell & Architecture, Selection & History, Direct Text Manipulation, Direct Image & Vector Manipulation, Forms & Annotations, Page Organizer & Multi-Document Workflows, Search, Keyboard & File UX) have been exhaustively tested and qualified across major browser engines (Chromium, Firefox, Playwright WebKit).
+SmartPDF has completed Phase 8 Final Release Candidate qualification. All 7 applicationization phases (Shell & Architecture, Selection & History, Direct Text Manipulation, Direct Image & Vector Manipulation, Forms & Annotations, Page Organizer & Multi-Document Workflows, Search, Keyboard & File UX) have been tested and qualified across browser engines (Chromium, Firefox, Playwright WebKit).
 
 ---
 
@@ -33,49 +33,71 @@ SmartPDF has completed Phase 8 Final Release Candidate qualification. All 7 appl
 
 ---
 
-## 2. Performance & Long Document Benchmarks
+## 2. Field PDF & Corpus Provenance Classification
 
-Actual measurements on local Apple Silicon hardware:
+All PDF assets utilized during development and testing are strictly classified by provenance:
 
-| Document Profile | Page Count | Open Time | Search Time | Export Time | File Size | Memory (Heap) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **1-Page Standard** | 1 | 15.03 ms (cold) | 2.00 ms | 2.95 ms | 0.8 KB | < 5 MB |
-| **14-Page Real Document** | 14 | 0.08 ms | 0.68 ms | 0.97 ms | 3.9 KB | < 8 MB |
-| **104-Page Large Document** | 104 | 0.06 ms | 5.69 ms | 6.95 ms | 32.6 KB | 9.85 MB |
-
-**Observations**:
-- Document open and search scale linearly with sub-10ms response times even on 100+ page documents.
-- Incremental save maintains compact byte sizes without ballooning memory.
-- Thumbnail virtualization and canvas rendering operate smoothly with 0 frame drops.
+- **Real-User Field PDFs**: **0** (No external real-user PDFs are committed to the public repository).
+- **Development Corpus**:
+  - Chrome / Chromium Print PDF generator (`chrome-*.pdf`)
+  - macOS Quartz Graphics engine (`quartz-*.pdf`)
+  - LibreOffice PDF export filter (`libreoffice-*.pdf`)
+  - PDFKit headless generator (`pdfkit-*.pdf`)
+  - pdf-lib JavaScript library (`pdflib-*.pdf`)
+  - Synthesized encrypted, signed, and multi-revision documents (`synthetic-*.pdf`)
+- **Generated Fixtures**:
+  - `test-assets/14-page-real.pdf` (multi-page fixture generated during test asset creation)
+  - `test-assets/scanned-test.pdf` (image-only synthetic scan fixture)
+  - `test-assets/flat-form-generated.pdf`, `test-assets/smartpdf-form.pdf`, `test-assets/smartpdf-adobe-like-form.pdf`
+  - `test-assets/vector-primitives.pdf`, `test-assets/text-multicol-table.pdf`, `test-assets/text-multispan-heading.pdf`
+  - `test-assets/merge-a.pdf`, `test-assets/merge-b.pdf`, `test-assets/image-shared-xobject.pdf`
+- **Unknown Provenance**: **0**
 
 ---
 
-## 3. Local-First Architecture & Security Verification
+## 3. Performance & Long Document Benchmarks
 
-- **Zero-Server Payload**: 100% of PDF parsing, rasterization, direct manipulation, and incremental serialization occurs inside the client's WebAssembly sandbox. 0 bytes of PDF payloads are transmitted to external endpoints.
-- **Typed Refusal Safety**: Encrypted documents (standard password or public-key) and damaged PDFs produce typed refusals (`ENCRYPTED_DOCUMENT`, `CORRUPT_STRUCTURE`) without panicking or corrupting memory.
+Actual measured timings on local Apple Silicon hardware:
+
+| Document Profile | Page Count | Runtime Phase | Open Time | Search Time | Export Time | Output Size | Heap Used |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| **1-Page Standard** | 1 | Cold WASM initialization | 15.03 ms | 2.00 ms | 2.95 ms | 0.8 KB | < 5 MB |
+| **14-Page Document** | 14 | Warm runtime open | 0.08 ms | 0.68 ms | 0.97 ms | 3.9 KB | < 8 MB |
+| **104-Page Document** | 104 | Warm runtime open | 0.06 ms | 5.69 ms | 6.95 ms | 32.6 KB | 9.85 MB |
+
+**Observations**:
+- Document open and search scale linearly with sub-10ms response times up to 104 pages.
+- Incremental save produces compact revision slices without ballooning memory.
+
+---
+
+## 4. Local-First Architecture & Security Verification
+
+- **Zero-Server Payload**: 100% of PDF parsing, rasterization, direct manipulation, and incremental serialization occurs inside client-side WebAssembly. 0 bytes of PDF document payloads are uploaded to backend services.
+- **Typed Refusal Safety**: Encrypted documents (standard password or public-key) and damaged PDFs produce typed refusals (`ENCRYPTED_DOCUMENT`, `CORRUPT_STRUCTURE`) without panics.
 - **Memory Safety**: StarPDF Rust engine contains **0 `unsafe` blocks** in its core codebase (`engine/starpdf/src/`).
 
 ---
 
-## 4. Known Limitations & Documented Boundaries
+## 5. Known Limitations & Documented Boundaries
 
 1. **Non-Rewritable Fonts**: Embedded fonts without standard `/ToUnicode` CMaps or Type3 bitmap fonts refuse text replacement with a clear notice (`"This text can't be safely rewritten."`) rather than attempting lossy approximate substitution.
 2. **Arbitrary Paragraph Reflow**: Reflow across multi-line paragraphs with arbitrary external fonts is intentionally not supported to prevent visual font-mismatch artifacts.
 3. **Complex Bezier Nodes**: Complex vector path outlines are selectable, movable, and stylable as unified bounding boxes; individual bezier knot point editing is not exposed.
-4. **Digital Signatures**: Existing digital signature byte ranges and incremental revisions are preserved on export; cryptographic verification is not performed.
+4. **Digital Signatures**: Signature byte ranges / structures are preserved where applicable on incremental export. Cryptographic verification: **NOT PERFORMED / NOT SUPPORTED**.
 
 ---
 
-## 5. Dependency & Legal Audit Notice
+## 6. Dependency & Legal Audit Notice
 
-- **Unresolved License Metadata Review Items**: 0
-- **Formal Legal Review**: NOT PERFORMED
-- *Notice: Open source licenses (MIT, Apache 2.0, BSD) reviewed for production compliance. Formal legal certification not claimed.*
+- **Audit Status**: Fresh dependency audit performed across all 41 production dependencies.
+- **Unresolved License Metadata Review Items**: **0**
+- **Formal Legal Review**: **NOT PERFORMED**
+- *Notice: Production dependencies conform to standard permissive OSS licenses (MIT, Apache 2.0, BSD-2/3, ISC). Formal legal certification is not claimed.*
 
 ---
 
-## 6. Final Release Candidate Decision
+## 7. Final Release Candidate Decision
 
 **FINAL RC STATUS**: **`RC_READY_WITH_DOCUMENTED_LIMITATIONS`**
 

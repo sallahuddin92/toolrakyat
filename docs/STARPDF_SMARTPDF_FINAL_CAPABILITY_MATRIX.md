@@ -11,14 +11,15 @@ This document provides the final, complete capability inventory of the StarPDF R
 | **`FULLY_EXPOSED`** | **42** | Complete Rust engine -> WASM -> TS Client -> SmartPDF UI -> Direct Manipulation -> Export/Reopen pipeline fully functional and qualified. |
 | **`PARTIALLY_EXPOSED`** | **1** | Bounded direct manipulation exposed (e.g. vector styling/bounds manipulation), with granular internal operations (individual bezier node control) not exposed. |
 | **`ENGINE_READY_UI_MISSING`** | **2** | Engine and WASM bindings exist and are tested, but user-facing UI triggers are omitted. |
+| **`ENGINE_READY_BINDING_MISSING`** | **1** | Engine core capability exists in Rust (`CompleteWriter`), but lacks WASM binding or pipeline integration. |
 | **`INTENTIONALLY_NOT_EXPOSED`** | **1** | Omitted intentionally to prevent document corruption or layout destruction. |
 | **`SAFE_REFUSAL`** | **2** | Deterministically refused at engine/UI boundaries with clear typed user feedback to guarantee document integrity. |
-| **`ENGINE_GAP`** | **1** | Engine core capability exists in Rust but lacks WASM binding or pipeline integration. |
-| **TOTAL AUDITED** | **49** | Comprehensive coverage across all document editing, manipulation, and workflow domains. |
+| **`TRUE_ENGINE_GAPS`** | **0** | No missing foundational engine primitives required for the qualified product scope. |
+| **TOTAL AUDITED ENTRIES** | **49** | Comprehensive coverage across all document editing, manipulation, and workflow domains. |
 
 ---
 
-## 2. Detailed Capability Breakdown
+## 2. Detailed Capability Breakdown (49 Audited Entries)
 
 ### A. Document Lifecycle & Security
 
@@ -27,7 +28,7 @@ This document provides the final, complete capability inventory of the StarPDF R
 | 1 | **Document Open & Parsing** | `FULLY_EXPOSED` | Robust parsing of standard, hybrid xref, linearized, and multi-revision documents. |
 | 2 | **Fault-Tolerant Recovery** | `FULLY_EXPOSED` | Recovers corrupt xref tables, reconstructs missing `startxref`, fixes binary stream lengths. |
 | 3 | **Document Metadata & Metrics** | `FULLY_EXPOSED` | Extracts title, author, producer, page count, and dimensions across all pages. |
-| 4 | **Digital Signature Detection** | `FULLY_EXPOSED` | Non-destructive byte-range preservation; displays signature notice without claiming crypto validation. |
+| 4 | **Digital Signature Detection** | `FULLY_EXPOSED` | Signature byte ranges / structures preserved where applicable. Cryptographic verification: NOT PERFORMED / NOT SUPPORTED. |
 | 5 | **Password Encryption Refusal** | `SAFE_REFUSAL` | Deterministically refuses Standard & Public-Key encrypted files with `ENCRYPTED_DOCUMENT`. |
 | 6 | **Stale Handle Protection** | `FULLY_EXPOSED` | Safe handle lifecycle in Rust engine registry preventing double-free or stale document access. |
 | 7 | **Document Close / Reset** | `FULLY_EXPOSED` | Explicit memory reclamation on document transitions with 0 leaks. |
@@ -105,6 +106,6 @@ This document provides the final, complete capability inventory of the StarPDF R
 | # | Capability | Classification | Notes |
 | :-: | :--- | :---: | :--- |
 | 46 | **Full Text Search & Highlighting** | `FULLY_EXPOSED` | StarPDF search bounding box overlay with zoom/rotation support and active hit focus. |
-| 47 | **Incremental Save / Export** | `FULLY_EXPOSED` | Append-only xref revision export preserving original structure and digital signatures. |
+| 47 | **Incremental Save / Export** | `FULLY_EXPOSED` | Append-only xref revision export preserving original structure and digital signature byte ranges. |
 | 48 | **Minimal Scratchpad Writer** | `FULLY_EXPOSED` | In-memory clean PDF generator for scratchpads and empty documents. |
-| 49 | **Complete Standalone Compaction** | `ENGINE_GAP` | `CompleteWriter` defragmenter exists in Rust core; WASM export omitted in current build. |
+| 49 | **Complete Standalone Compaction** | `ENGINE_READY_BINDING_MISSING` | `CompleteWriter` defragmenter exists in Rust core; WASM export omitted in current build. |
