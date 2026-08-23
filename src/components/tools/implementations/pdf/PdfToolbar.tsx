@@ -63,6 +63,8 @@ interface PdfToolbarProps {
   onMergeClick?: () => void;
   isThumbnailsOpen?: boolean;
   onToggleThumbnails?: () => void;
+  isSearchOpen?: boolean;
+  onToggleSearch?: (open: boolean) => void;
   mode?: EditorMode;
   onModeChange?: (mode: EditorMode) => void;
   fillAndSignTool?: FillAndSignTool;
@@ -99,6 +101,8 @@ export function PdfToolbar({
   onMergeClick,
   isThumbnailsOpen = true,
   onToggleThumbnails,
+  isSearchOpen,
+  onToggleSearch,
   mode = "SELECT",
   onModeChange,
   fillAndSignTool = "text",
@@ -106,9 +110,10 @@ export function PdfToolbar({
   formAssistEnabled = true,
   onToggleFormAssist,
 }: PdfToolbarProps) {
-
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const [showSearchInput, setShowSearchInput] = useState(false);
+  const [internalShowSearchInput, setInternalShowSearchInput] = useState(false);
+  const showSearchInput = isSearchOpen !== undefined ? isSearchOpen : internalShowSearchInput;
+  const setShowSearchInput = onToggleSearch || setInternalShowSearchInput;
   const zoomPercentage = Math.round(scale * 100);
 
   return (
@@ -381,12 +386,32 @@ export function PdfToolbar({
                     placeholder="Search in document..."
                     value={searchQuery}
                     onChange={(e) => onSearchChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                          onPrevSearchResult?.();
+                        } else {
+                          onNextSearchResult?.();
+                        }
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        setShowSearchInput(false);
+                        onSearchChange("");
+                      }
+                    }}
                     className="bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none w-24 sm:w-36 h-6"
                     autoFocus
                     data-testid="search-query-input"
+                    aria-label="Search query"
                   />
+                  {searchQuery.trim().length > 0 && searchResultCount === 0 && (
+                    <span className="text-[10px] text-amber-600 font-medium whitespace-nowrap pl-1" data-testid="search-results-count">
+                      0 of 0
+                    </span>
+                  )}
                   {searchResultCount > 0 && (
-                    <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap pl-1" data-testid="search-results-count">
+                    <span className="text-[10px] text-slate-600 font-medium whitespace-nowrap pl-1 tabular-nums" data-testid="search-results-count">
                       {activeSearchIndex + 1}/{searchResultCount}
                     </span>
                   )}
@@ -398,7 +423,7 @@ export function PdfToolbar({
                         size="icon"
                         onClick={onPrevSearchResult}
                         className="size-5 rounded text-slate-500"
-                        title="Previous hit"
+                        title="Previous hit (Shift+Enter)"
                         aria-label="Previous hit"
                       >
                         <ChevronLeft className="size-3" />
@@ -409,7 +434,7 @@ export function PdfToolbar({
                         size="icon"
                         onClick={onNextSearchResult}
                         className="size-5 rounded text-slate-500"
-                        title="Next hit"
+                        title="Next hit (Enter)"
                         aria-label="Next hit"
                       >
                         <ChevronRight className="size-3" />
@@ -435,7 +460,7 @@ export function PdfToolbar({
                   size="icon"
                   onClick={() => setShowSearchInput(true)}
                   className="size-8 text-slate-500 hover:text-slate-900 rounded-lg"
-                  title="Search text (StarPDF WASM)"
+                  title="Search text (Cmd+F / Ctrl+F)"
                   aria-label="Search text"
                   data-testid="toolbar-search-toggle-btn"
                 >

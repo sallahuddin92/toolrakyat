@@ -6,6 +6,7 @@ import type {
   StarPdfImageInfo,
   StarPdfTextSpan,
   StarPdfVectorGraphicInfo,
+  StarPdfSearchResult,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import {
@@ -67,6 +68,8 @@ interface PdfInteractiveOverlayProps {
     annotId: string,
     pdfRect: PdfRect,
   ) => void;
+  searchResults?: StarPdfSearchResult[];
+  activeSearchIndex?: number;
 }
 
 interface DragTransformState {
@@ -121,14 +124,26 @@ export function PdfInteractiveOverlay({
   onTransformVector,
   onMoveText,
   onTransformAnnotation,
+  searchResults = [],
+  activeSearchIndex = 0,
 }: PdfInteractiveOverlayProps) {
-
-
   const pageDims = useMemo(() => ({ width: pageWidth, height: pageHeight, rotation }), [pageWidth, pageHeight, rotation]);
   const pageIdx = pageNumber - 1;
   const humanTextGroups = useMemo(() => groupTextSpans(textSpans), [textSpans]);
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const activeHighlightRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll active search highlight into view
+  useEffect(() => {
+    if (activeHighlightRef.current) {
+      activeHighlightRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
+  }, [activeSearchIndex, pageNumber]);
 
 
   // Inline placement state for text tool
@@ -1081,7 +1096,43 @@ export function PdfInteractiveOverlay({
           );
         })()}
 
-
+      {/* Search Highlights Overlay Layer */}
+      {searchResults.length > 0 && (
+        <div className="absolute inset-0 pointer-events-none z-15" data-testid="search-highlights-layer">
+          {searchResults.map((hit, hitIdx) => {
+            if (hit.page_index !== pageIdx) return null;
+            const isActiveHit = hitIdx === activeSearchIndex;
+            return hit.boxes.map((box, boxIdx) => {
+              const pixelRect = convertPdfRectToPixels(
+                { x: box.x, y: box.y, width: box.width, height: box.height },
+                pageDims,
+                scale,
+                rotation,
+              );
+              return (
+                <div
+                  key={`search-hit-${hitIdx}-${boxIdx}`}
+                  ref={isActiveHit && boxIdx === 0 ? activeHighlightRef : undefined}
+                  style={{
+                    left: `${pixelRect.left}px`,
+                    top: `${pixelRect.top}px`,
+                    width: `${pixelRect.width}px`,
+                    height: `${pixelRect.height}px`,
+                  }}
+                  className={cn(
+                    "absolute pointer-events-none rounded-xs transition-all",
+                    isActiveHit
+                      ? "bg-amber-400/80 border-2 border-amber-600 ring-2 ring-amber-400/60 shadow-sm z-30 animate-pulse"
+                      : "bg-yellow-300/45 border border-yellow-400/60 z-20",
+                  )}
+                  data-testid={isActiveHit ? "search-highlight-active" : "search-highlight-match"}
+                  data-hit-index={hitIdx}
+                />
+              );
+            });
+          })}
+        </div>
+      )}
     </div>
   );
 }

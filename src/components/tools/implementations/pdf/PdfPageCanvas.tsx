@@ -9,6 +9,7 @@ import type {
   StarPdfImageInfo,
   StarPdfTextSpan,
   StarPdfVectorGraphicInfo,
+  StarPdfSearchResult,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
@@ -63,8 +64,9 @@ interface PdfPageCanvasProps {
     annotId: string,
     pdfRect: import("@/lib/pdf/selection").PdfRect,
   ) => void;
+  searchResults?: StarPdfSearchResult[];
+  activeSearchIndex?: number;
 }
-
 
 export function PdfPageCanvas({
   pdfDocument,
@@ -96,6 +98,8 @@ export function PdfPageCanvas({
   onTransformVector,
   onMoveText,
   onTransformAnnotation,
+  searchResults = [],
+  activeSearchIndex = 0,
 }: PdfPageCanvasProps) {
 
 
@@ -243,6 +247,8 @@ export function PdfPageCanvas({
           onTransformVector={onTransformVector}
           onMoveText={onMoveText}
           onTransformAnnotation={onTransformAnnotation}
+          searchResults={searchResults}
+          activeSearchIndex={activeSearchIndex}
         />
 
 
