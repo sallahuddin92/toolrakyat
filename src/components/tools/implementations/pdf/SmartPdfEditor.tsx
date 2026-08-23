@@ -50,6 +50,7 @@ import {
   AddCrossMarkCommand,
   AddInkAnnotationCommand,
   DeleteAnnotationCommand,
+  UpdateAnnotationPropertiesCommand,
   UpdateAnnotationRectCommand,
   MovePageCommand,
   DuplicatePageCommand,
@@ -782,6 +783,13 @@ export function SmartPdfEditor() {
 
   const handleFormFieldChange = useCallback(
     (fieldName: string, value: string | boolean | string[]) => {
+      if (inspectionResult) {
+        const field = inspectionResult.fields.find((f) => f.name === fieldName);
+        if (field?.isReadOnly) {
+          toast.error("Cannot edit read-only form field.");
+          return;
+        }
+      }
       setFieldValues((prev) => ({ ...prev, [fieldName]: value }));
       setIsModified(true);
       if (sourceBytes) {
@@ -790,7 +798,7 @@ export function SmartPdfEditor() {
         );
       }
     },
-    [sourceBytes],
+    [inspectionResult, sourceBytes],
   );
 
   const handleAnnotationChange = useCallback(
@@ -804,6 +812,18 @@ export function SmartPdfEditor() {
       }
     },
     [sourceBytes],
+  );
+
+  const handleUpdateAnnotationProperties = useCallback(
+    async (annotId: string, properties: import("@/lib/pdf/starpdf-types").StarPdfUpdateAnnotationInput) => {
+      try {
+        await executeCommand(new UpdateAnnotationPropertiesCommand(annotId, properties, currentPage - 1));
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        toast.error(`Failed to style annotation: ${errMsg}`);
+      }
+    },
+    [currentPage, executeCommand],
   );
 
   // Global Keyboard Shortcuts (Escape to cancel tool mode or selection, Delete/Backspace for selected objects)
@@ -1224,6 +1244,7 @@ export function SmartPdfEditor() {
               annotationValue={
                 selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
               }
+              onUpdateAnnotationProperties={handleUpdateAnnotationProperties}
               onDeleteAnnotation={handleDeleteAnnotation}
               onAddTextInstead={() => {
                 setEditorMode("FILL_AND_SIGN");

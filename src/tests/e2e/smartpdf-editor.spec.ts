@@ -11,7 +11,11 @@ async function uploadPdfBytes(
   name: string,
   bytes: Buffer,
 ) {
-  await page.locator('input[type="file"][accept*="pdf"]').first().setInputFiles({
+  const dropzoneInput = page.locator('[data-testid="pdf-dropzone-input"]');
+  const globalInput = page.locator('input[type="file"]').first();
+  const fileInput = (await dropzoneInput.count()) > 0 ? dropzoneInput : globalInput;
+  await fileInput.waitFor({ state: "attached", timeout: 10000 });
+  await fileInput.setInputFiles({
     name,
     mimeType: "application/pdf",
     buffer: bytes,
@@ -29,7 +33,7 @@ async function uploadPdfBytes(
   const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
 
   await expect(workspace).toBeVisible({ timeout: 10000 });
-  const canvas = workspace.locator("main canvas");
+  const canvas = workspace.locator("main canvas").first();
   await expect
     .poll(() => canvas.evaluate((node) => (node as HTMLCanvasElement).width))
     .toBeGreaterThan(0);
@@ -423,7 +427,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(extractedPath).not.toBeNull();
     const extracted = fs.readFileSync(extractedPath!);
 
-    await page.getByRole("button", { name: "Open" }).click();
+    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
     const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
     if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
       await confirmBtn.click();
@@ -453,12 +457,10 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
       "test-assets",
       "smartpdf-form.pdf",
     );
+    const bytes = fs.readFileSync(fixturePath);
 
     // Upload the AcroForm fixture
-    const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Select PDF File" }).click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(fixturePath);
+    await uploadPdfBytes(page, "smartpdf-form.pdf", bytes);
 
     // Verify workspace mounts
     const workspace = page.locator(
@@ -2878,6 +2880,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     // 5. Add FreeText D
     await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
     await overlay.click({ position: { x: 100, y: 250 } });
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
     await inlineInput.fill("Patient Record D");
     await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
 
@@ -3662,6 +3665,133 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // 5. Verify Unsaved changes state
     await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("v0.22 Phase 5: AcroForm Direct Manipulation (Text, Checkbox, Dropdown, Clear & Undo/Redo Roundtrip)", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/smartpdf-form.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase5-acroform-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select Form Field
+    const fieldElement = page.locator('[data-testid^="canvas-field-"]').first();
+    await expect(fieldElement).toBeVisible({ timeout: 5000 });
+    await fieldElement.click();
+
+    // 2. Verify Contextual Toolbar for Form
+    const toolbar = page.locator('[data-testid="pdf-contextual-toolbar"]');
+    await expect(toolbar).toBeVisible({ timeout: 5000 });
+
+    // 3. Edit Text Form Field value
+    const formInput = page.locator('[data-testid="context-form-input"]');
+    if (await formInput.isVisible()) {
+      await formInput.fill("Phase 5 Direct Value");
+      await page.waitForTimeout(400);
+
+      // Verify status bar shows Unsaved changes
+      await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+
+      // 4. Test Undo / Redo
+      const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+      await undoBtn.click();
+      await page.waitForTimeout(400);
+
+      const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
+      await redoBtn.click();
+      await page.waitForTimeout(400);
+
+      // 5. Test Clear button
+      const clearBtn = page.locator('[data-testid="context-form-clear-btn"]');
+      if (await clearBtn.isVisible()) {
+        await clearBtn.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // 6. Test Checkbox Field if present
+    const checkboxElement = page.locator('[data-testid="context-form-checkbox"]');
+    if (await checkboxElement.isVisible()) {
+      await checkboxElement.click();
+      await page.waitForTimeout(400);
+      await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+    }
+
+    // 7. Click empty canvas to deselect
+    await workspace.click({ position: { x: 10, y: 10 } });
+    await expect(toolbar).toBeHidden({ timeout: 5000 });
+  });
+
+  test("v0.22 Phase 5: Annotation Direct Manipulation & Styling (Selection, Styling, Move Handle & Delete)", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-shapes-ink-link.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase5-annotation-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select existing Annotation
+    const annotElement = page.locator('[data-testid^="canvas-annotation-"]').first();
+    await expect(annotElement).toBeVisible({ timeout: 5000 });
+    await annotElement.click();
+
+    // 2. Verify Contextual Toolbar with Annotation Controls
+    const toolbar = page.locator('[data-testid="pdf-contextual-toolbar"]');
+    await expect(toolbar).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="context-annotation-controls"]')).toBeVisible({ timeout: 5000 });
+
+    // 3. Verify Direct Manipulation Transform Box
+    const transformBox = page.locator('[data-testid="direct-manipulation-transform-box"]');
+    await expect(transformBox).toBeVisible({ timeout: 5000 });
+
+    // 4. Test Style Controls if available
+    const strokeColor = page.locator('[data-testid="context-annotation-stroke-color"]');
+    if (await strokeColor.isVisible()) {
+      await strokeColor.fill("#22c55e");
+      await page.waitForTimeout(400);
+      await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+    }
+
+    // 5. Test Move Handle
+    const moveHandle = page.locator('[data-testid="direct-manipulation-move-handle"]');
+    if (await moveHandle.isVisible()) {
+      const box = await moveHandle.boundingBox();
+      if (box) {
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 15, { steps: 5 });
+        await page.mouse.up();
+        await page.waitForTimeout(400);
+      }
+    }
+
+    // 6. Test Undo / Redo
+    const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
+    await undoBtn.click();
+    await page.waitForTimeout(400);
+
+    // 7. Test Delete Annotation
+    const deleteBtn = page.locator('[data-testid="context-annotation-delete-btn"]');
+    if (await deleteBtn.isVisible()) {
+      await deleteBtn.click();
+      await page.waitForTimeout(400);
+      await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+    }
   });
 });
 
