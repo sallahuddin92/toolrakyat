@@ -427,11 +427,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(extractedPath).not.toBeNull();
     const extracted = fs.readFileSync(extractedPath!);
 
-    await page.locator('[data-testid="toolbar-open-file-btn"]').click();
-    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
     const canvas = await uploadPdfBytes(page, "page-operations-extracted.pdf", extracted);
     await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
     expect((await canvas.screenshot()).byteLength).toBeGreaterThan(1_000);
@@ -2879,7 +2874,9 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await overlay.click({ position: { x: 100, y: 200 } });
 
     // 5. Add FreeText D
-    await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
+    const textToolBtn = page.locator('[data-testid="fill-sign-tool-text-btn"]');
+    await textToolBtn.click();
+    await expect(textToolBtn).toHaveClass(/bg-sky-600/);
     await overlay.click({ position: { x: 100, y: 320 } });
     await expect(inlineInput).toBeVisible({ timeout: 5000 });
     await inlineInput.fill("Patient Record D");
