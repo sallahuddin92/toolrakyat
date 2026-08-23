@@ -2880,7 +2880,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // 5. Add FreeText D
     await page.locator('[data-testid="fill-sign-tool-text-btn"]').click();
-    await overlay.click({ position: { x: 100, y: 250 } });
+    await overlay.click({ position: { x: 100, y: 320 } });
     await expect(inlineInput).toBeVisible({ timeout: 5000 });
     await inlineInput.fill("Patient Record D");
     await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
