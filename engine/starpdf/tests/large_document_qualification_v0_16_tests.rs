@@ -961,6 +961,7 @@ fn test_qualification_reconciled_save_growth_10_cycles() {
     println!("----------------------------------------------------");
 }
 
+#[cfg(target_os = "macos")]
 #[repr(C)]
 #[derive(Default, Debug, Clone, Copy)]
 struct MachTaskBasicInfo {
