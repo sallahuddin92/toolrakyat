@@ -1,0 +1,103 @@
+name: SmartPDF CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  web-qualification:
+    name: Web Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Vitest unit tests
+        run: npm test
+
+      - name: Next.js production build
+        run: npm run build
+
+  rust-engine:
+    name: StarPDF Rust Engine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust formatting check
+        working-directory: engine/starpdf
+        run: cargo fmt --check
+
+      - name: Rust Clippy linting
+        working-directory: engine/starpdf
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        working-directory: engine/starpdf
+        run: cargo test --all-features
+
+      - name: Rust release build
+        working-directory: engine/starpdf
+        run: cargo build --release
+
+  playwright-e2e:
+    name: Playwright E2E Tests (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    needs: [web-qualification]
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js production app
+        run: npm run build
+
+      - name: Install Playwright browsers & dependencies
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright E2E (${{ matrix.project }})
+        run: npx playwright test src/tests/e2e/smartpdf-editor.spec.ts --project=${{ matrix.project }}
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-${{ matrix.project }}
+          path: test-results/
+          retention-days: 7
