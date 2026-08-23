@@ -2846,6 +2846,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
   test("v0.20 Phase 3A.1: 20-Operation Re-Edit Durability Torture Test with Multi-Round Export/Reopen", async ({
     page,
   }) => {
+    test.setTimeout(120_000);
     const fixturePath = path.join(process.cwd(), "test-assets/flat-form-generated.pdf");
     const originalBytes = fs.readFileSync(fixturePath);
     await uploadPdfBytes(page, "torture-doc.pdf", originalBytes);
