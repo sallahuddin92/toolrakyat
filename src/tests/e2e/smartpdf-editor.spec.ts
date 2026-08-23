@@ -1912,11 +1912,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(exportedBytes).not.toEqual(originalBytes);
 
     // 8. Reopen exported document
-    await page.getByRole("button", { name: "Open" }).click();
-    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
     await uploadPdfBytes(page, "workflow-k-edited.pdf", exportedBytes);
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
@@ -1984,11 +1979,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(exportedBytes).not.toEqual(originalBytes);
 
     // 8. Reopen exported document
-    await page.getByRole("button", { name: "Open" }).click();
-    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
     await uploadPdfBytes(page, "workflow-l-edited.pdf", exportedBytes);
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
@@ -2064,11 +2054,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(exportedBytes.length).toBeGreaterThan(100);
 
     // 6. Reopen and verify canvas state
-    await page.getByRole("button", { name: "Open" }).click();
-    const confirmBtn = page.getByTestId("confirm-dialog-confirm-btn");
-    if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await confirmBtn.click();
-    }
     await uploadPdfBytes(page, "workflow-m-edited.pdf", exportedBytes);
     await expect(workspace).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("main", { name: "PDF Document Page Viewport" }).locator("canvas")).toBeVisible();
