@@ -43,9 +43,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust 1.93.0 toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.93.0"
           components: rustfmt, clippy
 
       - name: Rust formatting check
@@ -92,7 +93,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Run Playwright E2E (${{ matrix.project }})
-        run: npx playwright test src/tests/e2e/smartpdf-editor.spec.ts --project=${{ matrix.project }}
+        run: npx playwright test src/tests/e2e/smartpdf-editor.spec.ts --project=${{ matrix.project }} --workers=1
 
       - name: Upload Playwright traces on failure
         if: failure()
