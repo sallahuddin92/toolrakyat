@@ -12,8 +12,8 @@ async function uploadPdfBytes(
   bytes: Buffer,
 ) {
   const dropzoneInput = page.locator('[data-testid="pdf-dropzone-input"]');
-  const globalInput = page.locator('input[type="file"]').first();
-  const fileInput = (await dropzoneInput.count()) > 0 ? dropzoneInput : globalInput;
+  const openInput = page.locator('input[aria-label="Open PDF document"]');
+  const fileInput = (await dropzoneInput.count()) > 0 ? dropzoneInput : openInput;
   await fileInput.waitFor({ state: "attached", timeout: 10000 });
   await fileInput.setInputFiles({
     name,
