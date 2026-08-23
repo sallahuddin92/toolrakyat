@@ -413,12 +413,14 @@ function AnnotationControls({
   onAnnotationChange,
   onUpdateAnnotationProperties,
   onDeleteAnnotation,
+  onDeselect,
 }: {
   annot: PdfMarkupAnnotation;
   annotationValue?: string;
   onAnnotationChange?: (annotId: string, value: string) => void;
   onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
+  onDeselect?: () => void;
 }) {
   const [localText, setLocalText] = useState<string | null>(null);
   const [strokeColor, setStrokeColor] = useState("#000000");
@@ -656,6 +658,12 @@ function AnnotationControls({
         onChange={(e) => {
           setLocalText(e.target.value);
           onAnnotationChange?.(annot.id, e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onDeselect?.();
+          }
         }}
         className="h-8 text-xs w-48 sm:w-64 bg-white"
         placeholder="Annotation contents..."
@@ -1050,6 +1058,7 @@ export function PdfContextualToolbar({
           onAnnotationChange={onAnnotationChange}
           onUpdateAnnotationProperties={onUpdateAnnotationProperties}
           onDeleteAnnotation={onDeleteAnnotation}
+          onDeselect={onDeselect}
         />
       )}
 

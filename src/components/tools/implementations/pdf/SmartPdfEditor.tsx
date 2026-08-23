@@ -19,7 +19,7 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, FolderOpen } from "lucide-react";
 
 import {
   type SmartPdfSelection,
@@ -139,10 +139,15 @@ export function SmartPdfEditor() {
   // Layout Panel Visibility (Desktop Workspace)
   const [isThumbnailsOpen, setIsThumbnailsOpen] = useState<boolean>(true);
 
-  // StarPDF search state
+  // StarPDF search state (Phase 7)
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchResults, setSearchResults] = useState<StarPdfSearchResult[]>([]);
   const [activeSearchIndex, setActiveSearchIndex] = useState<number>(0);
+
+  // File drag-and-drop & replace pending file state (Phase 7)
+  const [pendingNewFile, setPendingNewFile] = useState<File | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>("Loading document...");
@@ -150,6 +155,7 @@ export function SmartPdfEditor() {
   const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
 
   const viewportContainerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mergeInputRef = useRef<HTMLInputElement | null>(null);
   const pdfProxyRef = useRef<PDFDocumentProxy | null>(null);
   const starPdfDocRef = useRef<StarPdfDocumentHandle | null>(null);
@@ -286,6 +292,14 @@ export function SmartPdfEditor() {
     [cleanupProxy],
   );
 
+  const handleFileSelected = useCallback(
+    async (file: File) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await loadDocument(bytes, file.name, file.size, 1);
+    },
+    [loadDocument],
+  );
+
   /**
    * Centralized Command Execution Lifecycle
    * Coordinates validation, busy state, execution, atomic document refresh,
@@ -349,6 +363,9 @@ export function SmartPdfEditor() {
           a.click();
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
+          if (command.id === "document.export") {
+            setIsModified(false);
+          }
         }
 
         // 2. Handle document byte mutations
@@ -478,27 +495,6 @@ export function SmartPdfEditor() {
     toast.success(`Redo: ${redone.entry.description}`);
   }, [currentPage, filename, loadDocument]);
 
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        if (e.shiftKey) {
-          e.preventDefault();
-          void handleRedo();
-        } else {
-          e.preventDefault();
-          void handleUndo();
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        void handleRedo();
-      } else if (e.key === "Escape") {
-        setSelectedItem(null);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleUndo, handleRedo]);
 
   const handleZoomIn = useCallback(() => {
     setScale((prev) => Math.min(Math.round((prev + 0.15) * 100) / 100, 4.0));
@@ -531,14 +527,15 @@ export function SmartPdfEditor() {
   const handleSearchChange = useCallback(
     async (query: string) => {
       setSearchQuery(query);
-      if (!starPdfDoc || !query.trim()) {
+      const doc = starPdfDocRef.current || starPdfDoc;
+      if (!doc || !query.trim()) {
         setSearchResults([]);
         setActiveSearchIndex(0);
         return;
       }
 
       try {
-        const hits = await starPdfDoc.search(query, { caseSensitive: false });
+        const hits = await doc.search(query, { caseSensitive: false });
         setSearchResults(hits);
         setActiveSearchIndex(0);
         if (hits.length > 0) {
@@ -737,6 +734,7 @@ export function SmartPdfEditor() {
     setSecurityInfo(null);
     setCurrentPage(1);
     setScale(1.0);
+    setIsSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
     setHistoryState(createInitialHistoryState(new Uint8Array(0)));
@@ -745,10 +743,19 @@ export function SmartPdfEditor() {
     setFillAndSignTool("text");
     setSignatureFile(null);
     setShowFlatFormBanner(true);
-  }, [cleanupProxy]);
+
+    if (pendingNewFile) {
+      const fileToLoad = pendingNewFile;
+      setPendingNewFile(null);
+      void handleFileSelected(fileToLoad);
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [cleanupProxy, handleFileSelected, pendingNewFile]);
 
   const handleOpenNewFileClick = useCallback(() => {
     if (isModified) {
+      setPendingNewFile(null);
       setShowConfirmOpenModal(true);
     } else {
       performOpenNewFile();
@@ -933,28 +940,84 @@ export function SmartPdfEditor() {
     [currentPage, executeCommand],
   );
 
-  // Global Keyboard Shortcuts (Escape to cancel tool mode or selection, Delete/Backspace for selected objects)
+  // Phase 7 Unified Global Keyboard Shortcuts (with strict typing safety)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          Boolean(target.closest("[contenteditable='true']")));
+
+      // 1. Escape shortcut: cancel active dialogs, mode, search, and selection (works globally and inside inputs)
       if (e.key === "Escape") {
-        if (editorMode === "FILL_AND_SIGN") {
+        e.preventDefault();
+        target?.blur();
+        setShowInfoModal(false);
+        setShowImportModal(false);
+        setShowSplitModal(false);
+        setShowConfirmOpenModal(false);
+        if (isSearchOpen) {
+          setIsSearchOpen(false);
+          setSearchQuery("");
+        }
+        setSelectedItem(null);
+        if (editorMode !== "SELECT") {
           setEditorMode("SELECT");
-        } else if (selectedItem) {
-          setSelectedItem(null);
         }
         return;
       }
 
-      if (e.key === "Delete" || e.key === "Backspace") {
-        const target = e.target;
-        if (
-          target instanceof HTMLInputElement ||
-          target instanceof HTMLTextAreaElement ||
-          (target instanceof HTMLElement && target.isContentEditable)
-        ) {
-          return;
-        }
+      // If user is typing inside text inputs/contenteditable, suppress all other editor shortcuts
+      if (isTyping) {
+        return;
+      }
 
+      // 2. Search shortcut (Cmd/Ctrl + F)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        setTimeout(() => {
+          const searchInput = document.querySelector<HTMLInputElement>(
+            '[data-testid="search-query-input"]',
+          );
+          if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+          }
+        }, 50);
+        return;
+      }
+
+      // 3. Export / Save shortcut (Cmd/Ctrl + S)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void executeCommand(new ExportDocumentCommand("editable"));
+        return;
+      }
+
+      // 4. Undo / Redo shortcuts (Cmd/Ctrl + Z, Cmd/Ctrl + Shift + Z, Ctrl + Y)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (e.shiftKey) {
+          e.preventDefault();
+          void handleRedo();
+        } else {
+          e.preventDefault();
+          void handleUndo();
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        void handleRedo();
+        return;
+      }
+
+      // 5. Delete / Backspace shortcut for selected objects
+      if (e.key === "Delete" || e.key === "Backspace") {
         if (selectedItem && !isBusyRef.current) {
           e.preventDefault();
           const item = selectedItem;
@@ -981,15 +1044,46 @@ export function SmartPdfEditor() {
               toast.error("This text can't be safely removed in place.");
             }
           } else if (item.type === "form") {
-
             handleFormFieldChange(item.id, "");
           }
         }
+        return;
+      }
+
+      // 6. Arrow / Page navigation
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        if (currentPage > 1) {
+          e.preventDefault();
+          handlePageNavigation(currentPage - 1);
+        }
+      } else if (e.key === "ArrowRight" || e.key === "PageDown") {
+        const totalPages = inspectionResult?.metadata.pageCount || 1;
+        if (currentPage < totalPages) {
+          e.preventDefault();
+          handlePageNavigation(currentPage + 1);
+        }
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editorMode, selectedItem, handleDeleteAnnotation, executeCommand, handleFormFieldChange]);
+  }, [
+    currentPage,
+    editorMode,
+    executeCommand,
+    handleDeleteAnnotation,
+    handleFormFieldChange,
+    handlePageNavigation,
+    handleRedo,
+    handleUndo,
+    inspectionResult,
+    isSearchOpen,
+    selectedItem,
+    showConfirmOpenModal,
+    showImportModal,
+    showInfoModal,
+    showSplitModal,
+  ]);
 
 
   // Form Affordance Detection (Form Assist)
@@ -1178,6 +1272,8 @@ export function SmartPdfEditor() {
         canRedo={canRedo(historyState)}
         onUndo={() => void handleUndo()}
         onRedo={() => void handleRedo()}
+        isSearchOpen={isSearchOpen}
+        onToggleSearch={setIsSearchOpen}
         searchQuery={searchQuery}
         searchResultCount={searchResults.length}
         activeSearchIndex={activeSearchIndex}
@@ -1250,6 +1346,22 @@ export function SmartPdfEditor() {
         onSplit={() => setShowSplitModal(true)}
       />
 
+      {/* Hidden File Input for Opening / Replacing Document */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        aria-label="Open PDF document"
+        onChange={async (e) => {
+          const files = e.target.files;
+          if (files && files.length > 0) {
+            await handleFileSelected(files[0]);
+          }
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }}
+      />
+
       {/* Hidden File Input for Adding/Merging PDFs */}
       <input
         ref={mergeInputRef}
@@ -1312,12 +1424,51 @@ export function SmartPdfEditor() {
           ref={viewportContainerRef}
           className="flex-1 bg-slate-100/90 overflow-auto p-6 sm:p-8 flex items-center justify-center min-w-0 relative"
           aria-label="PDF Document Page Viewport"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setIsDraggingFile(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setIsDraggingFile(false);
+          }}
+          onDrop={async (e) => {
+            e.preventDefault();
+            setIsDraggingFile(false);
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+              const pdfFile = Array.from(files).find(
+                (f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"),
+              );
+              if (pdfFile) {
+                if (isModified) {
+                  setPendingNewFile(pdfFile);
+                  setShowConfirmOpenModal(true);
+                } else {
+                  await handleFileSelected(pdfFile);
+                }
+              }
+            }
+          }}
           onClick={(e) => {
             if (e.target === e.currentTarget && editorMode === "SELECT") {
               setSelectedItem(null);
             }
           }}
         >
+          {/* Drag & Drop File Upload Overlay */}
+          {isDraggingFile && (
+            <div
+              className="absolute inset-0 z-50 bg-sky-500/10 border-2 border-dashed border-sky-500 backdrop-blur-xs flex flex-col items-center justify-center gap-2 pointer-events-none animate-in fade-in duration-100"
+              data-testid="workspace-drop-overlay"
+            >
+              <FolderOpen className="size-12 text-sky-600 animate-bounce" />
+              <span className="text-sm font-semibold text-sky-900 bg-white/95 px-4 py-2 rounded-lg shadow-md">
+                Drop PDF here to open in StarPDF
+              </span>
+            </div>
+          )}
 
           {/* Floating Contextual Object Action Bar */}
           {selectedItem && (
@@ -1390,6 +1541,8 @@ export function SmartPdfEditor() {
               onTransformVector={handleTransformVector}
               onMoveText={handleMoveText}
               onTransformAnnotation={handleTransformAnnotation}
+              searchResults={searchResults}
+              activeSearchIndex={activeSearchIndex}
             />
           </div>
 
@@ -1406,10 +1559,15 @@ export function SmartPdfEditor() {
           <span>Page {currentPage} / {inspectionResult.metadata.pageCount}</span>
           <span className="text-slate-300">•</span>
           <span>Zoom {Math.round(scale * 100)}%</span>
-          {isModified && (
+          {isModified ? (
             <>
               <span className="text-slate-300">•</span>
-              <span className="text-amber-600 font-medium">Unsaved changes</span>
+              <span className="text-amber-600 font-medium" data-testid="status-unsaved-changes">Unsaved changes</span>
+            </>
+          ) : (
+            <>
+              <span className="text-slate-300">•</span>
+              <span className="text-emerald-600 font-medium" data-testid="status-saved">Saved</span>
             </>
           )}
           {isBusy && (

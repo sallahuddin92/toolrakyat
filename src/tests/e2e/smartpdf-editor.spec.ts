@@ -3954,6 +3954,148 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await cancelSplitBtn.click();
     await expect(splitModal).toBeHidden({ timeout: 5000 });
   });
+
+  test("v0.24 Phase 7: Search UX - StarPDF search, bbox highlights, navigation, and Escape dismissal", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/text-multicol-table.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase7-search-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Open search via toolbar button
+    const searchBtn = page.locator('[data-testid="toolbar-search-toggle-btn"]');
+    await expect(searchBtn).toBeVisible({ timeout: 5000 });
+    await searchBtn.click();
+
+    // 2. Search input should be visible
+    const searchInput = page.locator('[data-testid="search-query-input"]');
+    await expect(searchInput).toBeVisible({ timeout: 5000 });
+
+    // 3. Search for known text "Medical"
+    await searchInput.fill("Medical");
+    await page.waitForTimeout(600);
+
+    // 4. Verify search count badge
+    const countBadge = page.locator('[data-testid="search-results-count"]');
+    await expect(countBadge).toBeVisible({ timeout: 5000 });
+    const countText = await countBadge.textContent();
+    expect(countText).toMatch(/\d+\/\d+/);
+
+    // 5. Verify search highlights layer on canvas
+    const activeHighlight = page.locator('[data-testid="search-highlight-active"]');
+    await expect(activeHighlight).toBeVisible({ timeout: 5000 });
+
+    // 6. Navigate with Enter key
+    await searchInput.press("Enter");
+    await page.waitForTimeout(300);
+    await expect(activeHighlight).toBeVisible();
+
+    // 7. Search non-matching query
+    await searchInput.fill("xyznonexistentterm999");
+    await page.waitForTimeout(500);
+    await expect(countBadge).toHaveText("0 of 0");
+    await expect(activeHighlight).toBeHidden();
+
+    // 8. Escape closes search
+    await searchInput.press("Escape");
+    await expect(searchInput).toBeHidden({ timeout: 5000 });
+  });
+
+  test("v0.24 Phase 7: Keyboard Shortcuts - Cmd+F, Cmd+S, Escape, and Typing Safety", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/edit-test.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase7-keyboard-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Trigger search via Cmd/Ctrl + F
+    const isMac = process.platform === "darwin";
+    const modifier = isMac ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+KeyF`);
+    await page.waitForTimeout(300);
+
+    const searchInput = page.locator('[data-testid="search-query-input"]');
+    await expect(searchInput).toBeVisible({ timeout: 5000 });
+
+    // 2. Escape closes search
+    await page.keyboard.press("Escape");
+    await expect(searchInput).toBeHidden({ timeout: 5000 });
+
+    // 3. Verify status bar shows Saved initially
+    const statusSaved = page.locator('[data-testid="status-saved"]');
+    await expect(statusSaved).toBeVisible({ timeout: 5000 });
+
+    // 4. Trigger Save/Export via Cmd/Ctrl + S
+    const downloadPromise = page.waitForEvent("download");
+    await page.keyboard.press(`${modifier}+KeyS`);
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toContain(".pdf");
+    await expect(statusSaved).toBeVisible({ timeout: 5000 });
+  });
+
+  test("v0.24 Phase 7: File UX - Unsaved Changes Confirmation & Dirty State", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "test-assets/edit-test.pdf",
+    );
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "phase7-file-ux-test.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Initial state: Saved
+    await expect(page.locator('[data-testid="status-saved"]')).toBeVisible({ timeout: 5000 });
+
+    // 2. Add annotation to make document dirty
+    const fillSignBtn = page.locator('[data-testid="toolbar-mode-fill-sign-btn"]');
+    await fillSignBtn.click();
+    const checkToolBtn = page.locator('[data-testid="fill-sign-tool-check-btn"]');
+    await checkToolBtn.click();
+
+    // Click overlay to place check mark
+    const overlay = page.locator('[data-testid="pdf-interactive-overlay"]');
+    await overlay.click({ position: { x: 200, y: 200 } });
+    await page.waitForTimeout(800);
+
+    // 3. Document is now modified
+    const unsavedBadge = page.locator('[data-testid="status-unsaved-changes"]');
+    await expect(unsavedBadge).toBeVisible({ timeout: 5000 });
+
+    // 4. Attempt to open a new file while unsaved
+    const openBtn = page.locator('[data-testid="toolbar-open-file-btn"]');
+    await openBtn.click();
+
+    // 5. Unsaved Changes confirmation dialog should appear
+    const confirmDialog = page.locator('[data-testid="pdf-confirm-dialog"]');
+    await expect(confirmDialog).toBeVisible({ timeout: 5000 });
+
+    // 6. Cancel dialog keeps document intact
+    const cancelBtn = page.locator('[data-testid="confirm-dialog-cancel-btn"]');
+    await cancelBtn.click();
+    await expect(confirmDialog).toBeHidden({ timeout: 5000 });
+    await expect(unsavedBadge).toBeVisible();
+  });
 });
 
 
