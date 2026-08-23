@@ -44,7 +44,37 @@ export function formatPdfErrorMessage(error: unknown): FriendlyErrorResult {
     };
   }
 
-  // 3. Layout / Spacing Dependencies
+  // 3. Text Move Dependencies & Layout Positioning
+  if (
+    rawMessage.includes("TEXT_MOVE_DOWNSTREAM_DEPENDENT_TEXT") ||
+    rawMessage.includes("TEXT_MOVE_SHARED_POSITIONER")
+  ) {
+    return {
+      userMessage:
+        "This text can’t be moved independently because nearby text shares its positioning. Your document was left unchanged.",
+      technicalDetails: "StarPDF refused the move to prevent other text from shifting.",
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  if (
+    rawMessage.includes("TEXT_MOVE_STATE_DEPENDENT") ||
+    rawMessage.includes("TEXT_MOVE_UNSUPPORTED_POSITIONER") ||
+    rawMessage.includes("TEXT_MOVE_NO_EXPLICIT_POSITIONER") ||
+    rawMessage.includes("TEXT_MOVE_OUTSIDE_TEXT_BLOCK") ||
+    rawMessage.includes("TEXT_MOVE_SINGULAR_TRANSFORM")
+  ) {
+    return {
+      userMessage:
+        "This text can’t be safely moved in place because its position depends on complex formatting. Your document was left unchanged.",
+      technicalDetails: "StarPDF refused the move to protect document layout integrity.",
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
+  // 4. Layout / Spacing Dependencies
   if (
     rawMessage.includes("depends on the spacing of this text run") ||
     rawMessage.includes("UNSUPPORTED_LAYOUT") ||

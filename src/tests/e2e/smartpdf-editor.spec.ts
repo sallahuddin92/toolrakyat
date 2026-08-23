@@ -4063,6 +4063,59 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(confirmDialog).toBeHidden({ timeout: 5000 });
     await expect(unsavedBadge).toBeVisible();
   });
+
+  test("78. Text Move Dependency UX — Friendly refusal toast without raw error codes", async ({
+    page,
+  }) => {
+    const fixturePath = path.resolve(process.cwd(), "test-assets/text-dependent-downstream.pdf");
+    const bytes = fs.readFileSync(fixturePath);
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "dependent-downstream.pdf", bytes);
+
+    const workspace = page.locator('[data-testid="smartpdf-editor-workspace"]');
+    await expect(workspace).toBeVisible({ timeout: 10000 });
+
+    // 1. Select "First Line" (which has downstream dependent "Second Line" in same block)
+    const firstLine = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await expect(firstLine).toBeVisible({ timeout: 5000 });
+    await firstLine.click();
+
+    // 2. Drag the text span move handle to attempt a move
+    const moveHandle = page.locator('[data-testid="direct-manipulation-move-handle"]');
+    await expect(moveHandle).toBeVisible({ timeout: 5000 });
+
+    const box = await moveHandle.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 50, box.y + box.height / 2 + 50, { steps: 5 });
+      await page.mouse.up();
+    }
+
+    // 3. Verify user-friendly refusal message is displayed
+    const friendlyToast = page.getByText("nearby text shares its positioning");
+    await expect(friendlyToast).toBeVisible({ timeout: 5000 });
+
+    // 4. Verify raw engine error string is NOT displayed in user-facing UI
+    await expect(page.locator("body")).not.toContainText("TEXT_MOVE_DOWNSTREAM_DEPENDENT_TEXT");
+    await expect(page.locator("body")).not.toContainText("Invalid PDF operation");
+
+    // 5. Verify "Add new text instead" action button is provided in toast
+    const addTextBtn = page.locator('[data-testid="toast-add-new-text-btn"]');
+    await expect(addTextBtn).toBeVisible();
+    await expect(addTextBtn).toHaveText("Add new text instead");
+
+    // 6. Clicking action switches to text tool
+    await addTextBtn.click();
+    const fillSignTextBtn = page.locator('[data-testid="fill-sign-tool-text-btn"]');
+    await expect(fillSignTextBtn).toBeVisible({ timeout: 5000 });
+    await expect(fillSignTextBtn).toHaveClass(/bg-sky-600/);
+
+    // 7. Verify document remained unmodified (dirty dot not shown)
+    await expect(page.locator('[data-testid="document-modified-dot"]')).toBeHidden();
+  });
 });
 
 

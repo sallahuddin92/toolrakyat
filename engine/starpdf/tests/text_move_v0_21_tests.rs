@@ -130,4 +130,24 @@ fn test_refuse_unsafe_downstream_dependent_text_move() {
     // Second line depends on prior positioning -> moving it must be safely refused
     let res_second = reopened.move_text_span(0, &page_text.spans[1].span_id, 10.0, 10.0);
     assert!(res_second.is_err());
+
+    // Both lines together form a complete bounded dependency closure -> succeeds rigidly
+    let orig_y1 = page_text.spans[0].y;
+    let orig_y2 = page_text.spans[1].y;
+    let span_ids = vec![
+        page_text.spans[0].span_id.clone(),
+        page_text.spans[1].span_id.clone(),
+    ];
+    let group_plan = reopened.move_text_group(0, &span_ids, 20.0, -15.0).unwrap();
+    let group_mutated = reopened.export_incremental(&group_plan).unwrap();
+
+    let mut group_verified = PdfDocument::from_bytes(&group_mutated).unwrap();
+    let group_text = group_verified.extract_page_text(0).unwrap();
+    assert_eq!(group_text.spans.len(), 2);
+    assert!((group_text.spans[0].x - (page_text.spans[0].x + 20.0)).abs() < 0.1);
+    assert!((group_text.spans[0].y - (orig_y1 - 15.0)).abs() < 0.1);
+    assert!((group_text.spans[1].x - (page_text.spans[1].x + 20.0)).abs() < 0.1);
+    assert!((group_text.spans[1].y - (orig_y2 - 15.0)).abs() < 0.1);
+    // Relative distance between spans is exactly preserved
+    assert!(((group_text.spans[0].y - group_text.spans[1].y) - (orig_y1 - orig_y2)).abs() < 0.0001);
 }

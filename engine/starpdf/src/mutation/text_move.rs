@@ -74,6 +74,8 @@ pub fn plan_move_edits_from_bytes(
 }
 
 /// Plans an atomic multi-span move over already-parsed instructions.
+/// Supports bounded dependency closures when all dependent text spans within
+/// a text matrix block are included in the target set.
 pub fn plan_move_edits(
     instructions: &[ContentInstruction],
     targets: &[&TextEditTarget],
@@ -83,37 +85,38 @@ pub fn plan_move_edits(
     if dx.abs() < f64::EPSILON && dy.abs() < f64::EPSILON {
         return Err(PdfError::InvalidOperation("TEXT_MOVE_NO_OP_DELTA".into()));
     }
+    let target_indices: BTreeSet<usize> = targets.iter().map(|t| t.instruction_index).collect();
     let mut edits: Vec<TextMoveEdit> = Vec::with_capacity(targets.len());
     let mut used_positioners: BTreeSet<usize> = BTreeSet::new();
     for target in targets {
-        let edit = classify_text_move(instructions, target, dx, dy)?;
-        if !used_positioners.insert(edit.positioner_index) {
-            return Err(PdfError::InvalidOperation(
-                "TEXT_MOVE_SHARED_POSITIONER".into(),
-            ));
+        let edit = classify_text_move_with_context(instructions, target, dx, dy, &target_indices)?;
+        if used_positioners.insert(edit.positioner_index) {
+            edits.push(edit);
         }
-        edits.push(edit);
     }
     Ok(edits)
 }
 
 /// Determines whether the given span can be moved by exactly `(dx, dy)` in user space
 /// and computes the required positioning-operand adjustments.
-///
-/// Safety envelope (v0.21):
-/// - The span's show operator must be `Tj`, or `TJ` with a string operand at `operand_index`.
-/// - The span must have a dedicated positioning operator (`Tm`, or the first-in-block
-///   `Td`/`TD`/`T*`) with no other show operators sharing it, and only text-state
-///   operators between the positioner and the show operator.
-/// - No downstream text may depend on the moved text-line origin before the next
-///   repositioning / block boundary (`Tm`, `Td`, `TD`, `T*`, `BT`, `ET`).
-/// - A relative positioner is accepted only when it is the FIRST positioning operator of
-///   its `BT..ET` block; otherwise the position depends on accumulated surrounding state.
 pub fn classify_text_move(
     instructions: &[ContentInstruction],
     target: &TextEditTarget,
     dx: f64,
     dy: f64,
+) -> PdfResult<TextMoveEdit> {
+    let mut target_indices = BTreeSet::new();
+    target_indices.insert(target.instruction_index);
+    classify_text_move_with_context(instructions, target, dx, dy, &target_indices)
+}
+
+/// Context-aware text move classifier that checks if dependent spans are part of a target closure.
+pub fn classify_text_move_with_context(
+    instructions: &[ContentInstruction],
+    target: &TextEditTarget,
+    dx: f64,
+    dy: f64,
+    target_indices: &BTreeSet<usize>,
 ) -> PdfResult<TextMoveEdit> {
     if target.instruction_index >= instructions.len() {
         return Err(PdfError::TargetTextNotFound(format!(
@@ -191,14 +194,12 @@ pub fn classify_text_move(
                         &mut show_after_positioner,
                         &mut foreign_op_after_positioner,
                     );
-                } else if positioner_index == Some(idx) {
-                    // unreachable, kept for clarity
                 }
                 prior_positioning_in_block = true;
             }
             ContentOperator::TStar => {
                 // T* moves by current leading; treat as relative positioning that depends
-                // on surrounding text state (leading), so it can never be a safe positioner.
+                // on surrounding text state (leading), so it can never be a standalone safe positioner.
                 prev_line_matrix = line_matrix;
                 line_matrix = Matrix2D::translation(0.0, -24.0).multiply(&line_matrix);
                 prior_positioning_in_block = true;
@@ -210,7 +211,7 @@ pub fn classify_text_move(
             | ContentOperator::TJ
             | ContentOperator::Quote
             | ContentOperator::DoubleQuote => {
-                if positioner_index.is_some() {
+                if positioner_index.is_some() && !target_indices.contains(&idx) {
                     show_after_positioner = true;
                 }
             }
@@ -245,16 +246,22 @@ pub fn classify_text_move(
 
     // Downstream dependency check: text shown before the next absolute repositioning/block boundary
     // rides on the moved text-line origin and would shift with it.
-    for instr in &instructions[(target.instruction_index + 1)..] {
+    for (offset, instr) in instructions[(target.instruction_index + 1)..]
+        .iter()
+        .enumerate()
+    {
+        let downstream_idx = target.instruction_index + 1 + offset;
         match instr.operator {
             ContentOperator::Et | ContentOperator::Bt | ContentOperator::Tm => break,
             ContentOperator::Tj
             | ContentOperator::TJ
             | ContentOperator::Quote
             | ContentOperator::DoubleQuote => {
-                return Err(PdfError::InvalidOperation(
-                    "TEXT_MOVE_DOWNSTREAM_DEPENDENT_TEXT".into(),
-                ));
+                if !target_indices.contains(&downstream_idx) {
+                    return Err(PdfError::InvalidOperation(
+                        "TEXT_MOVE_DOWNSTREAM_DEPENDENT_TEXT".into(),
+                    ));
+                }
             }
             _ => {}
         }
@@ -472,19 +479,22 @@ mod tests {
     }
 
     #[test]
-    fn refuses_shared_positioner_between_two_spans() {
-        let stream = b"BT\n/F1 12 Tf\n12 0 0 12 72 720 Tm\n(A) Tj\n[(B)] TJ\nET\n";
+    fn test_a_independent_tm_text_move_succeeds() {
+        let stream = b"BT\n/F1 12 Tf\n12 0 0 12 100 200 Tm\n(Standalone) Tj\nET\n";
         let instructions = parse(stream);
-        let target_b = TextEditTarget::new(0, 0, 4, 0);
-        let err = classify_text_move(&instructions, &target_b, 5.0, 5.0)
-            .err()
-            .map(|e| e.to_string())
-            .unwrap_or_default();
-        assert!(err.contains("TEXT_MOVE_SHARED_POSITIONER"), "{err}");
+        let target = TextEditTarget::new(0, 0, 3, 0);
+        let edit = classify_text_move(&instructions, &target, 15.0, -10.0).unwrap();
+        assert_eq!(edit.positioner_index, 2);
+        assert_eq!((edit.delta_tx, edit.delta_ty), (15.0, -10.0));
+
+        let mut mutable_instructions = instructions.clone();
+        apply_move_edits(&mut mutable_instructions, &[edit]).unwrap();
+        assert_eq!(mutable_instructions[2].operands[4].as_f64(), Some(115.0));
+        assert_eq!(mutable_instructions[2].operands[5].as_f64(), Some(190.0));
     }
 
     #[test]
-    fn refuses_downstream_dependent_text() {
+    fn test_b_downstream_dependent_text_safe_refusal() {
         let stream = b"BT\n12 0 0 12 72 720 Tm\n(A) Tj\n(B) Tj\nET\n";
         let instructions = parse(stream);
         let target = TextEditTarget::new(0, 0, 2, 0);
@@ -496,34 +506,93 @@ mod tests {
     }
 
     #[test]
-    fn refuses_no_explicit_positioner() {
-        // Position derived entirely from TJ kerning accumulation after BT with no Tm/Td.
-        let stream = b"BT\n/F1 12 Tf\n(A) Tj\nET\n";
-        let instructions = parse(stream);
-        let target = TextEditTarget::new(0, 0, 2, 0);
-        assert!(classify_text_move(&instructions, &target, 5.0, 5.0).is_err());
-    }
-
-    #[test]
-    fn plan_rejects_two_spans_sharing_one_positioner_atomically() {
+    fn test_c_bounded_dependent_group_entire_closure_moves_rigidly() {
         let stream = b"BT\n/F1 12 Tf\n12 0 0 12 72 720 Tm\n(A) Tj\n[(B)] TJ\nET\n";
         let t1 = TextEditTarget::new(0, 0, 3, 0);
         let t2 = TextEditTarget::new(0, 0, 4, 0);
-        // Span B shares the positioner -> whole plan fails atomically.
-        let result = plan_move_edits_from_bytes(stream, &[&t1, &t2], 5.0, 5.0);
-        assert!(result.is_err());
+        let instructions = parse(stream);
+
+        // Moving both spans in the closure succeeds with exactly one positioner adjustment
+        let edits = plan_move_edits(&instructions, &[&t1, &t2], 10.0, 20.0).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].positioner_index, 2);
+        assert_eq!((edits[0].delta_tx, edits[0].delta_ty), (10.0, 20.0));
+
+        let mut mutable_instructions = instructions.clone();
+        apply_move_edits(&mut mutable_instructions, &edits).unwrap();
+        assert_eq!(mutable_instructions[2].operands[4].as_f64(), Some(82.0));
+        assert_eq!(mutable_instructions[2].operands[5].as_f64(), Some(740.0));
     }
 
     #[test]
-    fn apply_move_edits_updates_operands() {
-        let stream = b"BT\n12 0 0 12 72 720 Tm\n(Hello) Tj\nET\n";
-        let target = TextEditTarget::new(0, 0, 2, 0);
+    fn test_d_downstream_reset_by_explicit_tm_succeeds_independently() {
+        let stream = b"BT\n/F1 12 Tf\n12 0 0 12 100 200 Tm\n(Title) Tj\n12 0 0 12 100 150 Tm\n(Body) Tj\nET\n";
         let instructions = parse(stream);
-        let edit = classify_text_move(&instructions, &target, 10.25, -3.5).unwrap();
+        let target_title = TextEditTarget::new(0, 0, 3, 0);
+
+        // Moving Title alone succeeds because Body is reset by explicit Tm
+        let edit = classify_text_move(&instructions, &target_title, 20.0, 10.0).unwrap();
+        assert_eq!(edit.positioner_index, 2);
+
         let mut mutable_instructions = instructions.clone();
         apply_move_edits(&mut mutable_instructions, &[edit]).unwrap();
-        let tm = &mutable_instructions[1];
-        assert_eq!(tm.operands[4].as_f64(), Some(82.25));
-        assert_eq!(tm.operands[5].as_f64(), Some(716.5));
+        // Title moved
+        assert_eq!(mutable_instructions[2].operands[4].as_f64(), Some(120.0));
+        assert_eq!(mutable_instructions[2].operands[5].as_f64(), Some(210.0));
+        // Body unchanged
+        assert_eq!(mutable_instructions[4].operands[4].as_f64(), Some(100.0));
+        assert_eq!(mutable_instructions[4].operands[5].as_f64(), Some(150.0));
+    }
+
+    #[test]
+    fn test_e_tj_array_dependency_classification() {
+        // Multi-string TJ array: moving individual string inside TJ is refused
+        let stream = b"BT\n/F1 12 Tf\n12 0 0 12 100 200 Tm\n[(Hello) -120 (World)] TJ\nET\n";
+        let instructions = parse(stream);
+        let target_hello = TextEditTarget::new(0, 0, 3, 0);
+        let target_world = TextEditTarget::new(0, 0, 3, 2);
+
+        assert!(classify_text_move(&instructions, &target_hello, 5.0, 5.0).is_err());
+        assert!(classify_text_move(&instructions, &target_world, 5.0, 5.0).is_err());
+    }
+
+    #[test]
+    fn test_f_td_td_tstar_dependencies_classification() {
+        let stream = b"BT\n50 700 Td\n(Line A) Tj\n0 -20 Td\n(Line B) Tj\nET\n";
+        let instructions = parse(stream);
+        let target_a = TextEditTarget::new(0, 0, 2, 0);
+        let target_b = TextEditTarget::new(0, 0, 4, 0);
+
+        // Line A alone fails due to downstream dependent Line B
+        assert!(classify_text_move(&instructions, &target_a, 5.0, 5.0).is_err());
+
+        // Line B alone fails due to relative accumulation on Line A
+        assert!(classify_text_move(&instructions, &target_b, 5.0, 5.0).is_err());
+
+        // Both together form a closure and move rigidly
+        let edits = plan_move_edits(&instructions, &[&target_a, &target_b], 15.0, 10.0).unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].positioner_index, 1);
+    }
+
+    #[test]
+    fn test_g_rotated_ctm_compensates_correctly() {
+        // 90-degree counter-clockwise rotation CTM: [0 1 -1 0 0 0]
+        let stream = b"0 1 -1 0 0 0 cm\nBT\n12 0 0 12 0 0 Tm\n(Rotated) Tj\nET\n";
+        let instructions = parse(stream);
+        let target = TextEditTarget::new(0, 0, 3, 0);
+        let edit = classify_text_move(&instructions, &target, 10.0, 20.0).unwrap();
+        // inverse([0 1; -1 0]) * (10, 20) = (20, -10)
+        assert!((edit.delta_tx - 20.0).abs() < 1e-6);
+        assert!((edit.delta_ty - (-10.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_h_failed_move_leaves_instructions_and_plan_empty() {
+        let stream = b"BT\n12 0 0 12 72 720 Tm\n(A) Tj\n(B) Tj\nET\n";
+        let instructions = parse(stream);
+        let target = TextEditTarget::new(0, 0, 2, 0);
+        let res = plan_move_edits(&instructions, &[&target], 10.0, 10.0);
+        assert!(res.is_err());
     }
 }

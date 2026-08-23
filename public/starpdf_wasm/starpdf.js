@@ -430,6 +430,40 @@ export function starpdf_move_page(handle, from_index, to_index) {
 }
 
 /**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @param {number} dx
+ * @param {number} dy
+ * @returns {any}
+ */
+export function starpdf_move_text(handle, page_index, span_id, dx, dy) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_move_text(handle, page_index, ptr0, len0, dx, dy);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {any} span_ids
+ * @param {number} dx
+ * @param {number} dy
+ * @returns {any}
+ */
+export function starpdf_move_text_group(handle, page_index, span_ids, dx, dy) {
+    const ret = wasm.starpdf_move_text_group(handle, page_index, span_ids, dx, dy);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {Uint8Array} bytes
  * @returns {number}
  */
@@ -664,6 +698,27 @@ export function starpdf_update_annotation(handle, obj_num, obj_gen, update_val) 
  */
 export function starpdf_update_graphic(handle, input_val) {
     const ret = wasm.starpdf_update_graphic(handle, input_val);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} image_id
+ * @param {number} new_x
+ * @param {number} new_y
+ * @param {number} new_width
+ * @param {number} new_height
+ * @param {boolean} clone_if_shared
+ * @returns {any}
+ */
+export function starpdf_update_image(handle, page_index, image_id, new_x, new_y, new_width, new_height, clone_if_shared) {
+    const ptr0 = passStringToWasm0(image_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_update_image(handle, page_index, ptr0, len0, new_x, new_y, new_width, new_height, clone_if_shared);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

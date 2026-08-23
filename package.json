@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "build:wasm": "cargo build --manifest-path engine/starpdf/Cargo.toml --target wasm32-unknown-unknown --release --features wasm && wasm-bindgen --target web --out-dir src/lib/pdf/starpdf-wasm engine/starpdf/target/wasm32-unknown-unknown/release/starpdf.wasm && mkdir -p public/starpdf_wasm && cp src/lib/pdf/starpdf-wasm/starpdf_bg.wasm public/starpdf_wasm/ && cp src/lib/pdf/starpdf-wasm/starpdf.js public/starpdf_wasm/",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "npx tsx src/lib/db/migrate.ts",
     "db:seed": "npx tsx src/lib/db/seed.ts",

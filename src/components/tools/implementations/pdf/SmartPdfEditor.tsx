@@ -440,7 +440,46 @@ export function SmartPdfEditor() {
         }
       } catch (err: unknown) {
         const friendly = formatPdfErrorMessage(err);
-        toast.error(friendly.userMessage);
+        if (
+          friendly.technicalDetails?.includes("TEXT_MOVE_DOWNSTREAM_DEPENDENT_TEXT") ||
+          friendly.userMessage.includes("nearby text shares its positioning")
+        ) {
+          toast(
+            (t) => (
+              <div className="flex flex-col gap-1.5 max-w-sm">
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                  {friendly.userMessage}
+                </span>
+                {friendly.technicalDetails && (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {friendly.technicalDetails}
+                  </span>
+                )}
+                <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    data-testid="toast-add-new-text-btn"
+                    className="px-2.5 py-1 text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-md transition-colors shadow-sm"
+                    onClick={() => {
+                      toast.dismiss(t.id);
+                      setEditorMode("FILL_AND_SIGN");
+                      setFillAndSignTool("text");
+                    }}
+                  >
+                    Add new text instead
+                  </button>
+                </div>
+              </div>
+            ),
+            {
+              id: "text-move-dependency-toast",
+              duration: 6000,
+              icon: "⚠️",
+            },
+          );
+        } else {
+          toast.error(friendly.userMessage);
+        }
       } finally {
         if (!isLightweight) {
           setCommandState({ status: "IDLE" });
@@ -858,17 +897,7 @@ export function SmartPdfEditor() {
 
   const handleMoveText = useCallback(
     async (pageIndex: number, spanId: string | string[], dx: number, dy: number) => {
-      try {
-        await executeCommand(new MoveTextCommand(spanId, dx, dy, pageIndex + 1));
-      } catch (err: unknown) {
-        console.error("Text move failed:", err);
-        const errMsg = err instanceof Error ? err.message : String(err);
-        toast.error(
-          errMsg.includes("TEXT_MOVE")
-            ? `Cannot move text: ${errMsg}`
-            : "Cannot move this text safely. Surrounding layout depends on its position.",
-        );
-      }
+      await executeCommand(new MoveTextCommand(spanId, dx, dy, pageIndex + 1));
     },
     [executeCommand],
   );
