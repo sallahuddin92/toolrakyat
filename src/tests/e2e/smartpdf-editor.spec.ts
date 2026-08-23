@@ -23,7 +23,7 @@ async function uploadPdfBytes(
 
   const confirmModalBtn = page.locator('[data-testid="confirm-dialog-confirm-btn"]');
   try {
-    if (await confirmModalBtn.isVisible({ timeout: 500 })) {
+    if (await confirmModalBtn.isVisible({ timeout: 2500 })) {
       await confirmModalBtn.click();
     }
   } catch {
