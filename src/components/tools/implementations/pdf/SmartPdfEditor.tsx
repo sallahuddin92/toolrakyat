@@ -19,7 +19,7 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
-import { ShieldCheck, FolderOpen } from "lucide-react";
+import { AlertTriangle, ShieldCheck, FolderOpen } from "lucide-react";
 
 import {
   type SmartPdfSelection,
@@ -92,6 +92,9 @@ export function SmartPdfEditor() {
   const [pdfProxy, setPdfProxy] = useState<PDFDocumentProxy | null>(null);
   const [starPdfDoc, setStarPdfDoc] = useState<StarPdfDocumentHandle | null>(null);
   const [securityInfo, setSecurityInfo] = useState<StarPdfSecurityInfo | null>(null);
+  const [nativeEngineState, setNativeEngineState] = useState<
+    "READY" | "RECOVERED_MALFORMED_PREV" | "READ_ONLY"
+  >("READY");
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
@@ -199,6 +202,7 @@ export function SmartPdfEditor() {
       setIsLoading(true);
       setError(null);
       setSecurityInfo(null);
+      setNativeEngineState("READY");
       setSelectedItem(null);
       setLoadingMessage("Parsing PDF structure & inspecting page objects...");
 
@@ -209,6 +213,9 @@ export function SmartPdfEditor() {
           starDoc = await StarPdfClient.open(bytes);
           const detectedSecurity = await starDoc.getSecurityInfo();
           setSecurityInfo(detectedSecurity);
+          if (starDoc.xrefStatus === "RECOVERED_MALFORMED_PREV") {
+            setNativeEngineState("RECOVERED_MALFORMED_PREV");
+          }
           if (detectedSecurity.encryption_state !== "NOT_ENCRYPTED") {
             await starDoc.close();
             const friendly = formatPdfErrorMessage("STANDARD_SECURITY_DETECTED");
@@ -217,8 +224,14 @@ export function SmartPdfEditor() {
             toast.error(friendly.userMessage);
             return;
           }
-        } catch (starErr) {
-          console.warn("StarPDF validation note:", starErr);
+        } catch {
+          if (starDoc) {
+            await starDoc.close();
+            starDoc = null;
+          }
+          setNativeEngineState("READ_ONLY");
+          setEditorMode("SELECT");
+          console.warn("StarPDF native mutation engine unavailable; opening a read-only preview.");
         }
 
         // 2. Inspect using pdf-lib (AcroForms, metadata, dimensions)
@@ -312,6 +325,12 @@ export function SmartPdfEditor() {
 
   const executeCommand = useCallback(
     async (command: SmartPdfCommand): Promise<void> => {
+      if (!starPdfDoc) {
+        toast.error(
+          "This document is open as a read-only preview because its structure could not be safely loaded for editing.",
+        );
+        return;
+      }
       const isLightweight = command.id === "form.set_value" || command.id === "annotation.update";
 
 
@@ -926,6 +945,10 @@ export function SmartPdfEditor() {
 
   const handleFormFieldChange = useCallback(
     (fieldName: string, value: string | boolean | string[]) => {
+      if (!starPdfDoc) {
+        toast.error("Form editing is disabled while this document is open as a read-only preview.");
+        return;
+      }
       if (inspectionResult) {
         const field = inspectionResult.fields.find((f) => f.name === fieldName);
         if (field?.isReadOnly) {
@@ -941,7 +964,7 @@ export function SmartPdfEditor() {
         );
       }
     },
-    [inspectionResult, sourceBytes],
+    [inspectionResult, sourceBytes, starPdfDoc],
   );
 
   const handleAnnotationChange = useCallback(
@@ -1233,6 +1256,7 @@ export function SmartPdfEditor() {
   }
 
   const isBusy = commandState.status === "RUNNING";
+  const nativeMutationEnabled = starPdfDoc !== null;
 
   return (
     <div
@@ -1252,8 +1276,34 @@ export function SmartPdfEditor() {
         </div>
       ) : null}
 
+      {nativeEngineState === "RECOVERED_MALFORMED_PREV" ? (
+        <div
+          className="border-b border-sky-300 bg-sky-50 px-4 py-2.5 text-sm text-sky-950 flex items-center gap-2 shrink-0"
+          data-testid="starpdf-xref-recovered-note"
+          role="status"
+        >
+          <ShieldCheck className="size-4 text-sky-700 shrink-0" />
+          <span>
+            StarPDF safely recovered a malformed document history link. Editing is enabled, and export will write a clean current cross-reference section.
+          </span>
+        </div>
+      ) : null}
+
+      {nativeEngineState === "READ_ONLY" ? (
+        <div
+          className="border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-950 flex items-center gap-2 shrink-0"
+          data-testid="starpdf-read-only-note"
+          role="status"
+        >
+          <AlertTriangle className="size-4 text-amber-700 shrink-0" />
+          <span>
+            Read-only preview: this PDF can be displayed, but its structure could not be safely loaded by the editing engine. Native editing and mutation controls are disabled.
+          </span>
+        </div>
+      ) : null}
+
       {/* Flat Form Suggestion Banner */}
-      {showFlatFormBanner && isFlatForm && (
+      {nativeMutationEnabled && showFlatFormBanner && isFlatForm && (
         <div
           role="status"
           className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-900 shrink-0 select-none animate-in fade-in duration-100"
@@ -1297,8 +1347,8 @@ export function SmartPdfEditor() {
         scale={scale}
         isExporting={isBusy && commandState.commandId === "document.export"}
         isModified={isModified}
-        canUndo={canUndo(historyState)}
-        canRedo={canRedo(historyState)}
+        canUndo={nativeMutationEnabled && canUndo(historyState)}
+        canRedo={nativeMutationEnabled && canRedo(historyState)}
         onUndo={() => void handleUndo()}
         onRedo={() => void handleRedo()}
         isSearchOpen={isSearchOpen}
@@ -1333,6 +1383,7 @@ export function SmartPdfEditor() {
         }}
         formAssistEnabled={formAssistEnabled}
         onToggleFormAssist={() => setFormAssistEnabled((prev) => !prev)}
+        mutationEnabled={nativeMutationEnabled}
       />
 
 
@@ -1373,6 +1424,7 @@ export function SmartPdfEditor() {
         }}
         onImport={() => setShowImportModal(true)}
         onSplit={() => setShowSplitModal(true)}
+        mutationEnabled={nativeMutationEnabled}
       />
 
       {/* Hidden File Input for Opening / Replacing Document */}
@@ -1441,10 +1493,10 @@ export function SmartPdfEditor() {
             onSelectRange={handleSelectPageRange}
             onSelectAllPages={handleSelectAllPages}
             onClearSelectedPages={handleClearSelectedPages}
-            onReorderPages={handleReorderPages}
-            onDuplicateSelected={handleDuplicateSelected}
-            onDeleteSelected={handleDeleteSelected}
-            onExtractSelected={handleExtractSelected}
+            onReorderPages={nativeMutationEnabled ? handleReorderPages : undefined}
+            onDuplicateSelected={nativeMutationEnabled ? handleDuplicateSelected : undefined}
+            onDeleteSelected={nativeMutationEnabled ? handleDeleteSelected : undefined}
+            onExtractSelected={nativeMutationEnabled ? handleExtractSelected : undefined}
           />
         )}
 
@@ -1500,7 +1552,7 @@ export function SmartPdfEditor() {
           )}
 
           {/* Floating Contextual Object Action Bar */}
-          {selectedItem && (
+          {nativeMutationEnabled && selectedItem && (
             <PdfContextualToolbar
               selection={selectedItem}
               containerRef={viewportContainerRef}
@@ -1555,11 +1607,11 @@ export function SmartPdfEditor() {
               fields={inspectionResult.fields}
               annotations={inspectionResult.annotations}
               candidates={currentCandidates}
-              formAssistEnabled={formAssistEnabled}
+              formAssistEnabled={nativeMutationEnabled && formAssistEnabled}
               selectedItem={selectedItem}
-              onSelectItem={setSelectedItem}
+              onSelectItem={nativeMutationEnabled ? setSelectedItem : undefined}
               onCanvasRendered={handleCanvasRendered}
-              mode={editorMode}
+              mode={nativeMutationEnabled ? editorMode : "SELECT"}
               fillAndSignTool={fillAndSignTool}
               onPlaceFreeText={handlePlaceFreeText}
               onPlaceCheck={handlePlaceCheck}

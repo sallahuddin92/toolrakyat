@@ -30,6 +30,7 @@ interface PdfPageOperationsProps {
   onMergeFiles?: (files: Uint8Array[]) => void;
   onImport?: () => void;
   onSplit?: () => void;
+  mutationEnabled?: boolean;
 }
 
 export function PdfPageOperations({
@@ -47,6 +48,7 @@ export function PdfPageOperations({
   onMergeFiles,
   onImport,
   onSplit,
+  mutationEnabled = true,
 }: PdfPageOperationsProps) {
   const isMulti = selectedCount > 1;
 
@@ -64,7 +66,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onMoveLeft}
-        disabled={isProcessing || currentPage <= 1}
+        disabled={!mutationEnabled || isProcessing || currentPage <= 1}
         data-testid="page-move-left"
       >
         <ArrowLeft className="size-3.5" />
@@ -75,7 +77,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onMoveRight}
-        disabled={isProcessing || currentPage >= pageCount}
+        disabled={!mutationEnabled || isProcessing || currentPage >= pageCount}
         data-testid="page-move-right"
       >
         <ArrowRight className="size-3.5" />
@@ -86,7 +88,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onDuplicate}
-        disabled={isProcessing}
+        disabled={!mutationEnabled || isProcessing}
         data-testid="page-duplicate"
       >
         <Copy className="size-3.5" />
@@ -97,7 +99,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onInsertBlank}
-        disabled={isProcessing}
+        disabled={!mutationEnabled || isProcessing}
         data-testid="page-insert-blank"
       >
         <Plus className="size-3.5" />
@@ -108,7 +110,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onExtract}
-        disabled={isProcessing || pageCount <= 0}
+        disabled={!mutationEnabled || isProcessing || pageCount <= 0}
         data-testid="page-extract"
       >
         <FileOutput className="size-3.5" />
@@ -121,7 +123,7 @@ export function PdfPageOperations({
             accept="application/pdf"
             multiple
             className="sr-only"
-            disabled={isProcessing}
+            disabled={!mutationEnabled || isProcessing}
             onChange={async (e) => {
               const files = e.target.files;
               if (files && files.length > 0) {
@@ -137,7 +139,7 @@ export function PdfPageOperations({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={isProcessing}
+            disabled={!mutationEnabled || isProcessing}
             data-testid="page-merge"
             asChild
           >
@@ -153,7 +155,7 @@ export function PdfPageOperations({
           variant="ghost"
           size="sm"
           onClick={onMerge}
-          disabled={isProcessing}
+          disabled={!mutationEnabled || isProcessing}
           data-testid="page-merge"
         >
           <FileInput className="size-3.5" />
@@ -166,7 +168,7 @@ export function PdfPageOperations({
           variant="ghost"
           size="sm"
           onClick={onImport}
-          disabled={isProcessing}
+          disabled={!mutationEnabled || isProcessing}
           data-testid="page-import"
         >
           <FolderInput className="size-3.5" />
@@ -179,7 +181,7 @@ export function PdfPageOperations({
           variant="ghost"
           size="sm"
           onClick={onSplit}
-          disabled={isProcessing}
+          disabled={!mutationEnabled || isProcessing}
           data-testid="page-split"
         >
           <Scissors className="size-3.5" />
@@ -191,7 +193,7 @@ export function PdfPageOperations({
         variant="ghost"
         size="sm"
         onClick={onDelete}
-        disabled={isProcessing || pageCount <= 1 || (isMulti && selectedCount >= pageCount)}
+        disabled={!mutationEnabled || isProcessing || pageCount <= 1 || (isMulti && selectedCount >= pageCount)}
         className="text-red-600 hover:text-red-700"
         data-testid="page-delete"
       >

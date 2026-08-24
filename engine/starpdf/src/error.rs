@@ -7,6 +7,7 @@ pub enum PdfError {
     InvalidSyntax(String),
     InvalidHeader,
     InvalidXref(String),
+    UnrecoverableXref(String),
     ObjectNotFound {
         number: u64,
         generation: u16,
@@ -58,6 +59,9 @@ impl fmt::Display for PdfError {
             Self::InvalidSyntax(msg) => write!(f, "Invalid PDF syntax: {msg}"),
             Self::InvalidHeader => write!(f, "Invalid or missing PDF header signature (%PDF-)"),
             Self::InvalidXref(msg) => write!(f, "Invalid cross-reference table/stream: {msg}"),
+            Self::UnrecoverableXref(msg) => {
+                write!(f, "XREF_STATUS_UNRECOVERABLE: {msg}")
+            }
             Self::ObjectNotFound { number, generation } => {
                 write!(
                     f,

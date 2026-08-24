@@ -51,6 +51,7 @@ pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
         .with_doc(handle, |doc| {
             let info = doc.security_info()?;
             let dto = WasmSecurityInfo {
+                xref_status: doc.xref_status().as_str().to_string(),
                 signature_state: info.signature_state.as_str().to_string(),
                 signature_count: info.signature_count,
                 byte_range_count: info.byte_ranges.len(),
@@ -114,6 +115,7 @@ pub fn starpdf_get_info(handle: u32) -> Result<JsValue, JsValue> {
                 is_valid,
                 recovery_status,
                 recovery_events,
+                xref_status: doc.xref_status().as_str().to_string(),
             };
             serde_wasm_bindgen::to_value(&info)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))

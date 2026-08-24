@@ -9,11 +9,13 @@ pub struct WasmDocumentInfo {
     pub is_valid: bool,
     pub recovery_status: String,
     pub recovery_events: Vec<String>,
+    pub xref_status: String,
 }
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmSecurityInfo {
+    pub xref_status: String,
     pub signature_state: String,
     pub signature_count: usize,
     pub byte_range_count: usize,

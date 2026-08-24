@@ -151,6 +151,25 @@ Any wrong glyph, wrong Unicode, unexpected text movement, unrelated text movemen
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 |  |  |  |  |  |  |  |
 
+## Anonymized malformed-xref field retest
+
+This automated/private retest records the RC2 blocker fix without including or identifying the source PDF. It does not replace the human checks above and does not change the overall `HUMAN PENDING` status.
+
+| Property | Result |
+| :--- | :--- |
+| File size | 5,435,222 bytes |
+| Xref layout | Classic xref; linearized-style current section plus later classic section |
+| `startxref` | `173` |
+| Malformed `/Prev` | `5433294` (forward of the current xref) |
+| StarPDF recovery | PASS — `RECOVERED_MALFORMED_PREV`, 26 pages resolved |
+| Text extraction | PASS across all 26 pages |
+| Safe mutation | PASS — FreeText text annotation added; the document's existing specialized fonts remained independently subject to normal editability checks |
+| Export | PASS — clean terminal xref emitted without a terminal `/Prev` |
+| StarPDF reopen | PASS — output reports `VALID`, not recovered |
+| Text verification | PASS — added annotation text recovered exactly after reopen |
+| PDF.js rendering | PASS before and after export in Chromium |
+| Source PDF committed | NO |
+
 ## Human sign-off
 
 - [ ] All required checks completed with real PDFs.

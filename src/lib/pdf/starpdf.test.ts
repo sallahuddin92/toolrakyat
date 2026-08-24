@@ -845,4 +845,44 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
 
     await doc.close();
   });
+
+  it("exposes bounded malformed Prev recovery across open, document, and security metadata", async () => {
+    const original = await StarPdfClient.createMinimalPdf("Recovery metadata");
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    const source = decoder.decode(original);
+    const rootLine = "  /Root 1 0 R\n";
+    const insertion = source.lastIndexOf(rootLine) + rootLine.length;
+    const malformed = encoder.encode(
+      `${source.slice(0, insertion)}  /Prev 9999999999\n${source.slice(insertion)}`,
+    );
+
+    const document = await StarPdfClient.open(malformed);
+    expect(document.xrefStatus).toBe("RECOVERED_MALFORMED_PREV");
+    await expect(document.getInfo()).resolves.toMatchObject({
+      xref_status: "RECOVERED_MALFORMED_PREV",
+    });
+    await expect(document.getSecurityInfo()).resolves.toMatchObject({
+      xref_status: "RECOVERED_MALFORMED_PREV",
+    });
+    await document.close();
+  });
+
+  it("exposes typed UNRECOVERABLE status when open cannot prove a coherent graph", async () => {
+    const original = await StarPdfClient.createMinimalPdf("Unrecoverable metadata");
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    const source = decoder.decode(original);
+    const marker = "startxref\n";
+    const valueStart = source.lastIndexOf(marker) + marker.length;
+    const valueEnd = source.indexOf("\n", valueStart);
+    const malformed = encoder.encode(
+      `${source.slice(0, valueStart)}${"0".repeat(valueEnd - valueStart)}${source.slice(valueEnd)}`,
+    );
+
+    await expect(StarPdfClient.open(malformed)).rejects.toMatchObject({
+      xref_status: "UNRECOVERABLE",
+      message: "StarPDF could not establish a coherent document graph for native editing.",
+    });
+  });
 });

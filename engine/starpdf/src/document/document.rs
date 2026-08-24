@@ -7,6 +7,7 @@ use crate::error::{PdfError, PdfResult};
 use crate::io::source::ByteSource;
 use crate::syntax::object::{ObjectRef, PdfObject};
 use crate::xref::resolver::XrefResolver;
+use crate::xref::table::XrefStatus;
 
 pub struct PdfDocument<'a> {
     source: ByteSource<'a>,
@@ -68,6 +69,8 @@ impl<'a> PdfDocument<'a> {
             };
 
         // 3. Initialize Lazy Object Store
+        let recovered_malformed_prev = xref_table.status == XrefStatus::RecoveredMalformedPrev;
+        let xref_recovery_events = xref_table.recovery_events.clone();
         let mut store = ObjectStore::new_with_limits(store_source, xref_table, limits);
 
         // 4. Resolve /Root Catalog
@@ -77,30 +80,59 @@ impl<'a> PdfDocument<'a> {
             .and_then(|v| v.as_reference())
             .ok_or_else(|| {
                 PdfError::InvalidSyntax("Trailer missing /Root catalog reference".into())
-            })?;
+            })
+            .map_err(|error| Self::xref_recovery_error(recovered_malformed_prev, error))?;
 
-        let catalog_obj = store.resolve(catalog_ref)?.clone();
+        let catalog_obj = store
+            .resolve(catalog_ref)
+            .map_err(|error| Self::xref_recovery_error(recovered_malformed_prev, error))?
+            .clone();
         let catalog_dict = catalog_obj
             .as_dict()
             .ok_or_else(|| PdfError::TypeMismatch {
                 expected: "dictionary",
                 actual: catalog_obj.type_name(),
-            })?;
+            })
+            .map_err(|error| Self::xref_recovery_error(recovered_malformed_prev, error))?;
 
         // 5. Resolve /Pages root node
         let root_pages_ref = catalog_dict
             .get("Pages")
             .and_then(|v| v.as_reference())
-            .ok_or_else(|| PdfError::InvalidSyntax("Catalog missing /Pages reference".into()))?;
+            .ok_or_else(|| PdfError::InvalidSyntax("Catalog missing /Pages reference".into()))
+            .map_err(|error| Self::xref_recovery_error(recovered_malformed_prev, error))?;
 
-        Ok(Self {
+        if recovered_malformed_prev {
+            for event in xref_recovery_events {
+                recovery_tracker.record(RecoveryKind::XrefRecovered, event);
+            }
+        }
+
+        let mut document = Self {
             source: store_source,
             version,
             store,
             catalog_ref,
             root_pages_ref,
             recovery_tracker,
-        })
+        };
+
+        if recovered_malformed_prev {
+            crate::validate::StructuralValidator::validate(&mut document)
+                .map_err(|error| Self::xref_recovery_error(true, error))?;
+        }
+
+        Ok(document)
+    }
+
+    fn xref_recovery_error(recovered: bool, error: PdfError) -> PdfError {
+        if recovered {
+            PdfError::UnrecoverableXref(format!(
+                "recovered xref sections do not prove a coherent catalog/page graph ({error})"
+            ))
+        } else {
+            error
+        }
     }
 
     #[inline]
@@ -111,6 +143,11 @@ impl<'a> PdfDocument<'a> {
     #[inline]
     pub fn recovery_tracker(&self) -> &RecoveryTracker {
         &self.recovery_tracker
+    }
+
+    #[inline]
+    pub fn xref_status(&self) -> XrefStatus {
+        self.store.xref().status
     }
 
     #[inline]
@@ -343,12 +380,21 @@ impl<'a> PdfDocument<'a> {
         let trailer_dict = self.store.trailer().clone();
         let source_bytes = self.source.as_bytes();
 
-        crate::writer::incremental::IncrementalWriter::write_update(
-            source_bytes,
-            &plan.modified_objects,
-            prev_startxref,
-            &trailer_dict,
-        )
+        if self.xref_status() == XrefStatus::RecoveredMalformedPrev {
+            crate::writer::incremental::IncrementalWriter::write_recovered_update(
+                source_bytes,
+                &plan.modified_objects,
+                self.store.xref(),
+                &trailer_dict,
+            )
+        } else {
+            crate::writer::incremental::IncrementalWriter::write_update(
+                source_bytes,
+                &plan.modified_objects,
+                prev_startxref,
+                &trailer_dict,
+            )
+        }
     }
 
     /// Mutates the document with the specified changes and exports an incrementally updated PDF.

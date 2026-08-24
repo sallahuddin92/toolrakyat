@@ -11,15 +11,22 @@ export type StarPdfRecoveryStatus =
   | "UNSUPPORTED_STRUCTURE"
   | "MALFORMED_DOCUMENT";
 
+export type StarPdfXrefStatus =
+  | "VALID"
+  | "RECOVERED_MALFORMED_PREV"
+  | "UNRECOVERABLE";
+
 export interface StarPdfDocumentInfo {
   page_count: number;
   pdf_version: string;
   is_valid: boolean;
   recovery_status?: StarPdfRecoveryStatus;
   recovery_events?: string[];
+  xref_status: StarPdfXrefStatus;
 }
 
 export interface StarPdfSecurityInfo {
+  xref_status: StarPdfXrefStatus;
   signature_state:
     | "UNSIGNED"
     | "SIGNED_PRESENT"

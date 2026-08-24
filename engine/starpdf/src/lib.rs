@@ -101,4 +101,4 @@ pub use vector::{
     VectorGraphicType,
 };
 pub use writer::{CompleteWriter, IncrementalWriter, MinimalWriter, Serializer};
-pub use xref::{XrefEntry, XrefResolver, XrefStreamParser, XrefTable};
+pub use xref::{XrefEntry, XrefResolver, XrefStatus, XrefStreamParser, XrefTable};

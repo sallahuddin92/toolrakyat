@@ -44,6 +44,39 @@ async function uploadPdfBytes(
   return canvas;
 }
 
+function replaceLastStartxrefWithZero(bytes: Buffer): Buffer {
+  const output = Buffer.from(bytes);
+  const marker = Buffer.from("startxref\n");
+  const markerIndex = output.lastIndexOf(marker);
+  if (markerIndex < 0) throw new Error("Fixture has no startxref marker");
+  const valueStart = markerIndex + marker.length;
+  const valueEnd = output.indexOf(0x0a, valueStart);
+  if (valueEnd < 0) throw new Error("Fixture has no startxref terminator");
+  output.fill(0x30, valueStart, valueEnd);
+  return output;
+}
+
+function addBeyondEofPrev(bytes: Buffer): Buffer {
+  const marker = Buffer.from("/Root ");
+  const rootStart = bytes.lastIndexOf(marker);
+  if (rootStart < 0) throw new Error("Fixture trailer has no /Root");
+  const lineEnd = bytes.indexOf(0x0a, rootStart);
+  if (lineEnd < 0) throw new Error("Fixture /Root has no line ending");
+  return Buffer.concat([
+    bytes.subarray(0, lineEnd + 1),
+    Buffer.from("/Prev 9999999999\n"),
+    bytes.subarray(lineEnd + 1),
+  ]);
+}
+
+async function createClassicViewerFixture(): Promise<Buffer> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([612, 792]);
+  page.drawText("SmartPDF xref recovery fixture", { x: 72, y: 700, size: 18, font });
+  return Buffer.from(await document.save({ useObjectStreams: false }));
+}
+
 async function createRichAppearanceFixture(): Promise<Buffer> {
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
@@ -4118,7 +4151,36 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
   });
 });
 
+test.describe("SmartPDF malformed xref recovery states", () => {
+  test("recoverable malformed Prev enables editing with a non-blocking note", async ({ page }) => {
+    const fixture = addBeyondEofPrev(await createClassicViewerFixture());
 
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "recoverable-prev.pdf", fixture);
+
+    await expect(page.getByTestId("starpdf-xref-recovered-note")).toBeVisible();
+    await expect(page.getByTestId("starpdf-read-only-note")).toHaveCount(0);
+    await expect(page.getByTestId("toolbar-mode-text-btn")).toBeEnabled();
+    await expect(page.getByTestId("toolbar-export-btn")).toBeEnabled();
+  });
+
+  test("PDF.js fallback is visibly read-only when StarPDF cannot open", async ({ page }) => {
+    const fixture = replaceLastStartxrefWithZero(await createClassicViewerFixture());
+
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "unrecoverable-xref.pdf", fixture);
+
+    const note = page.getByTestId("starpdf-read-only-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("Read-only preview");
+    await expect(page.getByTestId("toolbar-mode-text-btn")).toBeDisabled();
+    await expect(page.getByTestId("toolbar-mode-fill-sign-btn")).toBeDisabled();
+    await expect(page.getByTestId("toolbar-export-btn")).toBeDisabled();
+    await expect(page.getByTestId("page-insert-blank")).toBeDisabled();
+    await expect(page.locator("body")).not.toContainText("Invalid cross-reference table/stream");
+    await expect(page.locator("body")).not.toContainText("XREF_STATUS_UNRECOVERABLE");
+  });
+});
 
 
 

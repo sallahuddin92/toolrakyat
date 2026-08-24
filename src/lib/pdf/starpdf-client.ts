@@ -19,6 +19,7 @@ import type {
   StarPdfUpdateVectorGraphicInput,
   StarPdfVectorGraphicInfo,
   StarPdfVectorMutationResult,
+  StarPdfXrefStatus,
 } from "./starpdf-types";
 
 // Import wasm module functions directly for universal execution (Node / SSR / Vitest / Main fallback)
@@ -169,6 +170,7 @@ export async function ensureWasmInitialized(): Promise<void> {
 export class StarPdfDocumentHandle {
   private _handle: number;
   private _isClosed = false;
+  private _xrefStatus: StarPdfXrefStatus = "VALID";
 
   constructor(handle: number) {
     this._handle = handle;
@@ -176,6 +178,14 @@ export class StarPdfDocumentHandle {
 
   get handle(): number {
     return this._handle;
+  }
+
+  get xrefStatus(): StarPdfXrefStatus {
+    return this._xrefStatus;
+  }
+
+  setXrefStatus(status: StarPdfXrefStatus): void {
+    this._xrefStatus = status;
   }
 
   get isClosed(): boolean {
@@ -709,8 +719,17 @@ export class StarPdfClient {
   ): Promise<StarPdfDocumentHandle> {
     await ensureWasmInitialized();
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-    const handle = starpdf_open(bytes);
-    return new StarPdfDocumentHandle(handle);
+    let document: StarPdfDocumentHandle | null = null;
+    try {
+      const handle = starpdf_open(bytes);
+      document = new StarPdfDocumentHandle(handle);
+      const info = await document.getInfo();
+      document.setXrefStatus(info.xref_status);
+      return document;
+    } catch (error) {
+      await document?.close();
+      throw new StarPdfOpenError(error);
+    }
   }
 
   static async createMinimalPdf(text: string): Promise<Uint8Array> {
@@ -730,5 +749,16 @@ export class StarPdfClient {
       );
     }
     return starpdf_merge_documents(documents);
+  }
+}
+
+export class StarPdfOpenError extends Error {
+  readonly xref_status = "UNRECOVERABLE" as const;
+
+  constructor(cause: unknown) {
+    super("StarPDF could not establish a coherent document graph for native editing.", {
+      cause,
+    });
+    this.name = "StarPdfOpenError";
   }
 }

@@ -8,6 +8,24 @@ pub enum XrefKind {
     HybridStream,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum XrefStatus {
+    #[default]
+    Valid,
+    RecoveredMalformedPrev,
+    Unrecoverable,
+}
+
+impl XrefStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Valid => "VALID",
+            Self::RecoveredMalformedPrev => "RECOVERED_MALFORMED_PREV",
+            Self::Unrecoverable => "UNRECOVERABLE",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XrefRevision {
     pub revision_index: usize,
@@ -62,6 +80,15 @@ pub struct XrefTable {
     pub trailer: BTreeMap<String, PdfObject>,
     pub startxref_offset: u64,
     pub revisions: Vec<XrefRevision>,
+    pub status: XrefStatus,
+    pub recovery_events: Vec<String>,
+}
+
+impl XrefTable {
+    pub fn record_malformed_prev_recovery(&mut self, event: impl Into<String>) {
+        self.status = XrefStatus::RecoveredMalformedPrev;
+        self.recovery_events.push(event.into());
+    }
 }
 
 impl XrefTable {

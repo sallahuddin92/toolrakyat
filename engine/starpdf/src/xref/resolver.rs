@@ -204,12 +204,13 @@ impl XrefResolver {
                     PdfObject::Stream(stream) => {
                         XrefStreamParser::parse_into_table(&stream, table, limits)?;
 
-                        let prev_offset = Self::validated_previous_offset(
+                        let prev_result = Self::validated_previous_offset(
                             stream.dict.get("Prev"),
                             offset,
                             source.len(),
                             "Prev",
-                        )?;
+                        );
+                        let prev_offset = prev_result.as_ref().ok().copied().flatten();
                         let xrefstm_offset = Self::validated_previous_offset(
                             stream.dict.get("XRefStm"),
                             offset,
@@ -234,16 +235,15 @@ impl XrefResolver {
                             )?;
                         }
 
-                        // Check for chained /Prev in stream dict
-                        if let Some(prev) = prev_offset {
-                            Self::parse_xref_chain_at_offset(
-                                source,
-                                prev,
-                                table,
-                                visited_offsets,
-                                limits,
-                            )?;
-                        }
+                        Self::parse_prev_with_recovery(
+                            source,
+                            stream.dict.get("Prev"),
+                            offset,
+                            prev_result,
+                            table,
+                            visited_offsets,
+                            limits,
+                        )?;
                     }
                     other => {
                         return Err(PdfError::InvalidXref(format!(
@@ -391,12 +391,13 @@ impl XrefResolver {
             source.len(),
             "XRefStm",
         )?;
-        let prev_offset = Self::validated_previous_offset(
+        let prev_result = Self::validated_previous_offset(
             current_dict.get("Prev"),
             current_offset,
             source.len(),
             "Prev",
-        )?;
+        );
+        let prev_offset = prev_result.as_ref().ok().copied().flatten();
         table.revisions.push(XrefRevision {
             revision_index: table.revisions.len(),
             kind: XrefKind::Classic,
@@ -420,10 +421,17 @@ impl XrefResolver {
             }
         }
 
-        // 2. Check for chained /Prev xref tables if incremental update
-        if let Some(prev) = prev_offset {
-            Self::parse_xref_chain_at_offset(source, prev, table, visited_offsets, limits)?;
-        }
+        // 2. Check for chained /Prev xref tables if incremental update.
+        // A malformed historical link is isolated from the already parsed current section.
+        Self::parse_prev_with_recovery(
+            source,
+            current_dict.get("Prev"),
+            current_offset,
+            prev_result,
+            table,
+            visited_offsets,
+            limits,
+        )?;
 
         Ok(())
     }
@@ -456,5 +464,108 @@ impl XrefResolver {
             )));
         }
         Ok(Some(offset))
+    }
+
+    fn parse_prev_with_recovery(
+        source: ByteSource<'_>,
+        prev_object: Option<&PdfObject>,
+        current_offset: u64,
+        validation: PdfResult<Option<u64>>,
+        table: &mut XrefTable,
+        visited_offsets: &mut BTreeSet<u64>,
+        limits: &DecompressLimits,
+    ) -> PdfResult<()> {
+        if prev_object.is_none() {
+            return Ok(());
+        }
+
+        match validation {
+            Ok(None) => Ok(()),
+            Ok(Some(prev)) => {
+                let mut candidate_table = table.clone();
+                let mut candidate_visited = visited_offsets.clone();
+                match Self::parse_xref_chain_at_offset(
+                    source,
+                    prev,
+                    &mut candidate_table,
+                    &mut candidate_visited,
+                    limits,
+                ) {
+                    Ok(()) => {
+                        *table = candidate_table;
+                        *visited_offsets = candidate_visited;
+                        Ok(())
+                    }
+                    Err(error) => {
+                        table.record_malformed_prev_recovery(format!(
+                            "Ignored malformed /Prev section at checked offset {prev}: {error}"
+                        ));
+                        Ok(())
+                    }
+                }
+            }
+            Err(validation_error) => {
+                let raw_offset = prev_object.and_then(PdfObject::as_i64);
+                let mut candidates = Vec::new();
+
+                if let Some(raw) = raw_offset.and_then(|value| u64::try_from(value).ok()) {
+                    if raw > 0 && raw < source.len() as u64 {
+                        candidates.push(raw);
+                    }
+
+                    let scan_bytes = limits.max_xref_recovery_scan_bytes.min(source.len());
+                    if scan_bytes > 0 {
+                        let center = usize::try_from(raw)
+                            .unwrap_or(source.len())
+                            .min(source.len());
+                        let half = scan_bytes / 2;
+                        let start = center.saturating_sub(half);
+                        let end = start.saturating_add(scan_bytes).min(source.len());
+                        if let Ok(window) = source.get_slice_range(start, end) {
+                            for (position, marker) in window.windows(4).enumerate() {
+                                if marker == b"xref" {
+                                    let candidate = (start + position) as u64;
+                                    if !candidates.contains(&candidate) {
+                                        candidates.push(candidate);
+                                    }
+                                    if candidates.len() >= 8 {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for candidate in candidates {
+                    if candidate == current_offset || visited_offsets.contains(&candidate) {
+                        continue;
+                    }
+                    let mut candidate_table = table.clone();
+                    let mut candidate_visited = visited_offsets.clone();
+                    if Self::parse_xref_chain_at_offset(
+                        source,
+                        candidate,
+                        &mut candidate_table,
+                        &mut candidate_visited,
+                        limits,
+                    )
+                    .is_ok()
+                    {
+                        candidate_table.record_malformed_prev_recovery(format!(
+                            "Recovered malformed /Prev from xref offset {current_offset} using checked xref section {candidate}: {validation_error}"
+                        ));
+                        *table = candidate_table;
+                        *visited_offsets = candidate_visited;
+                        return Ok(());
+                    }
+                }
+
+                table.record_malformed_prev_recovery(format!(
+                    "Ignored malformed /Prev at xref offset {current_offset}: {validation_error}"
+                ));
+                Ok(())
+            }
+        }
     }
 }

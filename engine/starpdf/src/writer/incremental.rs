@@ -4,6 +4,7 @@ use std::io::Write;
 use crate::error::{PdfError, PdfResult};
 use crate::syntax::object::{ObjectRef, PdfObject};
 use crate::writer::serializer::Serializer;
+use crate::xref::table::{XrefEntry, XrefTable};
 
 pub struct IncrementalWriter;
 
@@ -17,6 +18,40 @@ impl IncrementalWriter {
         modified_objects: &BTreeMap<ObjectRef, PdfObject>,
         prev_startxref: usize,
         original_trailer: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Vec<u8>> {
+        Self::write_update_internal(
+            original_bytes,
+            modified_objects,
+            prev_startxref,
+            original_trailer,
+            None,
+        )
+    }
+
+    /// Writes a clean terminal xref table for a recovered document. Every effective
+    /// uncompressed object is re-indexed and the malformed historical `/Prev` chain
+    /// is deliberately omitted from the new trailer.
+    pub fn write_recovered_update(
+        original_bytes: &[u8],
+        modified_objects: &BTreeMap<ObjectRef, PdfObject>,
+        effective_xref: &XrefTable,
+        original_trailer: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<Vec<u8>> {
+        Self::write_update_internal(
+            original_bytes,
+            modified_objects,
+            0,
+            original_trailer,
+            Some(effective_xref),
+        )
+    }
+
+    fn write_update_internal(
+        original_bytes: &[u8],
+        modified_objects: &BTreeMap<ObjectRef, PdfObject>,
+        prev_startxref: usize,
+        original_trailer: &BTreeMap<String, PdfObject>,
+        recovered_xref: Option<&XrefTable>,
     ) -> PdfResult<Vec<u8>> {
         if modified_objects.is_empty() {
             // Nothing to update, return original bytes unchanged
@@ -34,6 +69,37 @@ impl IncrementalWriter {
         // 1. Serialize modified indirect objects and record their byte offsets
         let mut object_offsets: BTreeMap<ObjectRef, usize> = BTreeMap::new();
         let mut max_obj_num = 0u64;
+
+        if let Some(xref) = recovered_xref {
+            for (&obj_num, entry) in &xref.entries {
+                match *entry {
+                    XrefEntry::InUse {
+                        byte_offset,
+                        generation,
+                    } => {
+                        let offset = usize::try_from(byte_offset).map_err(|_| {
+                            PdfError::InvalidOperation(
+                                "Recovered xref object offset exceeds platform range".into(),
+                            )
+                        })?;
+                        if offset >= original_bytes.len() {
+                            return Err(PdfError::InvalidOperation(format!(
+                                "Recovered xref object {obj_num} points outside the source"
+                            )));
+                        }
+                        object_offsets.insert(ObjectRef::new(obj_num, generation), offset);
+                        max_obj_num = max_obj_num.max(obj_num);
+                    }
+                    XrefEntry::Compressed { .. } => {
+                        return Err(PdfError::InvalidOperation(
+                            "XREF_RECOVERED_EXPORT_UNSUPPORTED_COMPRESSED: clean recovered export requires xref-stream serialization"
+                                .into(),
+                        ));
+                    }
+                    XrefEntry::Free { .. } => {}
+                }
+            }
+        }
 
         for (&obj_ref, obj) in modified_objects {
             if obj_ref.number > 9_999_999_999 {
@@ -117,11 +183,13 @@ impl IncrementalWriter {
         trailer_dict.insert("Size".to_string(), PdfObject::Integer(new_size as i64));
 
         // Add /Prev pointing to original startxref
-        if prev_startxref > 0 {
+        if recovered_xref.is_none() && prev_startxref > 0 {
             trailer_dict.insert(
                 "Prev".to_string(),
                 PdfObject::Integer(prev_startxref as i64),
             );
+        } else {
+            trailer_dict.remove("Prev");
         }
 
         // Remove incompatible stream keys if any

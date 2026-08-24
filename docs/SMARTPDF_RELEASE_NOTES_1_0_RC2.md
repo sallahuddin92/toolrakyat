@@ -4,13 +4,13 @@ SmartPDF 1.0 Release Candidate 2 is a local-first PDF editor powered by the Star
 
 ## Release identity
 
-- **Qualified product SHA:** `003f70f0c0cca83a1373d403d21f1a937c7eb7ea`
+- **Prior qualified product baseline:** `003f70f0c0cca83a1373d403d21f1a937c7eb7ea`
 - **Qualified branch:** `main`
 - **Previous release candidate:** `v1.0.0-rc.1` remains unchanged
 - **RC2 tag:** Not created
 - **Manual acceptance:** `HUMAN PENDING`
 
-The RC2 preparation commit contains documentation only. The qualified product implementation remains the SHA above.
+RC2 includes the bounded malformed-`/Prev` recovery and explicit PDF.js-only read-only state described below. No RC2 tag has been created, and human manual acceptance remains pending.
 
 ## Adaptive multilingual font runtime
 
@@ -45,7 +45,11 @@ The qualification asserts non-missing shaped glyph IDs, exact reopened Unicode, 
 
 SmartPDF retains its conservative text-move dependency policy. Independent text can be moved by updating safe text positioning operators. Moves that would disturb dependent downstream text are refused with a user-facing safety message rather than shifting unrelated content or producing a corrupt export.
 
-## Automated qualification
+## Malformed xref history recovery
+
+StarPDF now preserves a valid current xref section when a `/Prev` history link is invalid, out of range, forward-pointing, cyclic, or leads to a malformed older revision. Recovery uses checked offsets, cycle detection, the existing xref-section limit, and a bounded local scan; the document opens for editing only after StarPDF proves a coherent catalog and page graph. Recovered exports write a clean terminal xref table without chaining through the malformed `/Prev` history. If coherence cannot be proven, SmartPDF continues PDF.js rendering as an explicitly read-only preview with native mutation controls disabled.
+
+## Prior baseline GitHub qualification
 
 GitHub Actions workflow: [SmartPDF CI for the qualified product SHA](https://github.com/sallahuddin92/toolrakyat/actions/runs/32681263824)
 
@@ -58,6 +62,8 @@ GitHub Actions workflow: [SmartPDF CI for the qualified product SHA](https://git
 | Playwright WebKit, one worker | PASS |
 
 Chromium, Firefox, and Playwright WebKit are qualified. **Safari was not directly tested.** Playwright WebKit qualification must not be represented as direct Safari qualification.
+
+The malformed-xref blocker fix was additionally qualified locally with Rust formatting, Clippy, all-features tests, release and WASM builds, WASM hash parity, ESLint, TypeScript, Vitest, Next.js production build, affected SmartPDF flows in Chromium, and the new recovery/read-only flows in Chromium, Firefox, and WebKit. The private field PDF passed recovered open, mutation, clean export, StarPDF reopen, text verification, and PDF.js rendering without being committed.
 
 ## Bundled font licensing
 

@@ -31,6 +31,7 @@ fn test_flate_decode_expansion_limit_protection() {
         max_object_stream_objects: 1000,
         max_xref_entries: 1000,
         max_xref_chain_depth: 10,
+        max_xref_recovery_scan_bytes: 4096,
     };
 
     let result = FlateDecoder::decode(&compressed, &strict_limits);

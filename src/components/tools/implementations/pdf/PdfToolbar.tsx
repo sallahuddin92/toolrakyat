@@ -71,6 +71,7 @@ interface PdfToolbarProps {
   onFillAndSignToolChange?: (tool: FillAndSignTool) => void;
   formAssistEnabled?: boolean;
   onToggleFormAssist?: () => void;
+  mutationEnabled?: boolean;
 }
 
 export function PdfToolbar({
@@ -109,6 +110,7 @@ export function PdfToolbar({
   onFillAndSignToolChange,
   formAssistEnabled = true,
   onToggleFormAssist,
+  mutationEnabled = true,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [internalShowSearchInput, setInternalShowSearchInput] = useState(false);
@@ -155,6 +157,7 @@ export function PdfToolbar({
               variant="ghost"
               size="sm"
               onClick={onMergeClick}
+              disabled={!mutationEnabled}
               className="text-xs text-slate-600 gap-1 h-8 rounded-lg shrink-0 hidden lg:inline-flex"
               title="Add and merge another PDF"
               data-testid="toolbar-merge-btn"
@@ -241,6 +244,7 @@ export function PdfToolbar({
             <button
               type="button"
               onClick={() => onModeChange?.("TEXT")}
+              disabled={!mutationEnabled}
               className={`px-2 py-1 text-xs rounded-md transition-colors ${
                 mode === "TEXT" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
               }`}
@@ -251,6 +255,7 @@ export function PdfToolbar({
             <button
               type="button"
               onClick={() => onModeChange?.("FILL_AND_SIGN")}
+              disabled={!mutationEnabled}
               className={`px-2 py-1 text-xs rounded-md transition-colors flex items-center gap-1 ${
                 mode === "FILL_AND_SIGN"
                   ? "bg-sky-600 text-white shadow-xs font-semibold"
@@ -264,6 +269,7 @@ export function PdfToolbar({
             <button
               type="button"
               onClick={() => onModeChange?.("ANNOTATE")}
+              disabled={!mutationEnabled}
               className={`px-2 py-1 text-xs rounded-md transition-colors ${
                 mode === "ANNOTATE" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
               }`}
@@ -274,6 +280,7 @@ export function PdfToolbar({
             <button
               type="button"
               onClick={() => onModeChange?.("PAGES")}
+              disabled={!mutationEnabled}
               className={`px-2 py-1 text-xs rounded-md transition-colors ${
                 mode === "PAGES" ? "bg-white text-slate-900 shadow-xs font-semibold" : "text-slate-600 hover:text-slate-900"
               }`}
@@ -488,7 +495,7 @@ export function PdfToolbar({
               <Button
                 type="button"
                 onClick={() => void onExport("editable")}
-                disabled={isExporting}
+                disabled={isExporting || !mutationEnabled}
                 className="h-8 rounded-l-xl rounded-r-none bg-transparent hover:bg-sky-700 text-white px-2.5 sm:px-3 text-xs gap-1.5 border-r border-sky-500 font-medium"
                 data-testid="toolbar-export-btn"
               >
@@ -508,7 +515,7 @@ export function PdfToolbar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                disabled={isExporting}
+                disabled={isExporting || !mutationEnabled}
                 onClick={() => setExportMenuOpen(!exportMenuOpen)}
                 className="size-8 rounded-l-none rounded-r-xl bg-transparent hover:bg-sky-700 text-white"
                 title="More export options"
@@ -519,7 +526,7 @@ export function PdfToolbar({
               </Button>
             </div>
 
-            {exportMenuOpen && (
+            {exportMenuOpen && mutationEnabled && (
               <>
                 <div
                   className="fixed inset-0 z-40"
@@ -694,4 +701,3 @@ export function PdfToolbar({
     </div>
   );
 }
-
