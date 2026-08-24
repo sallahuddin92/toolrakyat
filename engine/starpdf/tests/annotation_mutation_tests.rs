@@ -270,7 +270,7 @@ fn freetext_identity_content_appearance_and_geometry_lifecycle_is_exact() {
 }
 
 #[test]
-fn freetext_winansi_is_exact_and_unsupported_scripts_refuse_truthfully() {
+fn freetext_winansi_fast_path_and_adaptive_multilingual_lifecycle_are_exact() {
     let original = MinimalWriter::create_minimal_pdf("FreeText coverage policy").unwrap();
     let create = |text: &str| PdfChange::AddAnnotation {
         page_index: 0,
@@ -293,17 +293,136 @@ fn freetext_winansi_is_exact_and_unsupported_scripts_refuse_truthfully() {
         .windows(b"<436166E9206469204B75616C61204C756D707572>".len())
         .any(|window| window == b"<436166E9206469204B75616C61204C756D707572>"));
 
-    for unsupported in ["جاوي", "中文", "Latin جاوي 中文"] {
-        let mut document = PdfDocument::from_bytes(&original).unwrap();
-        let error = document.apply_mutation(&[create(unsupported)]).unwrap_err();
-        let message = error.to_string();
-        assert!(
-            message.contains("UNSUPPORTED_COMPLEX_SCRIPT")
-                || message.contains("UNSUPPORTED_FONT_ENCODING"),
-            "unexpected refusal for {unsupported:?}: {message}"
-        );
-        assert!(document.page_annotations(0).unwrap().is_empty());
+    let values = [
+        "جاوي ڤنديديقن چمرلڠ",
+        "עברית שלום",
+        "देवनागरी नमस्ते",
+        "日本語の注釈",
+        "简体中文批注",
+        "繁體中文註解",
+        "한국어 주석",
+        "Latin جاوي 日本語",
+    ];
+    let mut current = latin;
+    let mut annotation_ref = Some(latin_ref);
+    for (index, value) in values.iter().enumerate() {
+        let mut document = PdfDocument::from_bytes(&current).unwrap();
+        let change = if let Some(annot_ref) = annotation_ref {
+            PdfChange::UpdateAnnotation {
+                annot_ref,
+                update: AnnotationUpdateSpec {
+                    contents: Some((*value).to_string()),
+                    ..AnnotationUpdateSpec::default()
+                },
+            }
+        } else {
+            create(value)
+        };
+        current = document.mutate_and_export(&[change]).unwrap();
+        let mut reopened = PdfDocument::from_bytes(&current).unwrap();
+        let annotation = &reopened.page_annotations(0).unwrap()[0];
+        annotation_ref = Some(annotation.object_ref);
+        assert_eq!(annotation.contents.as_deref(), Some(*value));
+
+        let annotation_obj = reopened
+            .store_mut()
+            .resolve(annotation.object_ref)
+            .unwrap()
+            .clone();
+        assert!(annotation_obj
+            .as_dict()
+            .unwrap()
+            .get("Contents")
+            .and_then(PdfObject::as_bytes)
+            .is_some_and(|bytes| bytes.starts_with(&[0xFE, 0xFF])));
+        let ap = annotation_obj.as_dict().unwrap().get("AP").unwrap().clone();
+        let ap = reopened.store_mut().resolve_object(&ap).unwrap().clone();
+        let normal = ap.as_dict().unwrap().get("N").unwrap().clone();
+        let stream = reopened
+            .store_mut()
+            .resolve_object(&normal)
+            .unwrap()
+            .clone();
+        let stream = stream.as_stream().unwrap();
+        let fonts = stream
+            .dict
+            .get("Resources")
+            .and_then(PdfObject::as_dict)
+            .and_then(|resources| resources.get("Font"))
+            .and_then(PdfObject::as_dict)
+            .expect("adaptive AP must own font resources");
+        assert!(!fonts.is_empty());
+        assert!(stream.data.windows(3).any(|window| window == b" Tj"));
+        assert!(stream.data.windows(3).any(|window| window == b" Tm"));
+
+        for font in fonts.values() {
+            let type0 = reopened.store_mut().resolve_object(font).unwrap();
+            let type0 = type0.as_dict().unwrap();
+            assert_eq!(
+                type0.get("Subtype").and_then(PdfObject::as_name),
+                Some("Type0")
+            );
+            assert_eq!(
+                type0.get("Encoding").and_then(PdfObject::as_name),
+                Some("Identity-H")
+            );
+            assert!(type0.get("ToUnicode").is_some());
+        }
+
+        if index == values.len() - 1 {
+            current = reopened
+                .mutate_and_export(&[PdfChange::UpdateAnnotation {
+                    annot_ref: annotation.object_ref,
+                    update: AnnotationUpdateSpec {
+                        rect: Some([60.0, 60.0, 320.0, 110.0]),
+                        ..AnnotationUpdateSpec::default()
+                    },
+                }])
+                .unwrap();
+            let mut moved = PdfDocument::from_bytes(&current).unwrap();
+            let moved_annotation = &moved.page_annotations(0).unwrap()[0];
+            assert_eq!(moved_annotation.contents.as_deref(), Some(*value));
+            assert_eq!(moved_annotation.rect, [60.0, 60.0, 320.0, 110.0]);
+        }
     }
+
+    let mut mixed = PdfDocument::from_bytes(&current).unwrap();
+    let final_latin = "Back to ordinary Latin";
+    let final_bytes = mixed
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: annotation_ref.unwrap(),
+            update: AnnotationUpdateSpec {
+                contents: Some(final_latin.to_string()),
+                ..AnnotationUpdateSpec::default()
+            },
+        }])
+        .unwrap();
+    let mut final_document = PdfDocument::from_bytes(&final_bytes).unwrap();
+    let final_annotation = &final_document.page_annotations(0).unwrap()[0];
+    assert_eq!(final_annotation.contents.as_deref(), Some(final_latin));
+    let final_appearance = normal_appearance_data(&mut final_document, final_annotation.object_ref);
+    assert!(final_appearance
+        .windows(b"<4261636B20746F206F7264696E617279204C6174696E>".len())
+        .any(|window| window == b"<4261636B20746F206F7264696E617279204C6174696E>"));
+}
+
+#[test]
+fn freetext_adaptive_font_refusal_is_typed_and_atomic() {
+    let original = MinimalWriter::create_minimal_pdf("FreeText typed refusal").unwrap();
+    let mut document = PdfDocument::from_bytes(&original).unwrap();
+    let error = document
+        .apply_mutation(&[PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::FreeText {
+                rect: [40.0, 40.0, 260.0, 80.0],
+                text: "Unsupported noncharacter: \u{10FFFF}".to_string(),
+                font_size: Some(12.0),
+                color: Some(vec![0.0]),
+            },
+        }])
+        .unwrap_err();
+    assert!(error.to_string().contains("UNSUPPORTED_FONT_ENCODING"));
+    assert!(document.page_annotations(0).unwrap().is_empty());
 }
 
 #[test]

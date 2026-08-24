@@ -82,10 +82,7 @@ impl AnnotationGenerator {
                     "Subtype".to_string(),
                     PdfObject::Name("FreeText".to_string()),
                 );
-                dict.insert(
-                    "Contents".to_string(),
-                    PdfObject::String(text.as_bytes().to_vec()),
-                );
+                dict.insert("Contents".to_string(), PdfObject::text_string(text));
 
                 let sz = font_size.unwrap_or(12.0).clamp(6.0, 72.0);
                 let col = color
@@ -143,7 +140,11 @@ impl AnnotationGenerator {
                         .as_bytes(),
                     ),
                     _ => {
-                        let operand = Self::win_ansi_text_operand(text)?;
+                        let Ok(operand) = Self::win_ansi_text_operand(text) else {
+                            // The mutation engine owns adaptive font object allocation. Returning
+                            // no fast-path appearance asks it to use the shared shaped runtime.
+                            return Ok((dict, None));
+                        };
                         let text_op = format!(
                             "BT\n/Helv {:.2} Tf\n2.0 {:.2} Td\n{} Tj\nET\nQ\n",
                             sz, y_pos, operand
@@ -297,10 +298,7 @@ impl AnnotationGenerator {
                 Self::validate_optional_color(fill_color.as_deref(), "Line fill color")?;
                 if let Some(value) = contents {
                     Self::validate_contents(value)?;
-                    dict.insert(
-                        "Contents".to_string(),
-                        PdfObject::String(value.as_bytes().to_vec()),
-                    );
+                    dict.insert("Contents".to_string(), PdfObject::text_string(value));
                 }
                 dict.insert("Subtype".to_string(), PdfObject::Name("Line".to_string()));
                 dict.insert(

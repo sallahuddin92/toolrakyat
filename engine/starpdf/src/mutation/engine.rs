@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::annotation::generator::MAX_ANNOTATION_CONTENTS_LEN;
 use crate::annotation::generator::{AnnotationAppearance, AnnotationGenerator};
+use crate::annotation::generator::{MAX_ANNOTATION_APPEARANCE_BYTES, MAX_ANNOTATION_CONTENTS_LEN};
 use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec};
 use crate::appearance::choice::{ChoiceAppearance, MAX_LIST_OPTIONS, MAX_MULTI_SELECT_INDEXES};
 use crate::appearance::da_parser::DefaultAppearance;
@@ -12,8 +12,11 @@ use crate::appearance::text_field::{TextFieldAppearance, TextLayoutOptions, MAX_
 use crate::document::object_store::ObjectStore;
 use crate::error::{PdfError, PdfResult};
 use crate::font::appearance::{AppearanceFont, AppearanceFontResolver, GlyphMappingQuality};
+use crate::font::planner::ShapedFallbackData;
 use crate::font::subset::TrueTypeSubsetter;
-use crate::font::{FontProgramKind, SfntFont};
+use crate::font::{
+    plan_adaptive_text, FontFamily, FontProgramKind, FontStyle, SfntFont, Type0FontEmbedder,
+};
 use crate::forms::field::FieldType;
 use crate::mutation::change::PdfChange;
 use crate::mutation::result::MutationPlan;
@@ -1877,8 +1880,15 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         })?;
 
         // 1. Generate annotation dictionary & optional appearance stream
-        let (mut annot_dict, stream_opt) = AnnotationGenerator::generate_annotation_objects(spec)?;
+        let (mut annot_dict, mut stream_opt) =
+            AnnotationGenerator::generate_annotation_objects(spec)?;
         annot_dict.insert("P".to_string(), PdfObject::Reference(page_ref));
+
+        if stream_opt.is_none()
+            && annot_dict.get("Subtype").and_then(PdfObject::as_name) == Some("FreeText")
+        {
+            stream_opt = Some(self.generate_adaptive_freetext_appearance(&annot_dict, modified)?);
+        }
 
         let annot_ref = self.allocate_object_ref()?;
 
@@ -1946,10 +1956,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     "Annotation contents exceed maximum length of {MAX_ANNOTATION_CONTENTS_LEN} bytes"
                 )));
             }
-            dict.insert(
-                "Contents".to_string(),
-                PdfObject::String(contents.as_bytes().to_vec()),
-            );
+            dict.insert("Contents".to_string(), PdfObject::text_string(contents));
         }
 
         if let Some(color) = &update.color {
@@ -2085,9 +2092,22 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 }
                 AnnotationAppearance::NotRequired => AppearanceStatus::ValueUpdated,
                 AnnotationAppearance::Unsupported => {
-                    return Err(PdfError::InvalidOperation(format!(
-                        "Unsupported appearance regeneration for annotation subtype /{subtype}"
-                    )))
+                    if subtype == "FreeText" {
+                        let stream = self.generate_adaptive_freetext_appearance(&dict, modified)?;
+                        let stream_ref = self.allocate_object_ref()?;
+                        modified.insert(stream_ref, PdfObject::Stream(stream));
+                        let generated = PdfObject::Dictionary(BTreeMap::from([(
+                            "N".to_string(),
+                            PdfObject::Reference(stream_ref),
+                        )]));
+                        let merged = self.merge_generated_appearance(dict.get("AP"), &generated)?;
+                        dict.insert("AP".to_string(), merged);
+                        AppearanceStatus::AppearanceRegenerated
+                    } else {
+                        return Err(PdfError::InvalidOperation(format!(
+                            "Unsupported appearance regeneration for annotation subtype /{subtype}"
+                        )));
+                    }
                 }
             }
         } else if dict.contains_key("AP") {
@@ -2098,6 +2118,194 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
 
         modified.insert(annot_ref, PdfObject::Dictionary(dict));
         Ok(status)
+    }
+
+    fn generate_adaptive_freetext_appearance(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<StreamObject> {
+        let text = dict
+            .get("Contents")
+            .and_then(PdfObject::as_string_lossy)
+            .unwrap_or_default();
+        if text.is_empty() {
+            return Err(PdfError::UnsupportedFontEncoding(
+                "Adaptive FreeText appearance requires non-empty Unicode text".into(),
+            ));
+        }
+        let rect = dict
+            .get("Rect")
+            .and_then(PdfObject::as_array)
+            .filter(|values| values.len() == 4)
+            .ok_or_else(|| {
+                PdfError::InvalidOperation("FreeText is missing a valid /Rect".into())
+            })?;
+        let number = |value: &PdfObject| match value {
+            PdfObject::Integer(v) => Some(*v as f64),
+            PdfObject::Real(v) => Some(*v),
+            _ => None,
+        };
+        let coords: Vec<f64> = rect.iter().filter_map(number).collect();
+        if coords.len() != 4 || !coords.iter().all(|value| value.is_finite()) {
+            return Err(PdfError::InvalidOperation(
+                "FreeText /Rect must contain four finite numbers".into(),
+            ));
+        }
+        let width = coords[2] - coords[0];
+        let height = coords[3] - coords[1];
+        if width <= 0.0 || height <= 0.0 {
+            return Err(PdfError::InvalidOperation(
+                "FreeText /Rect must have positive bounds".into(),
+            ));
+        }
+
+        let da = dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .and_then(|value| DefaultAppearance::parse(&value).ok())
+            .unwrap_or_default();
+        let font_size = da.font_size.clamp(6.0, 72.0);
+        let style = FontStyle {
+            family: FontFamily::SansSerif,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+        };
+        let plan = plan_adaptive_text(&text, &style, font_size)?.ok_or_else(|| {
+            PdfError::UnsupportedFontEncoding(
+                "No qualified adaptive font covers the complete FreeText value".into(),
+            )
+        })?;
+        if plan.fallback_runs.len() != plan.runs.len() {
+            return Err(PdfError::InvalidOperation(
+                "Adaptive FreeText run metadata is inconsistent".into(),
+            ));
+        }
+
+        let mut merged_by_font: BTreeMap<String, ShapedFallbackData> = BTreeMap::new();
+        for fallback in &plan.fallback_runs {
+            if let Some(existing) = merged_by_font.get_mut(&fallback.font_id) {
+                existing
+                    .requested_glyphs
+                    .extend_from_slice(&fallback.requested_glyphs);
+                existing.requested_glyphs.sort_unstable();
+                existing.requested_glyphs.dedup();
+                existing.cid_to_gid.extend(fallback.cid_to_gid.clone());
+                existing
+                    .cid_to_unicode
+                    .extend(fallback.cid_to_unicode.clone());
+                existing.glyph_widths.extend(fallback.glyph_widths.clone());
+            } else {
+                merged_by_font.insert(fallback.font_id.clone(), fallback.clone());
+            }
+        }
+        if merged_by_font.len() > MAX_SUBSET_FONT_RESOURCES_PER_MUTATION {
+            return Err(PdfError::InvalidOperation(
+                "Adaptive FreeText exceeds the font resource limit".into(),
+            ));
+        }
+        let required_objects = (merged_by_font.len() as u64)
+            .checked_mul(6)
+            .ok_or_else(|| PdfError::InvalidOperation("Font object count overflow".into()))?;
+        if self.next_alloc_obj_num.saturating_add(required_objects) > MAX_PDF_OBJECT_NUMBER {
+            return Err(PdfError::InvalidOperation(
+                "PDF object number allocation limit exceeded".into(),
+            ));
+        }
+
+        let mut font_tags = BTreeMap::new();
+        let mut font_resources = BTreeMap::new();
+        for (index, (font_id, fallback)) in merged_by_font.iter().enumerate() {
+            let embedded = Type0FontEmbedder::embed_type0_font_resource(
+                &fallback.font_bytes,
+                &fallback.font_name,
+                &fallback.requested_glyphs,
+                &fallback.cid_to_gid,
+                &fallback.cid_to_unicode,
+                &fallback.glyph_widths,
+                modified,
+                &mut self.next_alloc_obj_num,
+            )?;
+            let mut tag = embedded.resource_name;
+            if font_resources.contains_key(&tag) {
+                tag = format!("{tag}_{}", index + 1);
+            }
+            font_resources.insert(tag.clone(), embedded.font_object);
+            font_tags.insert(font_id.clone(), tag);
+        }
+
+        let mut content = format!(
+            "q\n0 0 {:.4} {:.4} re W n\n{}\nBT\n",
+            width,
+            height,
+            da.color.to_fill_ops()
+        );
+        let mut cursor_x = if plan.direction == crate::font::TextDirection::RightToLeft {
+            (width - 2.0 - plan.predicted_width).max(2.0)
+        } else {
+            2.0
+        };
+        let baseline = ((height - font_size) / 2.0).max(2.0);
+        for (run, fallback) in plan.runs.iter().zip(&plan.fallback_runs) {
+            let tag = font_tags.get(&fallback.font_id).ok_or_else(|| {
+                PdfError::InvalidOperation("Missing adaptive FreeText font resource".into())
+            })?;
+            if fallback.raw_bytes.len() != run.glyphs.len().saturating_mul(2) {
+                return Err(PdfError::InvalidOperation(
+                    "Adaptive FreeText CID sequence is inconsistent".into(),
+                ));
+            }
+            use std::fmt::Write as _;
+            writeln!(&mut content, "/{tag} {:.4} Tf", font_size).map_err(|_| {
+                PdfError::InvalidOperation("Appearance serialization failed".into())
+            })?;
+            for (glyph, cid) in run.glyphs.iter().zip(fallback.raw_bytes.chunks_exact(2)) {
+                let x = cursor_x + glyph.x_offset * font_size / 1000.0;
+                let y = baseline + glyph.y_offset * font_size / 1000.0;
+                writeln!(
+                    &mut content,
+                    "1 0 0 1 {:.4} {:.4} Tm <{:02X}{:02X}> Tj",
+                    x, y, cid[0], cid[1]
+                )
+                .map_err(|_| {
+                    PdfError::InvalidOperation("Appearance serialization failed".into())
+                })?;
+                cursor_x += glyph.advance * font_size / 1000.0;
+            }
+        }
+        content.push_str("ET\nQ\n");
+        if content.len() > MAX_ANNOTATION_APPEARANCE_BYTES {
+            return Err(PdfError::InvalidOperation(format!(
+                "Annotation appearance exceeds maximum length of {MAX_ANNOTATION_APPEARANCE_BYTES} bytes"
+            )));
+        }
+
+        let data = content.into_bytes();
+        let resources =
+            BTreeMap::from([("Font".to_string(), PdfObject::Dictionary(font_resources))]);
+        let stream_dict = BTreeMap::from([
+            ("Type".to_string(), PdfObject::Name("XObject".into())),
+            ("Subtype".to_string(), PdfObject::Name("Form".into())),
+            ("FormType".to_string(), PdfObject::Integer(1)),
+            (
+                "BBox".to_string(),
+                PdfObject::Array(vec![
+                    PdfObject::Real(0.0),
+                    PdfObject::Real(0.0),
+                    PdfObject::Real(width),
+                    PdfObject::Real(height),
+                ]),
+            ),
+            ("Resources".to_string(), PdfObject::Dictionary(resources)),
+            ("Length".to_string(), PdfObject::Integer(data.len() as i64)),
+        ]);
+        Ok(StreamObject {
+            dict: stream_dict,
+            stream_offset: 0,
+            stream_length: data.len(),
+            data,
+        })
     }
 
     fn mutate_remove_annotation(

@@ -344,7 +344,11 @@ export class StarPdfDocumentHandle {
     input: StarPdfAddAnnotationInput
   ): Promise<boolean> {
     this.assertOpen();
-    await ensureWasmInitialized();
+    if (input.subtype === "FreeText") {
+      await registerFallbackFontsForText(input.contents ?? "");
+    } else {
+      await ensureWasmInitialized();
+    }
     return starpdf_add_annotation(this._handle, pageIndex, input);
   }
 
@@ -354,7 +358,11 @@ export class StarPdfDocumentHandle {
     input: StarPdfUpdateAnnotationInput
   ): Promise<boolean> {
     this.assertOpen();
-    await ensureWasmInitialized();
+    if (typeof input.contents === "string") {
+      await registerFallbackFontsForText(input.contents);
+    } else {
+      await ensureWasmInitialized();
+    }
     return starpdf_update_annotation(
       this._handle,
       BigInt(objectNum),

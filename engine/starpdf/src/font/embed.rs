@@ -8,6 +8,12 @@ use std::fmt::Write;
 
 pub struct Type0FontEmbedder;
 
+#[derive(Debug, Clone)]
+pub struct EmbeddedType0Resource {
+    pub resource_name: String,
+    pub font_object: PdfObject,
+}
+
 impl Type0FontEmbedder {
     fn inherited_resources(
         store: &mut ObjectStore<'_>,
@@ -83,8 +89,7 @@ impl Type0FontEmbedder {
         ObjectRef::new(num, 0)
     }
 
-    /// Embeds a real OpenType/TrueType font into the PDF document as a Type0 / CIDFontType2 font.
-    /// Returns the allocated resource name and updates `modified`.
+    /// Embeds a Type0 font and registers it in a page resource dictionary.
     pub fn embed_type0_font(
         store: &mut ObjectStore<'_>,
         page_ref: ObjectRef,
@@ -97,6 +102,81 @@ impl Type0FontEmbedder {
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
         next_alloc_num: &mut u64,
     ) -> PdfResult<String> {
+        let embedded = Self::embed_type0_font_internal(
+            font_bytes,
+            font_name,
+            requested_glyphs,
+            cid_to_gid,
+            cid_to_unicode,
+            glyph_widths,
+            modified,
+            next_alloc_num,
+        )?;
+
+        let page_obj = match modified.get(&page_ref) {
+            Some(obj) => obj.clone(),
+            None => store.resolve(page_ref)?.clone(),
+        };
+        let mut page_dict = page_obj
+            .as_dict()
+            .cloned()
+            .ok_or_else(|| PdfError::TypeMismatch {
+                expected: "dictionary",
+                actual: page_obj.type_name(),
+            })?;
+        let mut res_dict = Self::inherited_resources(store, &page_dict)?;
+        let mut font_dict = match res_dict.get("Font") {
+            Some(PdfObject::Dictionary(d)) => d.clone(),
+            Some(PdfObject::Reference(r)) => {
+                let r_obj = match modified.get(r) {
+                    Some(obj) => obj.clone(),
+                    None => store.resolve(*r)?.clone(),
+                };
+                r_obj.as_dict().cloned().unwrap_or_default()
+            }
+            _ => BTreeMap::new(),
+        };
+        font_dict.insert(embedded.resource_name.clone(), embedded.font_object.clone());
+        res_dict.insert("Font".into(), PdfObject::Dictionary(font_dict));
+        page_dict.insert("Resources".into(), PdfObject::Dictionary(res_dict));
+        modified.insert(page_ref, PdfObject::Dictionary(page_dict));
+        Ok(embedded.resource_name)
+    }
+
+    /// Embeds the same subset font objects without coupling them to page resources. This is used
+    /// by annotation Form XObjects, whose `/Resources` dictionary owns the returned font object.
+    pub fn embed_type0_font_resource(
+        font_bytes: &[u8],
+        font_name: &str,
+        requested_glyphs: &[u16],
+        cid_to_gid: &BTreeMap<u16, u16>,
+        cid_to_unicode: &BTreeMap<u16, String>,
+        glyph_widths: &BTreeMap<u16, f64>,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+        next_alloc_num: &mut u64,
+    ) -> PdfResult<EmbeddedType0Resource> {
+        Self::embed_type0_font_internal(
+            font_bytes,
+            font_name,
+            requested_glyphs,
+            cid_to_gid,
+            cid_to_unicode,
+            glyph_widths,
+            modified,
+            next_alloc_num,
+        )
+    }
+
+    fn embed_type0_font_internal(
+        font_bytes: &[u8],
+        font_name: &str,
+        requested_glyphs: &[u16],
+        cid_to_gid: &BTreeMap<u16, u16>,
+        cid_to_unicode: &BTreeMap<u16, String>,
+        glyph_widths: &BTreeMap<u16, f64>,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+        next_alloc_num: &mut u64,
+    ) -> PdfResult<EmbeddedType0Resource> {
         // 1. Subset the TrueType font
         let mut glyph_set: Vec<u16> = requested_glyphs.to_vec();
         glyph_set.sort_unstable();
@@ -254,40 +334,10 @@ impl Type0FontEmbedder {
         type0_dict.insert("ToUnicode".into(), PdfObject::Reference(tounicode_ref));
         modified.insert(type0_ref, PdfObject::Dictionary(type0_dict));
 
-        // 10. Register the Type0 font in the target page's /Resources /Font dictionary
         let res_tag = format!("F_StarPDF_{}", font_name.replace([' ', '-'], ""));
-        let page_obj = match modified.get(&page_ref) {
-            Some(obj) => obj.clone(),
-            None => store.resolve(page_ref)?.clone(),
-        };
-        let mut page_dict = page_obj
-            .as_dict()
-            .cloned()
-            .ok_or_else(|| PdfError::TypeMismatch {
-                expected: "dictionary",
-                actual: page_obj.type_name(),
-            })?;
-
-        let mut res_dict = Self::inherited_resources(store, &page_dict)?;
-
-        let mut font_dict = match res_dict.get("Font") {
-            Some(PdfObject::Dictionary(d)) => d.clone(),
-            Some(PdfObject::Reference(r)) => {
-                let r_obj = match modified.get(r) {
-                    Some(obj) => obj.clone(),
-                    None => store.resolve(*r)?.clone(),
-                };
-                r_obj.as_dict().cloned().unwrap_or_default()
-            }
-            _ => BTreeMap::new(),
-        };
-
-        font_dict.insert(res_tag.clone(), PdfObject::Reference(type0_ref));
-        res_dict.insert("Font".into(), PdfObject::Dictionary(font_dict));
-        page_dict.insert("Resources".into(), PdfObject::Dictionary(res_dict));
-
-        modified.insert(page_ref, PdfObject::Dictionary(page_dict));
-
-        Ok(res_tag)
+        Ok(EmbeddedType0Resource {
+            resource_name: res_tag,
+            font_object: PdfObject::Reference(type0_ref),
+        })
     }
 }

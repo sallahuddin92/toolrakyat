@@ -43,6 +43,20 @@ pub enum PdfObject {
 }
 
 impl PdfObject {
+    /// Creates a PDF text string. ASCII stays compact; other Unicode is encoded as UTF-16BE
+    /// with a byte-order mark so conforming readers recover the exact logical value.
+    pub fn text_string(value: &str) -> Self {
+        if value.is_ascii() {
+            return Self::String(value.as_bytes().to_vec());
+        }
+        let mut bytes = Vec::with_capacity(value.encode_utf16().count().saturating_mul(2) + 2);
+        bytes.extend_from_slice(&[0xFE, 0xFF]);
+        for unit in value.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_be_bytes());
+        }
+        Self::String(bytes)
+    }
+
     #[inline]
     pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)

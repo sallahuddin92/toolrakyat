@@ -20,11 +20,12 @@ pub use catalog::{
 };
 pub use cmap::UnicodeCMap;
 pub use coverage::{CoarseCoverageBitmap, COARSE_COVERAGE_BITMAP_BYTES, COARSE_UNICODE_PAGE_COUNT};
-pub use embed::Type0FontEmbedder;
+pub use embed::{EmbeddedType0Resource, Type0FontEmbedder};
 pub use encoding::SimpleEncoding;
 pub use font::{Font, FontFamily, FontProgramKind, FontStyle};
 pub use planner::{
-    LayoutSafetyClassification, ReplacementStrategy, TextPlanner, TextReplacementPlan,
+    plan_adaptive_text, AdaptiveTextPlan, LayoutSafetyClassification, ReplacementStrategy,
+    TextPlanner, TextReplacementPlan,
 };
 pub use resource::PageResources;
 pub use sfnt::SfntFont;

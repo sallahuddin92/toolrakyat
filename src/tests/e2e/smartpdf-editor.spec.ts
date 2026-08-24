@@ -790,7 +790,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
         objectNum: freeText.object_num,
         objectGen: freeText.object_gen,
         input: {
-          contents: "FreeText AP regenerated",
+          contents: "Latin جاوي 日本語",
           color: [0, 0.45, 0.2],
           border_width: 2,
         },
@@ -826,6 +826,10 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
           .slice(0, inputBytes.length)
           .every((value, index) => value === inputBytes[index]),
         annotationCount: (annotations.annotations as unknown[]).length,
+        freeTextContents: (annotations.annotations as Array<{ subtype: string; contents?: string }>).find(
+          (annotation) => annotation.subtype === "FreeText",
+        )?.contents,
+        hasType0Appearance: new TextDecoder().decode(output).includes("/Subtype /Type0"),
         appearanceStatus: appearanceStatus.status,
         staleHandleCode: staleHandle.code,
       };
@@ -834,6 +838,8 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     expect(workerResult.version).toBe("0.12.1");
     expect(workerResult.prefixPreserved).toBe(true);
     expect(workerResult.annotationCount).toBeGreaterThanOrEqual(5);
+    expect(workerResult.freeTextContents).toBe("Latin جاوي 日本語");
+    expect(workerResult.hasType0Appearance).toBe(true);
     expect(workerResult.appearanceStatus).toBe("AP_REGENERATED");
     expect(workerResult.staleHandleCode).toBe("INVALID_HANDLE");
 
@@ -3749,7 +3755,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const stableTestId = await created.getAttribute("data-testid");
     expect(stableTestId).toMatch(/^canvas-annotation-annot-obj-\d+-\d+$/);
 
-    const firstEdit = "Muhammad Sallahuddin Bin Hamzah";
+    const firstEdit = "Latin جاوي 日本語";
     await input.fill(firstEdit);
     const draftDownloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export Editable" }).click();
@@ -3813,8 +3819,6 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const firstPath = await firstDownload.path();
     expect(firstPath).not.toBeNull();
     const firstOutput = fs.readFileSync(firstPath!);
-    const appearanceHex = `<${Buffer.from(firstEdit, "utf8").toString("hex").toUpperCase()}>`;
-    expect(firstOutput.includes(Buffer.from(appearanceHex))).toBe(true);
 
     const reopenedCanvas = await uploadPdfBytes(page, "freetext-lifecycle-reopened.pdf", firstOutput);
     expect((await reopenedCanvas.screenshot()).byteLength).toBeGreaterThan(1_000);
@@ -3823,7 +3827,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await reopened.click();
     await expect(page.getByTestId("context-annotation-input")).toHaveValue(firstEdit);
 
-    const secondEdit = "Second lifecycle edit";
+    const secondEdit = "中文第二次編輯";
     await page.getByTestId("context-annotation-input").fill(secondEdit);
     await page.getByTestId("context-annotation-apply-btn").click();
     await expect(page.locator(`[data-testid="${stableTestId}"][title*="${secondEdit}"]`)).toBeVisible();

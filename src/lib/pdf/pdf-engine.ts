@@ -6,7 +6,7 @@ import {
   PDFDropdown,
   PDFOptionList,
   PDFName,
-  PDFString,
+  PDFHexString,
   PDFNumber,
   PDFDict,
   PDFRef,
@@ -281,7 +281,7 @@ export async function updateAcroFormFields(
               try {
                 const annotDict = doc.context.lookup(annotRef);
                 if (annotDict && annotDict instanceof PDFDict) {
-                  annotDict.set(PDFName.of("Contents"), PDFString.of(targetVal));
+                  annotDict.set(PDFName.of("Contents"), PDFHexString.fromText(targetVal));
                 }
               } catch {
                 // Ignore failure on specific annotation

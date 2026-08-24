@@ -214,7 +214,7 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     await step3Doc.close();
   });
 
-  it("encodes WinAnsi FreeText exactly and refuses unsupported annotation scripts without mutation", async () => {
+  it("keeps WinAnsi FreeText fast and re-plans adaptive multilingual annotation edits", async () => {
     const bytes = await StarPdfClient.createMinimalPdf("FreeText script policy");
     const doc = await StarPdfClient.open(bytes);
     const supported = "Café di Kuala Lumpur";
@@ -230,32 +230,33 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(Buffer.from(output).includes(winAnsiAppearance)).toBe(true);
     await doc.close();
 
-    const reopened = await StarPdfClient.open(output);
-    const [annotation] = await reopened.getAnnotations(0);
+    let reopened = await StarPdfClient.open(output);
+    let [annotation] = await reopened.getAnnotations(0);
     expect(annotation.contents).toBe(supported);
-    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
-      contents: "توليس جاوي",
-    });
-    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_COMPLEX_SCRIPT");
-    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
-      contents: "中文測試",
-    });
-    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_FONT_ENCODING");
-    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
-      contents: "Latin العربية 中文",
-    });
-    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_COMPLEX_SCRIPT");
-    expect((await reopened.getAnnotations(0))[0].contents).toBe(supported);
+    for (const value of ["توليس جاوي ڤ چ ڠ ڽ", "中文測試", "Latin العربية 中文"]) {
+      await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
+        contents: value,
+      });
+      const adaptiveOutput = await reopened.exportIncremental();
+      expect(Buffer.from(adaptiveOutput).includes(Buffer.from("/Subtype /Type0"))).toBe(true);
+      expect(Buffer.from(adaptiveOutput).includes(Buffer.from("/Encoding /Identity-H"))).toBe(true);
+      expect(Buffer.from(adaptiveOutput).includes(Buffer.from("/ToUnicode"))).toBe(true);
+      await reopened.close();
 
-    const followUp = "Résumé accepted after refusal";
+      reopened = await StarPdfClient.open(adaptiveOutput);
+      [annotation] = await reopened.getAnnotations(0);
+      expect(annotation.contents).toBe(value);
+    }
+
+    const finalLatin = "Résumé accepted after multilingual edits";
     await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
-      contents: followUp,
+      contents: finalLatin,
     });
-    const followUpOutput = await reopened.exportIncremental();
+    const finalOutput = await reopened.exportIncremental();
     await reopened.close();
 
-    const finalDoc = await StarPdfClient.open(followUpOutput);
-    expect((await finalDoc.getAnnotations(0))[0].contents).toBe(followUp);
+    const finalDoc = await StarPdfClient.open(finalOutput);
+    expect((await finalDoc.getAnnotations(0))[0].contents).toBe(finalLatin);
     await finalDoc.close();
   });
 

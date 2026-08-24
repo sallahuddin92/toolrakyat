@@ -43,6 +43,16 @@ pub struct ShapedFallbackData {
     pub raw_bytes: Vec<u8>,
 }
 
+/// A document-independent plan produced by the shared adaptive font runtime.
+/// Consumers embed the returned fallback resources in either page or Form XObject resources.
+#[derive(Debug, Clone)]
+pub struct AdaptiveTextPlan {
+    pub runs: Vec<ShapedRun>,
+    pub direction: TextDirection,
+    pub predicted_width: f64,
+    pub fallback_runs: Vec<ShapedFallbackData>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TextReplacementPlan {
     pub page_index: usize,
@@ -138,6 +148,151 @@ pub fn resolve_logical_cluster_strings(text: &str, glyphs: &[ShapedGlyph]) -> Ve
         .into_iter()
         .map(|index| by_glyph[index].clone())
         .collect()
+}
+
+/// Plans bundled fallback fonts and HarfRust shaping without depending on a page text span.
+/// Returns `None` when the catalog cannot prove complete coverage for every run.
+pub fn plan_adaptive_text(
+    text: &str,
+    style: &FontStyle,
+    font_size: f64,
+) -> PdfResult<Option<AdaptiveTextPlan>> {
+    let direction = TextShaper::detect_direction(text);
+    let registry = get_font_registry();
+
+    // Prefer one font when it has exact coverage for the complete logical string.
+    for entry in find_candidate_fallbacks(text, style) {
+        if let Some(font_bytes) = registry.get_font(entry.font_id) {
+            if registry.verify_exact_coverage(&font_bytes, text) {
+                let is_rtl = direction == TextDirection::RightToLeft;
+                if let Some(shaped_run) = TextShaper::shape_opentype(&font_bytes, text, is_rtl) {
+                    let cluster_strings = resolve_logical_cluster_strings(text, &shaped_run.glyphs);
+                    let fallback = build_fallback_run(
+                        entry.font_id,
+                        entry.display_name,
+                        font_bytes,
+                        &shaped_run,
+                        &cluster_strings,
+                        &mut 1,
+                    )?;
+                    let predicted_width = (shaped_run.total_advance / 1000.0) * font_size;
+                    return Ok(Some(AdaptiveTextPlan {
+                        runs: vec![shaped_run],
+                        direction,
+                        predicted_width,
+                        fallback_runs: vec![fallback],
+                    }));
+                }
+            }
+        }
+    }
+
+    // Mixed-script fallback: itemize in visual bidi order and select a font per run.
+    let bidi_info = unicode_bidi::BidiInfo::new(text, None);
+    let mut runs = Vec::new();
+    let mut fallback_runs = Vec::new();
+    let mut next_cid_by_font: BTreeMap<String, u16> = BTreeMap::new();
+    let mut total_font_units = 0.0;
+
+    for para in &bidi_info.paragraphs {
+        let (_, visual_run_ranges) = bidi_info.visual_runs(para, para.range.clone());
+        for run_range in visual_run_ranges {
+            let run_text = &text[run_range.clone()];
+            let is_rtl = bidi_info.levels[run_range.start].is_rtl();
+            let mut planned = None;
+
+            for entry in find_candidate_fallbacks(run_text, style) {
+                if !entry.covers_text_coarse(run_text) {
+                    continue;
+                }
+                let Some(font_bytes) = registry.get_font(entry.font_id) else {
+                    continue;
+                };
+                if !registry.verify_exact_coverage(&font_bytes, run_text) {
+                    continue;
+                }
+                let Some(shaped_run) = TextShaper::shape_opentype(&font_bytes, run_text, is_rtl)
+                else {
+                    continue;
+                };
+                let cluster_strings = resolve_logical_cluster_strings(run_text, &shaped_run.glyphs);
+                let next_cid = next_cid_by_font
+                    .entry(entry.font_id.to_string())
+                    .or_insert(1);
+                let fallback = build_fallback_run(
+                    entry.font_id,
+                    entry.display_name,
+                    font_bytes,
+                    &shaped_run,
+                    &cluster_strings,
+                    next_cid,
+                )?;
+                planned = Some((shaped_run, fallback));
+                break;
+            }
+
+            let Some((run, fallback)) = planned else {
+                return Ok(None);
+            };
+            total_font_units += run.total_advance;
+            runs.push(run);
+            fallback_runs.push(fallback);
+        }
+    }
+
+    if fallback_runs.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(AdaptiveTextPlan {
+        runs,
+        direction,
+        predicted_width: (total_font_units / 1000.0) * font_size,
+        fallback_runs,
+    }))
+}
+
+fn build_fallback_run(
+    font_id: &str,
+    font_name: &str,
+    font_bytes: Vec<u8>,
+    shaped_run: &ShapedRun,
+    cluster_strings: &[String],
+    next_cid: &mut u16,
+) -> PdfResult<ShapedFallbackData> {
+    let mut requested_glyphs = Vec::new();
+    let mut cid_to_gid = BTreeMap::new();
+    let mut cid_to_unicode = BTreeMap::new();
+    let mut glyph_widths = BTreeMap::new();
+    let mut raw_bytes = Vec::new();
+
+    for (index, glyph) in shaped_run.glyphs.iter().enumerate() {
+        let cid = *next_cid;
+        *next_cid = next_cid.checked_add(1).ok_or_else(|| {
+            PdfError::InvalidOperation("Fallback font CID space exhausted".into())
+        })?;
+        let gid = u16::try_from(glyph.glyph_id)
+            .map_err(|_| PdfError::InvalidOperation("Fallback glyph ID exceeds 16 bits".into()))?;
+        requested_glyphs.push(gid);
+        cid_to_gid.insert(cid, gid);
+        glyph_widths.insert(cid, glyph.advance);
+        raw_bytes.extend_from_slice(&cid.to_be_bytes());
+        if let Some(cluster) = cluster_strings.get(index) {
+            if !cluster.is_empty() {
+                cid_to_unicode.insert(cid, cluster.clone());
+            }
+        }
+    }
+
+    Ok(ShapedFallbackData {
+        font_id: font_id.to_string(),
+        font_name: font_name.to_string(),
+        font_bytes,
+        requested_glyphs,
+        cid_to_gid,
+        cid_to_unicode,
+        glyph_widths,
+        raw_bytes,
+    })
 }
 
 pub struct TextPlanner;
@@ -268,190 +423,25 @@ impl TextPlanner {
             });
         }
 
-        // 4. ADAPTIVE PATH: Real Fallback Font Catalog with OpenType Shaping (HarfRust)
-        let registry = get_font_registry();
-
-        // 4A: Check single-font match
-        let candidate_entries = find_candidate_fallbacks(replacement, &orig_style);
-        for entry in candidate_entries {
-            if let Some(font_bytes) = registry.get_font(entry.font_id) {
-                if registry.verify_exact_coverage(&font_bytes, replacement) {
-                    let is_rtl = direction == TextDirection::RightToLeft;
-                    if let Some(shaped_run) =
-                        TextShaper::shape_opentype(&font_bytes, replacement, is_rtl)
-                    {
-                        let cluster_strings =
-                            resolve_logical_cluster_strings(replacement, &shaped_run.glyphs);
-
-                        let mut requested_glyphs = Vec::new();
-                        let mut cid_to_gid = BTreeMap::new();
-                        let mut cid_to_unicode = BTreeMap::new();
-                        let mut glyph_widths = BTreeMap::new();
-                        let mut raw_bytes = Vec::new();
-
-                        for (idx, g) in shaped_run.glyphs.iter().enumerate() {
-                            let gid = g.glyph_id as u16;
-                            let cid = u16::try_from(idx + 1).map_err(|_| {
-                                PdfError::InvalidOperation(
-                                    "Fallback run has too many glyphs".into(),
-                                )
-                            })?;
-                            requested_glyphs.push(gid);
-                            cid_to_gid.insert(cid, gid);
-                            glyph_widths.insert(cid, g.advance);
-                            raw_bytes.extend_from_slice(&cid.to_be_bytes());
-
-                            if let Some(cluster_str) = cluster_strings.get(idx) {
-                                if !cluster_str.is_empty() {
-                                    cid_to_unicode.insert(cid, cluster_str.clone());
-                                }
-                            }
-                        }
-
-                        let total_advance = shaped_run.total_advance;
-                        let predicted_width = (total_advance / 1000.0) * font_size;
-                        let fallback_res_name =
-                            format!("F_StarPDF_{}", entry.display_name.replace([' ', '-'], ""));
-
-                        return Ok(TextReplacementPlan {
-                            page_index,
-                            target: target.clone(),
-                            original_text: orig_text,
-                            replacement_text: replacement.to_string(),
-                            strategy: ReplacementStrategy::ShapedFallback,
-                            runs: vec![shaped_run],
-                            direction,
-                            font_resource_name: fallback_res_name,
-                            font_size,
-                            predicted_width,
-                            available_width: span.width,
-                            layout_safety: LayoutSafetyClassification::SafeShaped,
-                            fallback_runs: vec![ShapedFallbackData {
-                                font_id: entry.font_id.to_string(),
-                                font_name: entry.display_name.to_string(),
-                                font_bytes,
-                                requested_glyphs,
-                                cid_to_gid,
-                                cid_to_unicode,
-                                glyph_widths,
-                                raw_bytes,
-                            }],
-                            refusal_reason: None,
-                        });
-                    }
-                }
-            }
-        }
-
-        // 4B: Mixed-script fallback: itemize into script runs
-        let bidi_info = unicode_bidi::BidiInfo::new(replacement, None);
-        let mut mixed_runs = Vec::new();
-        let mut mixed_fallback_data = Vec::new();
-        let mut next_cid_by_font: BTreeMap<String, u16> = BTreeMap::new();
-        let mut all_matched = true;
-        let mut total_font_units = 0.0;
-
-        for para in &bidi_info.paragraphs {
-            let (_, visual_run_ranges) = bidi_info.visual_runs(para, para.range.clone());
-            for run_range in visual_run_ranges {
-                let run_text = &replacement[run_range.clone()];
-                let is_rtl = bidi_info.levels[run_range.start].is_rtl();
-
-                // Find matching font for this specific run
-                let mut run_matched = false;
-                for entry in find_candidate_fallbacks(run_text, &orig_style) {
-                    if entry.covers_text_coarse(run_text) {
-                        if let Some(font_bytes) = registry.get_font(entry.font_id) {
-                            if registry.verify_exact_coverage(&font_bytes, run_text) {
-                                if let Some(shaped_run) =
-                                    TextShaper::shape_opentype(&font_bytes, run_text, is_rtl)
-                                {
-                                    let cluster_strings = resolve_logical_cluster_strings(
-                                        run_text,
-                                        &shaped_run.glyphs,
-                                    );
-
-                                    let mut requested_glyphs = Vec::new();
-                                    let mut cid_to_gid = BTreeMap::new();
-                                    let mut cid_to_unicode = BTreeMap::new();
-                                    let mut glyph_widths = BTreeMap::new();
-                                    let mut raw_bytes = Vec::new();
-
-                                    for (idx, g) in shaped_run.glyphs.iter().enumerate() {
-                                        let gid = g.glyph_id as u16;
-                                        let next_cid = next_cid_by_font
-                                            .entry(entry.font_id.to_string())
-                                            .or_insert(1);
-                                        let cid = *next_cid;
-                                        *next_cid = next_cid.checked_add(1).ok_or_else(|| {
-                                            PdfError::InvalidOperation(
-                                                "Fallback font CID space exhausted".into(),
-                                            )
-                                        })?;
-                                        requested_glyphs.push(gid);
-                                        cid_to_gid.insert(cid, gid);
-                                        glyph_widths.insert(cid, g.advance);
-                                        raw_bytes.extend_from_slice(&cid.to_be_bytes());
-
-                                        if let Some(cluster_str) = cluster_strings.get(idx) {
-                                            if !cluster_str.is_empty() {
-                                                cid_to_unicode.insert(cid, cluster_str.clone());
-                                            }
-                                        }
-                                    }
-
-                                    total_font_units += shaped_run.total_advance;
-                                    mixed_runs.push(shaped_run);
-                                    mixed_fallback_data.push(ShapedFallbackData {
-                                        font_id: entry.font_id.to_string(),
-                                        font_name: entry.display_name.to_string(),
-                                        font_bytes,
-                                        requested_glyphs,
-                                        cid_to_gid,
-                                        cid_to_unicode,
-                                        glyph_widths,
-                                        raw_bytes,
-                                    });
-
-                                    run_matched = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if !run_matched {
-                    all_matched = false;
-                    break;
-                }
-            }
-            if !all_matched {
-                break;
-            }
-        }
-
-        if all_matched && !mixed_fallback_data.is_empty() {
-            let predicted_width = (total_font_units / 1000.0) * font_size;
+        if let Some(adaptive) = plan_adaptive_text(replacement, &orig_style, font_size)? {
             let primary_res_name = format!(
                 "F_StarPDF_{}",
-                mixed_fallback_data[0].font_name.replace([' ', '-'], "")
+                adaptive.fallback_runs[0].font_name.replace([' ', '-'], "")
             );
-
             return Ok(TextReplacementPlan {
                 page_index,
                 target: target.clone(),
                 original_text: orig_text,
                 replacement_text: replacement.to_string(),
                 strategy: ReplacementStrategy::ShapedFallback,
-                runs: mixed_runs,
-                direction,
+                runs: adaptive.runs,
+                direction: adaptive.direction,
                 font_resource_name: primary_res_name,
                 font_size,
-                predicted_width,
+                predicted_width: adaptive.predicted_width,
                 available_width: span.width,
                 layout_safety: LayoutSafetyClassification::SafeShaped,
-                fallback_runs: mixed_fallback_data,
+                fallback_runs: adaptive.fallback_runs,
                 refusal_reason: None,
             });
         }

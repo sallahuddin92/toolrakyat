@@ -22,6 +22,7 @@ import initWasm, {
   starpdf_get_page_count,
   starpdf_get_security_info,
   starpdf_open,
+  starpdf_register_font_asset,
   starpdf_insert_blank_page,
   starpdf_insert_imported_page,
   starpdf_merge_documents,
@@ -55,6 +56,14 @@ import initWasm, {
 } from "/starpdf_wasm/starpdf.js";
 
 let initialized = false;
+const registeredFallbackFonts = new Set();
+const fallbackFontAssets = [
+  [/\p{Script=Arabic}/u, "noto-sans-arabic", "NotoSansArabic-Regular.ttf"],
+  [/\p{Script=Hebrew}/u, "noto-sans-hebrew", "NotoSansHebrew-Regular.ttf"],
+  [/\p{Script=Devanagari}/u, "noto-sans-devanagari", "NotoSansDevanagari-Regular.ttf"],
+  [/\p{Script=Hangul}/u, "noto-sans-cjk-kr", "NotoSansKR-Regular.ttf"],
+  [/[\u3040-\u30ff\u31f0-\u31ff]/u, "noto-sans-cjk-jp", "NotoSansJP-Regular.ttf"],
+];
 
 function classifyError(err) {
   const message = err instanceof Error ? err.message : String(err);
@@ -74,6 +83,24 @@ async function ensureInit(wasmUrl = "/starpdf_wasm/starpdf_bg.wasm") {
   if (!initialized) {
     await initWasm({ module_or_path: wasmUrl });
     initialized = true;
+  }
+}
+
+async function registerFallbackFontsForText(text = "") {
+  const assets = fallbackFontAssets.filter(([pattern]) => pattern.test(text));
+  if (/\p{Script=Han}/u.test(text) && !assets.some(([, id]) => id.includes("cjk-jp") || id.includes("cjk-kr"))) {
+    assets.push(
+      /[體測試繁國語學書車門風馬龍臺灣]/u.test(text)
+        ? [null, "noto-sans-cjk-tc", "NotoSansTC-Regular.ttf"]
+        : [null, "noto-sans-cjk-sc", "NotoSansSC-Regular.ttf"]
+    );
+  }
+  for (const [, fontId, filename] of assets) {
+    if (registeredFallbackFonts.has(fontId)) continue;
+    const response = await fetch(`/fonts/${filename}`);
+    if (!response.ok) throw new Error(`Failed to load fallback font ${fontId}: HTTP ${response.status}`);
+    starpdf_register_font_asset(fontId, new Uint8Array(await response.arrayBuffer()));
+    registeredFallbackFonts.add(fontId);
   }
 }
 
@@ -174,11 +201,17 @@ self.onmessage = async (event) => {
         break;
       }
       case "addAnnotation": {
+        if (req.input?.subtype === "FreeText") {
+          await registerFallbackFontsForText(req.input.contents);
+        }
         starpdf_add_annotation(req.handle, req.pageIndex, req.input);
         self.postMessage({ type: "addAnnotation", id: req.id, success: true });
         break;
       }
       case "updateAnnotation": {
+        if (typeof req.input?.contents === "string") {
+          await registerFallbackFontsForText(req.input.contents);
+        }
         starpdf_update_annotation(req.handle, BigInt(req.objectNum), req.objectGen, req.input);
         self.postMessage({ type: "updateAnnotation", id: req.id, success: true });
         break;
@@ -189,11 +222,13 @@ self.onmessage = async (event) => {
         break;
       }
       case "replaceText": {
+        await registerFallbackFontsForText(req.newText);
         const result = starpdf_replace_text(req.handle, req.pageIndex, req.spanId, req.newText);
         self.postMessage({ type: "replaceText", id: req.id, success: true, result });
         break;
       }
       case "replaceTextGroup": {
+        await registerFallbackFontsForText(req.newText);
         const result = starpdf_replace_text_group(req.handle, req.pageIndex, req.spanIds, req.newText);
         self.postMessage({ type: "replaceTextGroup", id: req.id, success: true, result });
         break;
