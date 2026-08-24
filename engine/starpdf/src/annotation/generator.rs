@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use crate::annotation::types::{AnnotationSpec, LineEndingStyle};
 use crate::appearance::color::PdfColor;
 use crate::appearance::fonts::FontMetricsHelper;
-use crate::appearance::text_field::escape_pdf_string;
 use crate::error::{PdfError, PdfResult};
+use crate::font::Font;
 use crate::syntax::object::{PdfObject, StreamObject};
 
 pub const MAX_ANNOTATION_CONTENTS_LEN: usize = 1_048_576;
@@ -118,13 +118,39 @@ impl AnnotationGenerator {
                 let color_op = format!("{}\n", col.to_fill_ops());
                 content.extend_from_slice(color_op.as_bytes());
 
-                let escaped = escape_pdf_string(text);
                 let y_pos = ((height - sz) / 2.0).max(2.0);
-                let text_op = format!(
-                    "BT\n/Helv {:.2} Tf\n2.0 {:.2} Td\n({}) Tj\nET\nQ\n",
-                    sz, y_pos, escaped
-                );
-                content.extend_from_slice(text_op.as_bytes());
+                match text.as_str() {
+                    "✓" => content.extend_from_slice(
+                        format!(
+                            "{:.2} w\n2.0 {:.2} m\n{:.2} 2.0 l\n{:.2} {:.2} l\nS\nQ\n",
+                            (sz / 8.0).clamp(1.0, 3.0),
+                            height * 0.48,
+                            width * 0.38,
+                            width - 2.0,
+                            height - 2.0,
+                        )
+                        .as_bytes(),
+                    ),
+                    "✕" => content.extend_from_slice(
+                        format!(
+                            "{:.2} w\n2.0 2.0 m\n{:.2} {:.2} l\nS\n2.0 {:.2} m\n{:.2} 2.0 l\nS\nQ\n",
+                            (sz / 8.0).clamp(1.0, 3.0),
+                            width - 2.0,
+                            height - 2.0,
+                            height - 2.0,
+                            width - 2.0,
+                        )
+                        .as_bytes(),
+                    ),
+                    _ => {
+                        let operand = Self::win_ansi_text_operand(text)?;
+                        let text_op = format!(
+                            "BT\n/Helv {:.2} Tf\n2.0 {:.2} Td\n{} Tj\nET\nQ\n",
+                            sz, y_pos, operand
+                        );
+                        content.extend_from_slice(text_op.as_bytes());
+                    }
+                }
                 Self::validate_appearance_size(content.len())?;
 
                 let mut stream_dict = Self::create_form_dict(width, height, content.len());
@@ -832,6 +858,20 @@ impl AnnotationGenerator {
             )));
         }
         Ok(())
+    }
+
+    fn win_ansi_text_operand(text: &str) -> PdfResult<String> {
+        let encoded = Font::standard_fallback("Helvetica").encode_text(text)?;
+        let mut operand = String::with_capacity(encoded.len().saturating_mul(2).saturating_add(2));
+        operand.push('<');
+        for byte in encoded {
+            use std::fmt::Write as _;
+            write!(&mut operand, "{byte:02X}").map_err(|_| {
+                PdfError::InvalidOperation("Failed to encode FreeText appearance".into())
+            })?;
+        }
+        operand.push('>');
+        Ok(operand)
     }
 
     fn append_ellipse(content: &mut Vec<u8>, cx: f64, cy: f64, rx: f64, ry: f64) {

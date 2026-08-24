@@ -30,10 +30,29 @@ describe("Phase 3A Creation Commands", () => {
   it("AddFreeTextCommand invokes starPdfDoc.addAnnotation with FreeText subtype", async () => {
     const mockExportIncremental = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
     const mockAddAnnotation = vi.fn().mockResolvedValue(42);
+    const mockGetAnnotations = vi
+      .fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          object_num: 42,
+          object_gen: 0,
+          page_index: 0,
+          subtype: "FreeText",
+          rect: [100, 200, 300, 218],
+          contents: "Patient Name: Jane Doe",
+          quad_points: [],
+          ink_list: [],
+          has_normal_appearance: true,
+          has_rollover_appearance: false,
+          has_down_appearance: false,
+        },
+      ]);
 
     const context = createMockContext({
       addAnnotation: mockAddAnnotation,
       exportIncremental: mockExportIncremental,
+      getAnnotations: mockGetAnnotations,
     });
 
     const cmd = new AddFreeTextCommand(0, 100, 200, "Patient Name: Jane Doe", 14, [0, 0, 0], 200, 18);
@@ -49,6 +68,7 @@ describe("Phase 3A Creation Commands", () => {
       color: [0, 0, 0],
     });
     expect(result.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(result.nextSelection?.id).toBe("annot-obj-42-0");
   });
 
   it("AddCheckMarkCommand adds checkmark annotation", async () => {
@@ -134,9 +154,16 @@ describe("Phase 3A Creation Commands", () => {
     const context = createMockContext({
       removeAnnotation: mockRemoveAnnotation,
       exportIncremental: mockExportIncremental,
+      getAnnotations: vi.fn().mockResolvedValue([
+        {
+          object_num: 42,
+          object_gen: 0,
+          page_index: 0,
+        },
+      ]),
     });
 
-    const cmd = new DeleteAnnotationCommand(0, "annot-42-0");
+    const cmd = new DeleteAnnotationCommand(0, "annot-obj-42-0");
     expect(cmd.id).toBe("annotation.delete");
 
     const result = await cmd.execute(context);

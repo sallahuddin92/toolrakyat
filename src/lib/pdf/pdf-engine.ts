@@ -189,7 +189,10 @@ export async function inspectPdfDocument(
           }
 
           annotations.push({
-            id: `annot-${i}-${j}`,
+            id:
+              objectNumber !== undefined
+                ? `annot-obj-${objectNumber}-${generationNumber ?? 0}`
+                : `annot-inline-${i}-${j}`,
             subtype: subtypeRaw,
             contents,
             rect,

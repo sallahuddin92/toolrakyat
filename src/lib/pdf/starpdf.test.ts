@@ -214,6 +214,51 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     await step3Doc.close();
   });
 
+  it("encodes WinAnsi FreeText exactly and refuses unsupported annotation scripts without mutation", async () => {
+    const bytes = await StarPdfClient.createMinimalPdf("FreeText script policy");
+    const doc = await StarPdfClient.open(bytes);
+    const supported = "Café di Kuala Lumpur";
+    await doc.addAnnotation(0, {
+      subtype: "FreeText",
+      rect: [50, 100, 280, 160],
+      contents: supported,
+      font_size: 14,
+      color: [0, 0, 0],
+    });
+    const output = await doc.exportIncremental();
+    const winAnsiAppearance = Buffer.from("436166E9206469204B75616C61204C756D707572");
+    expect(Buffer.from(output).includes(winAnsiAppearance)).toBe(true);
+    await doc.close();
+
+    const reopened = await StarPdfClient.open(output);
+    const [annotation] = await reopened.getAnnotations(0);
+    expect(annotation.contents).toBe(supported);
+    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
+      contents: "توليس جاوي",
+    });
+    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_COMPLEX_SCRIPT");
+    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
+      contents: "中文測試",
+    });
+    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_FONT_ENCODING");
+    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
+      contents: "Latin العربية 中文",
+    });
+    await expect(reopened.exportIncremental()).rejects.toThrow("UNSUPPORTED_COMPLEX_SCRIPT");
+    expect((await reopened.getAnnotations(0))[0].contents).toBe(supported);
+
+    const followUp = "Résumé accepted after refusal";
+    await reopened.updateAnnotation(annotation.object_num, annotation.object_gen, {
+      contents: followUp,
+    });
+    const followUpOutput = await reopened.exportIncremental();
+    await reopened.close();
+
+    const finalDoc = await StarPdfClient.open(followUpOutput);
+    expect((await finalDoc.getAnnotations(0))[0].contents).toBe(followUp);
+    await finalDoc.close();
+  });
+
   it("creates and reopens a Line annotation with supported endings and appearance status", async () => {
     const bytes = await StarPdfClient.createMinimalPdf("Line WASM Test");
     const doc = await StarPdfClient.open(bytes);

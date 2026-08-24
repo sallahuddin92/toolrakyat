@@ -159,6 +159,153 @@ fn test_update_and_remove_annotation() {
     assert_eq!(annots3.len(), 0);
 }
 
+fn normal_appearance_data(document: &mut PdfDocument<'_>, annot_ref: ObjectRef) -> Vec<u8> {
+    let annotation = document.store_mut().resolve(annot_ref).unwrap().clone();
+    let appearance = annotation.as_dict().unwrap().get("AP").cloned().unwrap();
+    let appearance = document.store_mut().resolve_object(&appearance).unwrap();
+    let normal = appearance.as_dict().unwrap().get("N").cloned().unwrap();
+    document
+        .store_mut()
+        .resolve_object(&normal)
+        .unwrap()
+        .as_stream()
+        .unwrap()
+        .data
+        .clone()
+}
+
+#[test]
+fn freetext_identity_content_appearance_and_geometry_lifecycle_is_exact() {
+    let original = MinimalWriter::create_minimal_pdf("FreeText identity lifecycle").unwrap();
+    let identical = |rect| PdfChange::AddAnnotation {
+        page_index: 0,
+        spec: AnnotationSpec::FreeText {
+            rect,
+            text: "Sallahuddin".to_string(),
+            font_size: Some(12.0),
+            color: Some(vec![0.0, 0.0, 0.0]),
+        },
+    };
+    let mut document = PdfDocument::from_bytes(&original).unwrap();
+    let created = document
+        .mutate_and_export(&[
+            identical([40.0, 40.0, 180.0, 70.0]),
+            identical([40.0, 90.0, 180.0, 120.0]),
+        ])
+        .unwrap();
+
+    let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+    let annotations = reopened.page_annotations(0).unwrap();
+    assert_eq!(annotations.len(), 2);
+    let untouched_ref = annotations[0].object_ref;
+    let target_ref = annotations[1].object_ref;
+    assert_ne!(untouched_ref, target_ref);
+
+    let edited_text = "Muhammad Sallahuddin Bin Hamzah";
+    let edited = reopened
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: target_ref,
+            update: AnnotationUpdateSpec {
+                contents: Some(edited_text.to_string()),
+                ..AnnotationUpdateSpec::default()
+            },
+        }])
+        .unwrap();
+    let mut edited_document = PdfDocument::from_bytes(&edited).unwrap();
+    let edited_annotations = edited_document.page_annotations(0).unwrap();
+    assert_eq!(edited_annotations[0].object_ref, untouched_ref);
+    assert_eq!(
+        edited_annotations[0].contents.as_deref(),
+        Some("Sallahuddin")
+    );
+    assert_eq!(edited_annotations[1].object_ref, target_ref);
+    assert_eq!(edited_annotations[1].contents.as_deref(), Some(edited_text));
+    assert_eq!(edited_annotations[1].rect, [40.0, 90.0, 180.0, 120.0]);
+    let appearance = normal_appearance_data(&mut edited_document, target_ref);
+    assert!(appearance
+        .windows(b"<4D7568616D6D61642053616C6C6168756464696E2042696E2048616D7A6168>".len())
+        .any(
+            |window| window == b"<4D7568616D6D61642053616C6C6168756464696E2042696E2048616D7A6168>"
+        ));
+
+    let second_edit = edited_document
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: target_ref,
+            update: AnnotationUpdateSpec {
+                contents: Some("Second exact edit".to_string()),
+                ..AnnotationUpdateSpec::default()
+            },
+        }])
+        .unwrap();
+    let mut second_document = PdfDocument::from_bytes(&second_edit).unwrap();
+    let moved = second_document
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: target_ref,
+            update: AnnotationUpdateSpec {
+                rect: Some([80.0, 130.0, 260.0, 180.0]),
+                ..AnnotationUpdateSpec::default()
+            },
+        }])
+        .unwrap();
+    let mut moved_document = PdfDocument::from_bytes(&moved).unwrap();
+    let moved_annotations = moved_document.page_annotations(0).unwrap();
+    let moved_target = moved_annotations
+        .iter()
+        .find(|annotation| annotation.object_ref == target_ref)
+        .unwrap();
+    assert_eq!(moved_target.contents.as_deref(), Some("Second exact edit"));
+    assert_eq!(moved_target.rect, [80.0, 130.0, 260.0, 180.0]);
+
+    let deleted = moved_document
+        .mutate_and_export(&[PdfChange::RemoveAnnotation {
+            page_index: 0,
+            annot_ref: target_ref,
+        }])
+        .unwrap();
+    let mut deleted_document = PdfDocument::from_bytes(&deleted).unwrap();
+    let remaining = deleted_document.page_annotations(0).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].object_ref, untouched_ref);
+    assert_eq!(remaining[0].contents.as_deref(), Some("Sallahuddin"));
+}
+
+#[test]
+fn freetext_winansi_is_exact_and_unsupported_scripts_refuse_truthfully() {
+    let original = MinimalWriter::create_minimal_pdf("FreeText coverage policy").unwrap();
+    let create = |text: &str| PdfChange::AddAnnotation {
+        page_index: 0,
+        spec: AnnotationSpec::FreeText {
+            rect: [40.0, 40.0, 260.0, 80.0],
+            text: text.to_string(),
+            font_size: Some(12.0),
+            color: Some(vec![0.0]),
+        },
+    };
+
+    let mut latin_document = PdfDocument::from_bytes(&original).unwrap();
+    let latin = latin_document
+        .mutate_and_export(&[create("Café di Kuala Lumpur")])
+        .unwrap();
+    let mut latin_reopened = PdfDocument::from_bytes(&latin).unwrap();
+    let latin_ref = latin_reopened.page_annotations(0).unwrap()[0].object_ref;
+    let appearance = normal_appearance_data(&mut latin_reopened, latin_ref);
+    assert!(appearance
+        .windows(b"<436166E9206469204B75616C61204C756D707572>".len())
+        .any(|window| window == b"<436166E9206469204B75616C61204C756D707572>"));
+
+    for unsupported in ["جاوي", "中文", "Latin جاوي 中文"] {
+        let mut document = PdfDocument::from_bytes(&original).unwrap();
+        let error = document.apply_mutation(&[create(unsupported)]).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("UNSUPPORTED_COMPLEX_SCRIPT")
+                || message.contains("UNSUPPORTED_FONT_ENCODING"),
+            "unexpected refusal for {unsupported:?}: {message}"
+        );
+        assert!(document.page_annotations(0).unwrap().is_empty());
+    }
+}
+
 #[test]
 fn test_atomic_transaction_refusal_on_invalid_change() {
     let pdf_bytes = MinimalWriter::create_minimal_pdf("Atomic Guard Test").unwrap();

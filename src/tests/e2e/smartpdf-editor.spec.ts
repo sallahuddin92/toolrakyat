@@ -1979,7 +1979,9 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
     // 1. Select FreeText annotation directly on canvas
-    const canvasAnnot = page.locator('[data-testid="canvas-annotation-annot-0-0"]');
+    const canvasAnnot = page
+      .locator('[data-testid^="canvas-annotation-annot-obj-"][title*="FreeText"]')
+      .first();
     await expect(canvasAnnot).toBeVisible({ timeout: 10000 });
     await canvasAnnot.dispatchEvent("click");
 
@@ -2003,6 +2005,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await canvasAnnot.dispatchEvent("click");
     await expect(contextInput).toBeVisible();
     await contextInput.fill("Updated FreeText Annotation Text");
+    await page.getByTestId("context-annotation-apply-btn").click();
 
     // 6. Verify document becomes dirty
     await expect(page.locator('[data-testid="document-modified-dot"]')).toBeVisible({ timeout: 5000 });
@@ -2024,7 +2027,9 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
     // 9. Verify reopened document contains expected annotation state on canvas
-    const reopenedCanvasAnnot = page.locator('[data-testid="canvas-annotation-annot-0-0"]');
+    const reopenedCanvasAnnot = page
+      .locator('[data-testid^="canvas-annotation-annot-obj-"][title*="FreeText"]')
+      .first();
     await expect(reopenedCanvasAnnot).toBeVisible({ timeout: 5000 });
     await reopenedCanvasAnnot.dispatchEvent("click");
 
@@ -2033,9 +2038,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(reopenedAnnotInput).toHaveValue("Updated FreeText Annotation Text");
 
     // Verify other markup annotations on canvas are present
-    await expect(page.locator('[data-testid="canvas-annotation-annot-0-1"]')).toBeVisible();
-    await expect(page.locator('[data-testid="canvas-annotation-annot-0-2"]')).toBeVisible();
-    await expect(page.locator('[data-testid="canvas-annotation-annot-0-3"]')).toBeVisible();
+    await expect(page.locator('[data-testid^="canvas-annotation-annot-obj-"]')).toHaveCount(4);
   });
 
   test("v0.20 Workflow M: Session Integrity — Multi-Domain Mutation with Undo/Redo Roundtrip", async ({
@@ -2874,16 +2877,30 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await inlineInput.fill("Patient Record A");
     await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
     await expect(inlineInput).not.toBeVisible();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue("Patient Record A", {
+      timeout: 10_000,
+    });
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(1);
 
     // 3. Add Check B
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible();
     await page.locator('[data-testid="fill-sign-tool-check-btn"]').click();
     await overlay.click({ position: { x: 100, y: 150 } });
+    await page.locator('[data-testid="toolbar-mode-select-btn"]').click();
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(2);
 
     // 4. Add Cross C
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible();
     await page.locator('[data-testid="fill-sign-tool-cross-btn"]').click();
     await overlay.click({ position: { x: 100, y: 200 } });
+    await page.locator('[data-testid="toolbar-mode-select-btn"]').click();
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(3);
 
     // 5. Add FreeText D
+    await page.locator('[data-testid="toolbar-mode-fill-sign-btn"]').click();
+    await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).toBeVisible();
     const textToolBtn = page.locator('[data-testid="fill-sign-tool-text-btn"]');
     await textToolBtn.click();
     await expect(textToolBtn).toHaveClass(/bg-sky-600/);
@@ -2891,13 +2908,18 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(inlineInput).toBeVisible({ timeout: 5000 });
     await inlineInput.fill("Patient Record D");
     await page.locator('[data-testid="inline-text-placement-commit-btn"]').click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue("Patient Record D", {
+      timeout: 10_000,
+    });
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(4);
 
-    // 6. Exit to Select mode
-    await page.locator('[data-testid="fill-sign-exit-btn"]').click();
+    // 6. FreeText creation returns to Select mode with the new annotation selected.
     await expect(page.locator('[data-testid="fill-sign-subtoolbar"]')).not.toBeVisible();
 
-    // 7-11. Repeatedly Edit Annotation A
-    const annotA = page.locator('[data-testid^="canvas-annotation-"]').first();
+    // 7-11. Repeatedly revise the local draft, then commit Annotation A exactly once.
+    const annotA = page
+      .locator('[data-testid^="canvas-annotation-"][title*="Patient Record A"]')
+      .first();
     await expect(annotA).toBeVisible({ timeout: 5000 });
 
     await annotA.dispatchEvent("click");
@@ -2909,6 +2931,10 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await contextInput.fill("Patient Record A - Edit 3");
     await contextInput.fill("Patient Record A - Edit 4");
     await contextInput.fill("Patient Record A - Final Edit");
+    await page.getByTestId("context-annotation-apply-btn").click();
+    await expect(
+      page.locator('[data-testid^="canvas-annotation-"][title*="Patient Record A - Final Edit"]'),
+    ).toBeVisible({ timeout: 10_000 });
 
     // 12. Deselect with Escape
     await page.keyboard.press("Escape");
@@ -2918,9 +2944,21 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const undoBtn = page.locator('[data-testid="toolbar-undo-btn"]');
     const redoBtn = page.locator('[data-testid="toolbar-redo-btn"]');
     await undoBtn.click();
+    await expect(
+      page.locator(
+        '[data-testid^="canvas-annotation-"][title="Markup annotation (FreeText): Patient Record A"]',
+      ),
+    ).toBeVisible({ timeout: 10_000 });
     await undoBtn.click();
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(3);
     await redoBtn.click();
+    await expect(page.locator('[data-testid^="canvas-annotation-"]')).toHaveCount(4);
     await redoBtn.click();
+    await expect(
+      page.locator(
+        '[data-testid^="canvas-annotation-"][title="Markup annotation (FreeText): Patient Record A - Final Edit"]',
+      ),
+    ).toBeVisible({ timeout: 10_000 });
 
     // 17-20. Export Editable (Round 1)
     const downloadPromise1 = page.waitForEvent("download");
@@ -2939,12 +2977,20 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
     // Select and re-edit annotation on round 2
-    const round2Annot = page.locator('[data-testid^="canvas-annotation-"]').first();
+    const round2Annot = page
+      .locator('[data-testid^="canvas-annotation-"][title*="Patient Record A - Final Edit"]')
+      .first();
     await expect(round2Annot).toBeVisible({ timeout: 10000 });
     await round2Annot.dispatchEvent("click");
 
     await expect(contextInput).toBeVisible({ timeout: 5000 });
     await contextInput.fill("Patient Record A - Round 2 Reopened & Edited");
+    await page.getByTestId("context-annotation-apply-btn").click();
+    await expect(
+      page.locator(
+        '[data-testid^="canvas-annotation-"][title*="Patient Record A - Round 2 Reopened & Edited"]',
+      ),
+    ).toBeVisible({ timeout: 10_000 });
 
     // Export Round 2
     const downloadPromise2 = page.waitForEvent("download");
@@ -2962,7 +3008,11 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await uploadPdfBytes(page, "torture-round3.pdf", exportedBytes2);
     await expect(workspace).toBeVisible({ timeout: 10000 });
 
-    const round3Annot = page.locator('[data-testid^="canvas-annotation-"]').first();
+    const round3Annot = page
+      .locator(
+        '[data-testid^="canvas-annotation-"][title*="Patient Record A - Round 2 Reopened & Edited"]',
+      )
+      .first();
     await expect(round3Annot).toBeVisible({ timeout: 10000 });
     await round3Annot.dispatchEvent("click");
 
@@ -3151,7 +3201,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const deleteBtn = page.locator('[data-testid="context-annotation-delete-btn"]');
     await expect(deleteBtn).toBeVisible({ timeout: 5000 });
 
-    // 5. Test Clear button
+    // 5. Clear only the local draft; committed annotation contents remain unchanged.
     await clearBtn.click();
     await expect(annotInput).toHaveValue("");
 
@@ -3673,6 +3723,136 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
 
     // 5. Verify Unsaved changes state
     await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("FreeText create, edit, move/resize, undo/redo, export/reopen, and edit-again lifecycle", async ({
+    page,
+  }) => {
+    const bytes = fs.readFileSync(path.resolve(process.cwd(), "test-assets/edit-test.pdf"));
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "freetext-lifecycle.pdf", bytes);
+
+    await page.getByTestId("toolbar-mode-fill-sign-btn").click();
+    await page.getByTestId("fill-sign-tool-text-btn").click();
+    const overlay = page.getByTestId("pdf-interactive-overlay");
+    await overlay.click({ position: { x: 170, y: 170 } });
+    await page.getByTestId("inline-text-placement-input").fill("Sallahuddin");
+    await page.getByTestId("inline-text-placement-commit-btn").click();
+
+    const input = page.getByTestId("context-annotation-input");
+    await expect(input).toBeVisible({ timeout: 10_000 });
+    await expect(input).toHaveValue("Sallahuddin");
+    const created = page
+      .locator('[data-testid^="canvas-annotation-annot-obj-"][title*="Sallahuddin"]')
+      .first();
+    await expect(created).toBeVisible({ timeout: 10_000 });
+    const stableTestId = await created.getAttribute("data-testid");
+    expect(stableTestId).toMatch(/^canvas-annotation-annot-obj-\d+-\d+$/);
+
+    const firstEdit = "Muhammad Sallahuddin Bin Hamzah";
+    await input.fill(firstEdit);
+    const draftDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const draftDownload = await draftDownloadPromise;
+    const draftPath = await draftDownload.path();
+    expect(draftPath).not.toBeNull();
+    const draftOutput = fs.readFileSync(draftPath!);
+    expect(draftOutput.includes(Buffer.from(firstEdit))).toBe(false);
+    const originalAppearanceHex = `<${Buffer.from("Sallahuddin", "utf8")
+      .toString("hex")
+      .toUpperCase()}>`;
+    expect(draftOutput.includes(Buffer.from(originalAppearanceHex))).toBe(true);
+    await page.getByTestId("context-annotation-apply-btn").click();
+    await expect(input).toHaveValue(firstEdit);
+    await expect(page.locator(`[data-testid="${stableTestId}"][title*="${firstEdit}"]`)).toBeVisible();
+    await expect(page.getByTestId("document-modified-dot")).toBeVisible();
+
+    await page.getByTestId("toolbar-undo-btn").click();
+    const originalAfterUndo = page.locator(
+      `[data-testid="${stableTestId}"][title*="Sallahuddin"]`,
+    );
+    await expect(originalAfterUndo).toBeVisible({ timeout: 10_000 });
+    await originalAfterUndo.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue("Sallahuddin");
+
+    await page.getByTestId("toolbar-redo-btn").click();
+    const editedAfterRedo = page.locator(
+      `[data-testid="${stableTestId}"][title*="${firstEdit}"]`,
+    );
+    await expect(editedAfterRedo).toBeVisible({ timeout: 10_000 });
+    await editedAfterRedo.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue(firstEdit);
+
+    const moveHandle = page.getByTestId("direct-manipulation-move-handle");
+    const moveBox = await moveHandle.boundingBox();
+    expect(moveBox).not.toBeNull();
+    await page.mouse.move(moveBox!.x + moveBox!.width / 2, moveBox!.y + moveBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(moveBox!.x + moveBox!.width / 2 + 24, moveBox!.y + moveBox!.height / 2 + 18, {
+      steps: 5,
+    });
+    await page.mouse.up();
+    await expect(editedAfterRedo).toBeVisible({ timeout: 10_000 });
+    await editedAfterRedo.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue(firstEdit);
+
+    const resizeHandle = page.getByTestId("direct-manipulation-handle-se");
+    const resizeBox = await resizeHandle.boundingBox();
+    expect(resizeBox).not.toBeNull();
+    await page.mouse.move(resizeBox!.x + resizeBox!.width / 2, resizeBox!.y + resizeBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(resizeBox!.x + resizeBox!.width / 2 + 35, resizeBox!.y + resizeBox!.height / 2 + 12, {
+      steps: 5,
+    });
+    await page.mouse.up();
+    await expect(editedAfterRedo).toBeVisible({ timeout: 10_000 });
+
+    const firstDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const firstDownload = await firstDownloadPromise;
+    const firstPath = await firstDownload.path();
+    expect(firstPath).not.toBeNull();
+    const firstOutput = fs.readFileSync(firstPath!);
+    const appearanceHex = `<${Buffer.from(firstEdit, "utf8").toString("hex").toUpperCase()}>`;
+    expect(firstOutput.includes(Buffer.from(appearanceHex))).toBe(true);
+
+    const reopenedCanvas = await uploadPdfBytes(page, "freetext-lifecycle-reopened.pdf", firstOutput);
+    expect((await reopenedCanvas.screenshot()).byteLength).toBeGreaterThan(1_000);
+    const reopened = page.locator(`[data-testid="${stableTestId}"][title*="${firstEdit}"]`);
+    await expect(reopened).toBeVisible({ timeout: 10_000 });
+    await reopened.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue(firstEdit);
+
+    const secondEdit = "Second lifecycle edit";
+    await page.getByTestId("context-annotation-input").fill(secondEdit);
+    await page.getByTestId("context-annotation-apply-btn").click();
+    await expect(page.locator(`[data-testid="${stableTestId}"][title*="${secondEdit}"]`)).toBeVisible();
+
+    const secondDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const secondDownload = await secondDownloadPromise;
+    const secondPath = await secondDownload.path();
+    expect(secondPath).not.toBeNull();
+    const secondOutput = fs.readFileSync(secondPath!);
+    await uploadPdfBytes(page, "freetext-lifecycle-second-reopen.pdf", secondOutput);
+    const secondReopened = page.locator(
+      `[data-testid="${stableTestId}"][title*="${secondEdit}"]`,
+    );
+    await expect(secondReopened).toBeVisible({ timeout: 10_000 });
+    await secondReopened.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue(secondEdit);
+
+    const finalInput = page.getByTestId("context-annotation-input");
+    await finalInput.fill("discard this draft");
+    await page.getByTestId("context-annotation-clear-btn").click();
+    await expect(finalInput).toHaveValue("");
+    await finalInput.fill("escape this draft");
+    await finalInput.press("Escape");
+    await expect(finalInput).toBeHidden();
+    await secondReopened.click();
+    await expect(page.getByTestId("context-annotation-input")).toHaveValue(secondEdit);
+    await page.getByTestId("context-annotation-delete-btn").click();
+    await expect(page.locator(`[data-testid="${stableTestId}"]`)).toHaveCount(0);
   });
 
   test("v0.22 Phase 5: AcroForm Direct Manipulation (Text, Checkbox, Dropdown, Clear & Undo/Redo Roundtrip)", async ({
@@ -4230,12 +4410,3 @@ test.describe("SmartPDF malformed xref recovery states", () => {
     await expect(page.getByTestId("search-results-count")).toHaveText("1/1");
   });
 });
-
-
-
-
-
-
-
-
-

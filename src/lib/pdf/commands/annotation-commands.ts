@@ -1,13 +1,42 @@
 import type { SmartPdfCommand, SmartPdfCommandContext, SmartPdfCommandResult } from "./types";
-import type { StarPdfUpdateAnnotationInput } from "../starpdf-types";
+import type { PdfMarkupAnnotation } from "../pdf-types";
+import type { StarPdfAnnotation, StarPdfUpdateAnnotationInput } from "../starpdf-types";
 
 interface ExtendedStarPdfDoc {
-  getAnnotations?: (pageIndex: number) => Promise<Array<{ object_num: number; object_gen: number; contents?: string }>>;
+  getAnnotations?: (pageIndex: number) => Promise<StarPdfAnnotation[]>;
   updateAnnotation?: (
     objectNum: number,
     objectGen: number,
     input: StarPdfUpdateAnnotationInput,
   ) => Promise<void>;
+}
+
+const canonicalAnnotationId = (objectNum: number, objectGen: number) =>
+  `annot-obj-${objectNum}-${objectGen}`;
+
+function annotationSelection(annotation: StarPdfAnnotation): NonNullable<SmartPdfCommandResult["nextSelection"]> {
+  const [x1, y1, x2, y2] = annotation.rect;
+  const data: PdfMarkupAnnotation = {
+    id: canonicalAnnotationId(annotation.object_num, annotation.object_gen),
+    subtype: annotation.subtype,
+    contents: annotation.contents ?? "",
+    rect: {
+      x: Math.min(x1, x2),
+      y: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+    },
+    pageIndex: annotation.page_index,
+    objectNumber: annotation.object_num,
+    generationNumber: annotation.object_gen,
+  };
+  return {
+    type: "annotation",
+    id: data.id,
+    pageIndex: data.pageIndex,
+    data,
+    pdfRect: { ...data.rect },
+  };
 }
 
 export class AddFreeTextCommand implements SmartPdfCommand {
@@ -43,6 +72,11 @@ export class AddFreeTextCommand implements SmartPdfCommand {
       this.y + boxHeight,
     ];
 
+    const before = await starPdfDoc.getAnnotations(this.pageIndex);
+    const beforeIdentities = new Set(
+      before.map((annotation) => canonicalAnnotationId(annotation.object_num, annotation.object_gen)),
+    );
+
     await starPdfDoc.addAnnotation(this.pageIndex, {
       subtype: "FreeText",
       rect,
@@ -52,9 +86,24 @@ export class AddFreeTextCommand implements SmartPdfCommand {
     });
 
     const updatedBytes = await starPdfDoc.exportIncremental();
+    const created = (await starPdfDoc.getAnnotations(this.pageIndex)).filter(
+      (annotation) =>
+        !beforeIdentities.has(canonicalAnnotationId(annotation.object_num, annotation.object_gen)),
+    );
+    if (created.length !== 1) {
+      throw new Error(
+        `ANNOTATION_CREATE_IDENTITY_UNRESOLVED: expected one new annotation, found ${created.length}`,
+      );
+    }
+    const createdSelection = annotationSelection(created[0]);
 
     return {
       bytes: updatedBytes,
+      nextSelection: createdSelection,
+      annotationValues: {
+        ...context.annotationValues,
+        [createdSelection.id]: this.text,
+      },
       message: `Text "${this.text}" added.`,
     };
   }
@@ -286,66 +335,42 @@ export class AddInkAnnotationCommand implements SmartPdfCommand {
   }
 }
 
-async function resolveAnnotationTarget(
+export async function resolveAnnotationTarget(
   annotId: string,
   pageIndex: number,
   starPdfDoc?: unknown,
   inspectionResult?: SmartPdfCommandContext["inspectionResult"],
-): Promise<{ targetNum?: number; targetGen: number }> {
-  let targetNum: number | undefined;
-  let targetGen = 0;
+): Promise<{ targetNum: number; targetGen: number }> {
+  const inspectionMatches = (inspectionResult?.annotations ?? []).filter(
+    (annotation) => annotation.id === annotId && annotation.pageIndex === pageIndex,
+  );
+  if (inspectionMatches.length > 1) {
+    throw new Error(`ANNOTATION_TARGET_AMBIGUOUS: multiple annotations have identity ${annotId}`);
+  }
 
-  if (inspectionResult) {
-    const match = inspectionResult.annotations.find(
-      (a) =>
-        a.id === annotId ||
-        (a.objectNumber !== undefined &&
-          `annot-obj-${a.objectNumber}-${a.generationNumber ?? 0}` === annotId),
+  let targetNum = inspectionMatches[0]?.objectNumber;
+  let targetGen = inspectionMatches[0]?.generationNumber ?? 0;
+  if (targetNum === undefined) {
+    const objectMatch = /^annot-obj-(\d+)-(\d+)$/.exec(annotId);
+    if (!objectMatch) {
+      throw new Error(
+        `ANNOTATION_TARGET_UNRESOLVED: ${annotId} has no authoritative indirect object identity`,
+      );
+    }
+    targetNum = Number.parseInt(objectMatch[1], 10);
+    targetGen = Number.parseInt(objectMatch[2], 10);
+  }
+
+  const extendedDoc = starPdfDoc as ExtendedStarPdfDoc | undefined;
+  if (typeof extendedDoc?.getAnnotations === "function") {
+    const matches = (await extendedDoc.getAnnotations(pageIndex)).filter(
+      (annotation) =>
+        annotation.object_num === targetNum && annotation.object_gen === targetGen,
     );
-    if (match && match.objectNumber !== undefined) {
-      return { targetNum: match.objectNumber, targetGen: match.generationNumber ?? 0 };
+    if (matches.length !== 1) {
+      const code = matches.length > 1 ? "ANNOTATION_TARGET_AMBIGUOUS" : "ANNOTATION_TARGET_UNRESOLVED";
+      throw new Error(`${code}: ${annotId} is not uniquely associated with page ${pageIndex + 1}`);
     }
-  }
-
-  const objMatch = annotId.match(/annot-obj-(\d+)-(\d+)/);
-  if (objMatch) {
-    return { targetNum: parseInt(objMatch[1], 10), targetGen: parseInt(objMatch[2], 10) };
-  }
-
-  if (starPdfDoc) {
-    const extendedDoc = starPdfDoc as unknown as ExtendedStarPdfDoc;
-    if (typeof extendedDoc.getAnnotations === "function") {
-      try {
-        const annots = await extendedDoc.getAnnotations(pageIndex);
-        const indexMatch = annotId.match(/annot-\d+-(\d+)/);
-        if (indexMatch) {
-          const idx = parseInt(indexMatch[1], 10);
-          if (annots[idx]) {
-            return { targetNum: annots[idx].object_num, targetGen: annots[idx].object_gen };
-          }
-        }
-        const match = annots.find(
-          (a) =>
-            `${a.object_num}` === annotId ||
-            `annot-${pageIndex}-${a.object_num}` === annotId ||
-            a.contents === annotId,
-        );
-        if (match) {
-          return { targetNum: match.object_num, targetGen: match.object_gen };
-        }
-        if (annots.length > 0) {
-          return { targetNum: annots[0].object_num, targetGen: annots[0].object_gen };
-        }
-      } catch {
-        // Fallback below
-      }
-    }
-  }
-
-  const digits = annotId.match(/\d+/g);
-  if (digits && digits.length > 0) {
-    targetNum = parseInt(digits[digits.length - (digits.length > 1 ? 2 : 1)], 10);
-    targetGen = digits.length > 1 ? parseInt(digits[digits.length - 1], 10) : 0;
   }
 
   return { targetNum, targetGen };
@@ -383,9 +408,10 @@ export class DeleteAnnotationCommand implements SmartPdfCommand {
       targetGen = resolved.targetGen;
     }
 
-    if (targetNum !== undefined) {
-      await starPdfDoc.removeAnnotation(this.pageIndex, targetNum, targetGen);
+    if (targetNum === undefined) {
+      throw new Error("ANNOTATION_TARGET_UNRESOLVED: delete requires an indirect object identity");
     }
+    await starPdfDoc.removeAnnotation(this.pageIndex, targetNum, targetGen);
 
     const updatedBytes = await starPdfDoc.exportIncremental();
 
@@ -421,17 +447,11 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
       inspectionResult,
     );
 
-    if (targetNum !== undefined) {
-      await starPdfDoc.updateAnnotation(targetNum, targetGen, this.properties);
-      const updatedBytes = await starPdfDoc.exportIncremental();
-      return {
-        bytes: updatedBytes,
-        message: "Annotation styled.",
-      };
-    }
-
+    await starPdfDoc.updateAnnotation(targetNum, targetGen, this.properties);
+    const updatedBytes = await starPdfDoc.exportIncremental();
     return {
-      message: "Annotation updated.",
+      bytes: updatedBytes,
+      message: "Annotation styled.",
     };
   }
 }
@@ -449,6 +469,9 @@ export class UpdateAnnotationCommand implements SmartPdfCommand {
 
   async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
     const { starPdfDoc, inspectionResult } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
 
     const { targetNum, targetGen } = await resolveAnnotationTarget(
       this.annotId,
@@ -457,24 +480,22 @@ export class UpdateAnnotationCommand implements SmartPdfCommand {
       inspectionResult,
     );
 
-    if (starPdfDoc && targetNum !== undefined) {
-      await starPdfDoc.updateAnnotation(targetNum, targetGen, { contents: this.value });
-      const updatedBytes = await starPdfDoc.exportIncremental();
-      return {
-        bytes: updatedBytes,
-        annotationValues: {
-          ...context.annotationValues,
-          [this.annotId]: this.value,
-        },
-        message: `Annotation updated.`,
-      };
-    }
-
+    await starPdfDoc.updateAnnotation(targetNum, targetGen, { contents: this.value });
+    const updatedBytes = await starPdfDoc.exportIncremental();
+    const currentSelection = context.selection;
     return {
+      bytes: updatedBytes,
       annotationValues: {
         ...context.annotationValues,
         [this.annotId]: this.value,
       },
+      nextSelection:
+        currentSelection?.type === "annotation" && currentSelection.id === this.annotId
+          ? {
+              ...currentSelection,
+              data: { ...currentSelection.data, contents: this.value },
+            }
+          : undefined,
       message: `Annotation updated.`,
     };
   }
@@ -504,17 +525,11 @@ export class UpdateAnnotationRectCommand implements SmartPdfCommand {
       inspectionResult,
     );
 
-    if (targetNum !== undefined) {
-      await starPdfDoc.updateAnnotation(targetNum, targetGen, { rect: this.rect });
-      const updatedBytes = await starPdfDoc.exportIncremental();
-      return {
-        bytes: updatedBytes,
-        message: "Annotation moved/resized.",
-      };
-    }
-
+    await starPdfDoc.updateAnnotation(targetNum, targetGen, { rect: this.rect });
+    const updatedBytes = await starPdfDoc.exportIncremental();
     return {
-      message: "Annotation position updated.",
+      bytes: updatedBytes,
+      message: "Annotation moved/resized.",
     };
   }
 }

@@ -147,10 +147,22 @@ impl DocumentRegistry {
             .ok_or_else(|| PdfError::InvalidSyntax(format!("Invalid document handle {handle}")))?;
 
         let mut doc = PdfDocument::from_bytes(&entry.raw_bytes)?;
-        let plan = doc.apply_mutation(&entry.pending_changes)?;
+        let plan = match doc.apply_mutation(&entry.pending_changes) {
+            Ok(plan) => plan,
+            Err(error) => {
+                entry.pending_changes.clear();
+                return Err(error);
+            }
+        };
         let status = plan.appearance_status;
         let mapping_quality = plan.glyph_mapping_quality;
-        let new_bytes = doc.export_incremental(&plan)?;
+        let new_bytes = match doc.export_incremental(&plan) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                entry.pending_changes.clear();
+                return Err(error);
+            }
+        };
 
         // Update handle state so subsequent mutations build incrementally
         entry.raw_bytes.clone_from(&new_bytes);

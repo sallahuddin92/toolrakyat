@@ -60,7 +60,7 @@ fn annotation_visual_update_replaces_stale_ap_atomically() {
         .get(&after_ap)
         .and_then(PdfObject::as_stream)
         .unwrap();
-    assert!(String::from_utf8_lossy(&stream.data).contains("After"));
+    assert!(String::from_utf8_lossy(&stream.data).contains("<4166746572> Tj"));
 
     let output = reopened.export_incremental(&plan).unwrap();
     assert!(output.starts_with(&added));

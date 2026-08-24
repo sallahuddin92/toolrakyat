@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createInitialHistoryState,
   pushHistorySnapshot,
@@ -132,11 +132,66 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
     });
 
     it("UpdateAnnotationCommand modifies annotation dictionary in context", async () => {
-      const cmd = new UpdateAnnotationCommand("annot-1", "Updated Note");
+      const updateAnnotation = vi.fn().mockResolvedValue(true);
+      const exportIncremental = vi.fn().mockResolvedValue(new Uint8Array([4, 5, 6]));
+      const commandContext = {
+        ...baseContext,
+        annotationValues: { "annot-obj-12-0": "Note 1" },
+        starPdfDoc: {
+          getAnnotations: vi.fn().mockResolvedValue([
+            { object_num: 12, object_gen: 0, page_index: 0 },
+          ]),
+          updateAnnotation,
+          exportIncremental,
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+      const cmd = new UpdateAnnotationCommand("annot-obj-12-0", "Updated Note");
       expect(cmd.isMutating).toBe(true);
 
-      const result = await cmd.execute(baseContext);
-      expect(result.annotationValues).toEqual({ "annot-1": "Updated Note" });
+      const result = await cmd.execute(commandContext);
+      expect(updateAnnotation).toHaveBeenCalledWith(12, 0, { contents: "Updated Note" });
+      expect(result.bytes).toEqual(new Uint8Array([4, 5, 6]));
+      expect(result.annotationValues).toEqual({ "annot-obj-12-0": "Updated Note" });
+    });
+
+    it("targets duplicate-content annotations only by exact indirect identity", async () => {
+      const updateAnnotation = vi.fn().mockResolvedValue(true);
+      const context = {
+        ...baseContext,
+        starPdfDoc: {
+          getAnnotations: vi.fn().mockResolvedValue([
+            { object_num: 12, object_gen: 0, page_index: 0, contents: "Same" },
+            { object_num: 19, object_gen: 2, page_index: 0, contents: "Same" },
+          ]),
+          updateAnnotation,
+          exportIncremental: vi.fn().mockResolvedValue(new Uint8Array([7, 8, 9])),
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+
+      await new UpdateAnnotationCommand("annot-obj-19-2", "Only this one", 0).execute(context);
+      expect(updateAnnotation).toHaveBeenCalledTimes(1);
+      expect(updateAnnotation).toHaveBeenCalledWith(19, 2, { contents: "Only this one" });
+    });
+
+    it("refuses unresolved annotation identity without mutating or exporting", async () => {
+      const updateAnnotation = vi.fn();
+      const exportIncremental = vi.fn();
+      const context = {
+        ...baseContext,
+        starPdfDoc: {
+          getAnnotations: vi.fn().mockResolvedValue([
+            { object_num: 12, object_gen: 0, page_index: 0, contents: "Same" },
+          ]),
+          updateAnnotation,
+          exportIncremental,
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+
+      await expect(
+        new UpdateAnnotationCommand("annot-inline-0-0", "Wrong target", 0).execute(context),
+      ).rejects.toThrow("ANNOTATION_TARGET_UNRESOLVED");
+      expect(updateAnnotation).not.toHaveBeenCalled();
+      expect(exportIncremental).not.toHaveBeenCalled();
     });
 
     it("ReplaceTextCommand and DeleteTextCommand declare mutating flag and throw when starPdfDoc is absent", async () => {
@@ -503,7 +558,4 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
   });
 
 });
-
-
-
 

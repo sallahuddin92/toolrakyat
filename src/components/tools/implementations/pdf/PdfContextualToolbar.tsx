@@ -42,7 +42,7 @@ interface PdfContextualToolbarProps {
   onDeleteGraphic: (graphicId: string) => Promise<void>;
   onFormFieldChange: (fieldName: string, value: string | boolean | string[]) => void;
   formFieldValue?: string | boolean | string[];
-  onAnnotationChange?: (annotId: string, value: string) => void;
+  onAnnotationChange?: (annotId: string, value: string) => Promise<void>;
   annotationValue?: string;
   onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
@@ -417,19 +417,28 @@ function AnnotationControls({
 }: {
   annot: PdfMarkupAnnotation;
   annotationValue?: string;
-  onAnnotationChange?: (annotId: string, value: string) => void;
+  onAnnotationChange?: (annotId: string, value: string) => Promise<void>;
   onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
   onDeselect?: () => void;
 }) {
-  const [localText, setLocalText] = useState<string | null>(null);
+  const sourceText = annotationValue ?? annot.contents ?? "";
+  const [localText, setLocalText] = useState(sourceText);
   const [strokeColor, setStrokeColor] = useState("#000000");
   const [fillColor, setFillColor] = useState("#3b82f6");
   const [borderWidth, setBorderWidth] = useState(1.5);
   const [highlightColor, setHighlightColor] = useState("#ffeb3b");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const displayVal = localText !== null ? localText : (annotationValue ?? annot.contents ?? "");
+  const commitContents = async () => {
+    if (!onAnnotationChange || localText === sourceText || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onAnnotationChange(annot.id, localText);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const hexToRgb = (hex: string): [number, number, number] => {
     const clean = hex.replace("#", "");
@@ -654,14 +663,17 @@ function AnnotationControls({
       </Badge>
       <Input
         type="text"
-        value={displayVal}
-        onChange={(e) => {
-          setLocalText(e.target.value);
-          onAnnotationChange?.(annot.id, e.target.value);
-        }}
+        value={localText}
+        onChange={(e) => setLocalText(e.target.value)}
         onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commitContents();
+          }
           if (e.key === "Escape") {
+            e.preventDefault();
             e.stopPropagation();
+            setLocalText(sourceText);
             onDeselect?.();
           }
         }}
@@ -672,12 +684,23 @@ function AnnotationControls({
       />
       <Button
         type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => void commitContents()}
+        disabled={isSubmitting || localText === sourceText}
+        className="h-8 text-xs px-2 shrink-0"
+        data-testid="context-annotation-apply-btn"
+      >
+        Apply
+      </Button>
+      <Button
+        type="button"
         variant="ghost"
         size="sm"
         onClick={() => {
           setLocalText("");
-          onAnnotationChange?.(annot.id, "");
         }}
+        disabled={isSubmitting || localText.length === 0}
         className="h-8 text-xs px-2 text-slate-500 hover:text-slate-700 shrink-0"
         title="Clear annotation contents"
         data-testid="context-annotation-clear-btn"
@@ -1052,7 +1075,7 @@ export function PdfContextualToolbar({
       {/* MARKUP ANNOTATION SELECTION CONTROLS */}
       {selection.type === "annotation" && (
         <AnnotationControls
-          key={selection.id}
+          key={`${selection.id}:${annotationValue ?? (selection.data as PdfMarkupAnnotation).contents ?? ""}`}
           annot={selection.data as PdfMarkupAnnotation}
           annotationValue={annotationValue}
           onAnnotationChange={onAnnotationChange}

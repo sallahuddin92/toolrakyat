@@ -50,6 +50,7 @@ import {
   AddCrossMarkCommand,
   AddInkAnnotationCommand,
   DeleteAnnotationCommand,
+  UpdateAnnotationCommand,
   UpdateAnnotationPropertiesCommand,
   UpdateAnnotationRectCommand,
   MovePageCommand,
@@ -331,7 +332,7 @@ export function SmartPdfEditor() {
         );
         return;
       }
-      const isLightweight = command.id === "form.set_value" || command.id === "annotation.update";
+      const isLightweight = command.id === "form.set_value";
 
 
       if (!isLightweight) {
@@ -822,8 +823,9 @@ export function SmartPdfEditor() {
 
   // Creation & Placement Handlers
   const handlePlaceFreeText = useCallback(
-    (pageIndex: number, x: number, y: number, text: string) => {
-      void executeCommand(new AddFreeTextCommand(pageIndex, x, y, text, 12, [0, 0, 0]));
+    async (pageIndex: number, x: number, y: number, text: string) => {
+      await executeCommand(new AddFreeTextCommand(pageIndex, x, y, text, 12, [0, 0, 0]));
+      setEditorMode("SELECT");
     },
     [executeCommand],
   );
@@ -968,16 +970,10 @@ export function SmartPdfEditor() {
   );
 
   const handleAnnotationChange = useCallback(
-    (annotId: string, value: string) => {
-      setAnnotationValues((prev) => ({ ...prev, [annotId]: value }));
-      setIsModified(true);
-      if (sourceBytes) {
-        setHistoryState((prev) =>
-          pushHistorySnapshot(prev, sourceBytes, "Update annotation"),
-        );
-      }
+    async (annotId: string, value: string) => {
+      await executeCommand(new UpdateAnnotationCommand(annotId, value, currentPage - 1));
     },
-    [sourceBytes],
+    [currentPage, executeCommand],
   );
 
   const handleUpdateAnnotationProperties = useCallback(
