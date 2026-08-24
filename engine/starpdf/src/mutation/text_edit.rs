@@ -265,6 +265,124 @@ impl ContentStreamEditor {
         Ok(Self::serialize_instructions(&instructions))
     }
 
+    /// Replaces targeted text bytes with font switching if a fallback or compatible font is used.
+    pub fn replace_multiple_in_stream_with_font_switch(
+        stream_bytes: &[u8],
+        edits: &[(&TextEditTarget, &[u8])],
+        compensation: Option<f64>,
+        font_switch: Option<(&str, f64, &str)>, // (new_font_name, font_size, original_font_name)
+    ) -> PdfResult<Vec<u8>> {
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let mut instructions = parser.parse_instructions()?;
+
+        if let Some((new_font, size, orig_font)) = font_switch {
+            if let Some((first_target, _)) = edits.first() {
+                let first_idx = first_target.instruction_index;
+                let last_idx = edits.last().map_or(first_idx, |(t, _)| t.instruction_index);
+
+                // Insert new font switch before first target instruction
+                let tf_new = ContentInstruction::new(
+                    vec![
+                        ContentOperand::Name(new_font.trim_start_matches('/').to_string()),
+                        ContentOperand::Real(size),
+                    ],
+                    ContentOperator::Tf,
+                );
+                instructions.insert(first_idx, tf_new);
+
+                // Adjust instruction indices in edits due to insertion
+                let mut adjusted_edits = Vec::with_capacity(edits.len());
+                for (t, bytes) in edits {
+                    let mut adj_t = (*t).clone();
+                    adj_t.instruction_index += 1;
+                    adjusted_edits.push((adj_t, *bytes));
+                }
+
+                // Check if downstream text instructions in the same BT...ET block exist
+                let mut has_downstream_text = false;
+                for instr in &instructions[(last_idx + 2)..] {
+                    match instr.operator {
+                        ContentOperator::Et | ContentOperator::Bt => break,
+                        ContentOperator::Tj
+                        | ContentOperator::TJ
+                        | ContentOperator::Quote
+                        | ContentOperator::DoubleQuote => {
+                            has_downstream_text = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if has_downstream_text {
+                    let tf_orig = ContentInstruction::new(
+                        vec![
+                            ContentOperand::Name(orig_font.trim_start_matches('/').to_string()),
+                            ContentOperand::Real(size),
+                        ],
+                        ContentOperator::Tf,
+                    );
+                    instructions.insert(last_idx + 2, tf_orig);
+                }
+
+                let last_edit_idx = adjusted_edits.len().saturating_sub(1);
+                for (i, (target, new_bytes)) in adjusted_edits.iter().enumerate() {
+                    let is_last = i == last_edit_idx;
+                    let instr = &mut instructions[target.instruction_index];
+                    match instr.operator {
+                        ContentOperator::Tj => {
+                            if is_last && compensation.is_some_and(|c| c.abs() >= 0.001) {
+                                let adj = compensation.unwrap_or(0.0);
+                                instr.operator = ContentOperator::TJ;
+                                instr.operands = vec![ContentOperand::Array(vec![
+                                    ContentOperand::String(new_bytes.to_vec()),
+                                    ContentOperand::Real(adj),
+                                ])];
+                            } else {
+                                instr.operands[0] = ContentOperand::String(new_bytes.to_vec());
+                            }
+                        }
+                        ContentOperator::TJ => {
+                            if let Some(ContentOperand::Array(items)) = instr.operands.first_mut() {
+                                if target.operand_index < items.len() {
+                                    items[target.operand_index] =
+                                        ContentOperand::String(new_bytes.to_vec());
+                                    if is_last && compensation.is_some_and(|c| c.abs() >= 0.001) {
+                                        let adj = compensation.unwrap_or(0.0);
+                                        let next_idx = target.operand_index + 1;
+                                        if next_idx < items.len() {
+                                            match &mut items[next_idx] {
+                                                ContentOperand::Integer(val) => {
+                                                    *val += adj.round() as i64;
+                                                }
+                                                ContentOperand::Real(val) => {
+                                                    *val += adj;
+                                                }
+                                                _ => {
+                                                    items.insert(
+                                                        next_idx,
+                                                        ContentOperand::Real(adj),
+                                                    );
+                                                }
+                                            }
+                                        } else {
+                                            items.push(ContentOperand::Real(adj));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                return Ok(Self::serialize_instructions(&instructions));
+            }
+        }
+
+        Self::replace_multiple_in_stream_with_compensation(stream_bytes, edits, compensation)
+    }
+
     /// Deterministically serializes content stream instructions into valid PDF content stream bytes.
     pub fn serialize_instructions(instructions: &[ContentInstruction]) -> Vec<u8> {
         let mut output = Vec::with_capacity(instructions.len() * 32);

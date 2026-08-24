@@ -30,11 +30,13 @@ impl SfntCmapTable {
             let subtable_offset = read_u32_be(data, record_offset + 4).unwrap_or(0) as usize;
 
             let priority = match (platform_id, encoding_id) {
-                (0, _) => 10, // Unicode platform
-                (3, 10) => 9, // Windows Unicode full repertoire (UCS-4)
-                (3, 1) => 8,  // Windows Unicode BMP (UCS-2)
-                (3, 0) => 4,  // Windows Symbol
-                (1, 0) => 2,  // Mac Roman
+                (3, 10) => 10, // Windows Unicode full repertoire (UCS-4)
+                (3, 1) => 9,   // Windows Unicode BMP (UCS-2)
+                (0, 4) => 8,   // Unicode 2.0+ full repertoire
+                (0, 3) => 7,   // Unicode 2.0+ BMP
+                (0, _) => 6,   // Unicode platform generic
+                (3, 0) => 5,   // Windows Symbol
+                (1, 0) => 4,   // Mac Roman
                 _ => 1,
             };
 
@@ -59,10 +61,52 @@ impl SfntCmapTable {
 
         let format = read_u16_be(data, offset).unwrap_or(0);
         match format {
+            0 => Self::parse_format_0(data, offset, cmap),
             4 => Self::parse_format_4(data, offset, cmap),
+            6 => Self::parse_format_6(data, offset, cmap),
             12 => Self::parse_format_12(data, offset, cmap),
             _ => Ok(()),
         }
+    }
+
+    fn parse_format_0(data: &[u8], offset: usize, cmap: &mut Self) -> PdfResult<()> {
+        if offset + 262 > data.len() {
+            return Ok(());
+        }
+        for code in 0u32..=255 {
+            let glyph_id = data[offset + 6 + code as usize] as u16;
+            if glyph_id != 0 {
+                cmap.char_to_glyph.insert(code, glyph_id);
+                if let Some(ch) = char::from_u32(code) {
+                    cmap.glyph_to_char.insert(glyph_id, ch);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_format_6(data: &[u8], offset: usize, cmap: &mut Self) -> PdfResult<()> {
+        if offset + 10 > data.len() {
+            return Ok(());
+        }
+        let first_code = read_u16_be(data, offset + 6).unwrap_or(0) as u32;
+        let entry_count = read_u16_be(data, offset + 8).unwrap_or(0) as usize;
+        let mut curr = offset + 10;
+        for i in 0..entry_count {
+            if curr + 2 > data.len() {
+                break;
+            }
+            let glyph_id = read_u16_be(data, curr).unwrap_or(0);
+            if glyph_id != 0 {
+                let code = first_code.saturating_add(i as u32);
+                cmap.char_to_glyph.insert(code, glyph_id);
+                if let Some(ch) = char::from_u32(code) {
+                    cmap.glyph_to_char.insert(glyph_id, ch);
+                }
+            }
+            curr += 2;
+        }
+        Ok(())
     }
 
     fn parse_format_4(data: &[u8], offset: usize, cmap: &mut Self) -> PdfResult<()> {

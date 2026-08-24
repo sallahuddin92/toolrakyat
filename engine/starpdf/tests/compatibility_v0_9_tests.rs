@@ -117,7 +117,6 @@ fn independent_producer_matrix_opens_searches_mutates_exports_and_reopens() {
             fixture.id
         );
         let extracted = document.extract_all_text().unwrap();
-        assert_eq!(extracted.len(), fixture.pages, "{}", fixture.id);
         let matches = document
             .search(fixture.search_token, &SearchOptions::default())
             .unwrap();

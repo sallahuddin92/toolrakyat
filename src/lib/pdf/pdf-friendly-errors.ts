@@ -29,7 +29,22 @@ export function formatPdfErrorMessage(error: unknown): FriendlyErrorResult {
     };
   }
 
-  // 2. Font / Encoding limitations
+  // 2. Font / Encoding & Glyph limitations
+  if (
+    rawMessage.includes("UNREPRESENTABLE") ||
+    rawMessage.includes("cannot be encoded by font") ||
+    rawMessage.includes("missing glyph") ||
+    rawMessage.includes("No compatible font found")
+  ) {
+    return {
+      userMessage:
+        "The font used for this text doesn't support one or more of the characters you typed, and no compatible fallback could be safely matched. Your document was left unchanged.",
+      technicalDetails: "StarPDF refused the edit to avoid rendering missing or corrupted glyphs.",
+      isUnsupported: true,
+      canRetry: false,
+    };
+  }
+
   if (
     rawMessage.includes("UNSUPPORTED_FONT_ENCODING") ||
     rawMessage.includes("unsupported font encoding") ||

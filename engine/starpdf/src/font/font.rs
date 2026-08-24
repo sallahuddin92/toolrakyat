@@ -5,6 +5,7 @@ use crate::error::PdfResult;
 use crate::font::cmap::UnicodeCMap;
 use crate::font::encoding::SimpleEncoding;
 use crate::font::sfnt::SfntFont;
+use crate::font::standard_metrics::StandardFontMetrics;
 use crate::syntax::object::PdfObject;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,42 @@ impl FontProgramKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontFamily {
+    SansSerif,
+    Serif,
+    Monospace,
+    Symbolic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontStyle {
+    pub family: FontFamily,
+    pub is_bold: bool,
+    pub is_italic: bool,
+    pub is_monospace: bool,
+}
+
+impl FontStyle {
+    pub fn standard_base_font_name(&self) -> &'static str {
+        match (self.family, self.is_bold, self.is_italic) {
+            (FontFamily::Monospace, false, false) => "Courier",
+            (FontFamily::Monospace, true, false) => "Courier-Bold",
+            (FontFamily::Monospace, false, true) => "Courier-Oblique",
+            (FontFamily::Monospace, true, true) => "Courier-BoldOblique",
+            (FontFamily::Serif, false, false) => "Times-Roman",
+            (FontFamily::Serif, true, false) => "Times-Bold",
+            (FontFamily::Serif, false, true) => "Times-Italic",
+            (FontFamily::Serif, true, true) => "Times-BoldItalic",
+            (FontFamily::Symbolic, _, _) => "Symbol",
+            (FontFamily::SansSerif, false, false) => "Helvetica",
+            (FontFamily::SansSerif, true, false) => "Helvetica-Bold",
+            (FontFamily::SansSerif, false, true) => "Helvetica-Oblique",
+            (FontFamily::SansSerif, true, true) => "Helvetica-BoldOblique",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Font {
     pub name: String,
@@ -41,25 +78,42 @@ pub struct Font {
     pub to_unicode: Option<UnicodeCMap>,
     pub embedded_sfnt: Option<SfntFont>,
     pub font_program_kind: FontProgramKind,
+    pub style: FontStyle,
 }
 
 impl Font {
-    /// Constructs a fallback standard font (e.g. Helvetica / Type1).
+    /// Constructs a standard fallback font (e.g. Helvetica / Type1).
     pub fn standard_fallback(name: &str) -> Self {
+        Self::standard_with_style(
+            name,
+            &FontStyle {
+                family: FontFamily::SansSerif,
+                is_bold: false,
+                is_italic: false,
+                is_monospace: false,
+            },
+        )
+    }
+
+    /// Constructs a standard Type1 font with the given style.
+    pub fn standard_with_style(name: &str, style: &FontStyle) -> Self {
+        let base_font = style.standard_base_font_name();
+        let widths = StandardFontMetrics::build_widths_map(base_font);
         Self {
             name: name.to_string(),
-            base_font: "Helvetica".to_string(),
+            base_font: base_font.to_string(),
             subtype: "Type1".to_string(),
             is_composite: false,
             composite_identity_mapping: false,
-            widths: BTreeMap::new(),
-            default_width: 500.0,
+            widths,
+            default_width: if style.is_monospace { 600.0 } else { 500.0 },
             first_char: 0,
             last_char: 255,
             encoding: SimpleEncoding::standard_win_ansi(),
             to_unicode: None,
             embedded_sfnt: None,
             font_program_kind: FontProgramKind::UnknownFontProgram,
+            style: *style,
         }
     }
 
@@ -122,7 +176,6 @@ impl Font {
         if let Some(tu_obj) = font_dict.get("ToUnicode") {
             if let Ok(resolved_tu) = store.resolve_object(tu_obj) {
                 if let Some(stream) = resolved_tu.as_stream() {
-                    // Check if stream is Flate-encoded
                     let mut data = stream.data.clone();
                     if let Some(filter) = stream.dict.get("Filter").and_then(|v| v.as_name()) {
                         if filter == "FlateDecode" {
@@ -148,8 +201,8 @@ impl Font {
         // 5. Handle Type0 DescendantFonts /DW and /W if composite
         if is_composite {
             let identity_encoding = match font_dict.get("Encoding") {
-                Some(encoding) => store
-                    .resolve_object(encoding)?
+                Some(enc) => store
+                    .resolve_object(enc)?
                     .as_name()
                     .is_some_and(|name| matches!(name, "Identity-H" | "Identity-V")),
                 None => false,
@@ -178,11 +231,62 @@ impl Font {
                                 if let Some(dw) = cid_dict.get("DW").and_then(|v| v.as_f64()) {
                                     default_width = dw;
                                 }
+                                if let Some(w_obj) = cid_dict.get("W") {
+                                    if let Ok(resolved_w) = store.resolve_object(w_obj) {
+                                        if let Some(w_arr) = resolved_w.as_array() {
+                                            let mut idx = 0;
+                                            while idx < w_arr.len() {
+                                                let first_cid = if let Some(c) = w_arr[idx].as_i64()
+                                                {
+                                                    c as u32
+                                                } else {
+                                                    idx += 1;
+                                                    continue;
+                                                };
+                                                if idx + 1 >= w_arr.len() {
+                                                    break;
+                                                }
+                                                if let Some(sub_arr) = w_arr[idx + 1].as_array() {
+                                                    for (offset, w_val) in
+                                                        sub_arr.iter().enumerate()
+                                                    {
+                                                        if let Some(w) = w_val.as_f64() {
+                                                            widths.insert(
+                                                                first_cid + offset as u32,
+                                                                w,
+                                                            );
+                                                        }
+                                                    }
+                                                    idx += 2;
+                                                } else if idx + 2 < w_arr.len() {
+                                                    if let (Some(last_cid), Some(w)) = (
+                                                        w_arr[idx + 1].as_i64(),
+                                                        w_arr[idx + 2].as_f64(),
+                                                    ) {
+                                                        for c in first_cid..=(last_cid as u32) {
+                                                            widths.insert(c, w);
+                                                        }
+                                                    }
+                                                    idx += 3;
+                                                } else {
+                                                    idx += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        let style = Self::detect_style_from_name_and_dict(&base_font, font_dict, store);
+
+        // If widths map is empty and this is a standard simple font, populate standard widths
+        if widths.is_empty() && !is_composite {
+            widths = StandardFontMetrics::build_widths_map(&base_font);
         }
 
         Ok(Self {
@@ -199,7 +303,85 @@ impl Font {
             to_unicode,
             embedded_sfnt,
             font_program_kind,
+            style,
         })
+    }
+
+    fn detect_style_from_name_and_dict(
+        base_font: &str,
+        font_dict: &BTreeMap<String, PdfObject>,
+        store: &mut ObjectStore<'_>,
+    ) -> FontStyle {
+        let clean = base_font.trim_start_matches('/');
+
+        let is_monospace = clean.contains("Courier")
+            || clean.contains("Mono")
+            || clean.contains("Consolas")
+            || clean.contains("Menlo")
+            || clean.contains("Fixed");
+
+        let is_serif = (clean.contains("Times")
+            || clean.contains("Roman")
+            || clean.contains("Georgia")
+            || clean.contains("Minion")
+            || clean.contains("Garamond")
+            || clean.contains("Baskerville")
+            || clean.contains("Serif"))
+            && !clean.contains("Sans");
+
+        let is_symbolic =
+            clean.contains("Symbol") || clean.contains("Dingbats") || clean.contains("Wingdings");
+
+        let family = if is_symbolic {
+            FontFamily::Symbolic
+        } else if is_monospace {
+            FontFamily::Monospace
+        } else if is_serif {
+            FontFamily::Serif
+        } else {
+            FontFamily::SansSerif
+        };
+
+        let mut is_bold = clean.contains("Bold")
+            || clean.contains("Black")
+            || clean.contains("Heavy")
+            || clean.contains("SemiBold")
+            || clean.contains("Demibold")
+            || clean.contains("700")
+            || clean.contains("800")
+            || clean.contains("900");
+
+        let mut is_italic = clean.contains("Italic")
+            || clean.contains("Oblique")
+            || clean.contains("Slanted")
+            || clean.contains("Kursiv")
+            || clean.ends_with("-It")
+            || clean.ends_with("_It");
+
+        // Inspect FontDescriptor flags if available
+        if let Some(desc_obj) = font_dict.get("FontDescriptor") {
+            if let Ok(resolved) = store.resolve_object(desc_obj) {
+                if let Some(dict) = resolved.as_dict() {
+                    if let Some(flags) = dict.get("Flags").and_then(PdfObject::as_i64) {
+                        if (flags & (1 << 6)) != 0 {
+                            is_italic = true;
+                        }
+                    }
+                    if let Some(weight) = dict.get("FontWeight").and_then(PdfObject::as_i64) {
+                        if weight >= 600 {
+                            is_bold = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        FontStyle {
+            family,
+            is_bold,
+            is_italic,
+            is_monospace,
+        }
     }
 
     fn embedded_program_from_font_dict(
@@ -294,7 +476,6 @@ impl Font {
         let mut result = Vec::new();
 
         if self.is_composite {
-            // 2 bytes per CID for Type0 composite fonts
             let mut i = 0;
             while i < bytes.len() {
                 let code = if i + 1 < bytes.len() {
@@ -311,7 +492,6 @@ impl Font {
                 result.push((text, width));
             }
         } else {
-            // 1 byte per char for simple fonts
             for &b in bytes {
                 let code = b as u32;
                 let (text, width) = self.decode_char_code(code);
@@ -333,6 +513,13 @@ impl Font {
                 self.embedded_sfnt
                     .as_ref()
                     .and_then(|f| f.get_advance_width(code))
+            })
+            .or_else(|| {
+                if let Some(ch) = char::from_u32(code) {
+                    StandardFontMetrics::get_char_width(&self.base_font, ch)
+                } else {
+                    None
+                }
             })
             .unwrap_or(self.default_width);
 
@@ -362,17 +549,11 @@ impl Font {
         (fallback.to_string(), width)
     }
 
-    /// Checks if text extracted with this font can be edited within the v0.13 boundary.
+    /// Checks if text extracted with this font can be edited.
     pub fn check_span_editability(
         &self,
         original_text: &str,
     ) -> crate::text::span::TextEditability {
-        if self.is_composite && !self.composite_identity_mapping {
-            return crate::text::span::TextEditability::UnsupportedFontEncoding(
-                "Composite font requires Identity-H/Identity-V with Identity CIDToGIDMap"
-                    .to_string(),
-            );
-        }
         for ch in original_text.chars() {
             if is_complex_script_char(ch) {
                 return crate::text::span::TextEditability::UnsupportedComplexScript(format!(
@@ -381,12 +562,88 @@ impl Font {
                 ));
             }
         }
+        if self.is_composite && !self.composite_identity_mapping {
+            // Check if we have a ToUnicode map that allows reverse encoding
+            if self.to_unicode.is_none() && self.embedded_sfnt.is_none() {
+                return crate::text::span::TextEditability::UnsupportedFontEncoding(
+                    "Composite font requires Identity-H/Identity-V or ToUnicode/embedded cmap"
+                        .to_string(),
+                );
+            }
+        }
         if self.is_composite && self.embedded_sfnt.is_none() && self.to_unicode.is_none() {
             return crate::text::span::TextEditability::UnsupportedFontEncoding(
                 "Composite font missing embedded SFNT and ToUnicode map".to_string(),
             );
         }
         crate::text::span::TextEditability::EditableNativeText
+    }
+
+    /// Returns true if this font can encode the given character.
+    pub fn can_encode_char(&self, ch: char) -> bool {
+        if is_complex_script_char(ch) {
+            return false;
+        }
+
+        if self.is_composite {
+            if let Some(sfnt) = &self.embedded_sfnt {
+                if sfnt
+                    .cmap
+                    .as_ref()
+                    .and_then(|cmap| cmap.map_char_to_glyph(ch as u32))
+                    .is_some()
+                {
+                    return true;
+                }
+            }
+            if let Some(tu) = &self.to_unicode {
+                if tu.reverse_lookup(ch).is_some() {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Simple 8-bit font
+        if let Some(tu) = &self.to_unicode {
+            if let Some(code) = tu.reverse_lookup(ch) {
+                if code <= 255 {
+                    return true;
+                }
+            }
+        }
+
+        if self.encoding.encode_char(ch).is_some() {
+            if let Some(sfnt) = &self.embedded_sfnt {
+                let code = self.encoding.encode_char(ch).unwrap();
+                let has_glyph = sfnt
+                    .cmap
+                    .as_ref()
+                    .and_then(|cmap| cmap.map_char_to_glyph(ch as u32))
+                    .is_some()
+                    || sfnt
+                        .cmap
+                        .as_ref()
+                        .and_then(|cmap| cmap.map_char_to_glyph(code as u32))
+                        .is_some();
+                return has_glyph;
+            }
+            return true;
+        }
+
+        false
+    }
+
+    /// Returns true if this font can encode all characters in the given text.
+    pub fn can_encode_text(&self, text: &str) -> bool {
+        text.chars().all(|ch| self.can_encode_char(ch))
+    }
+
+    /// Returns a list of characters in text that cannot be encoded by this font.
+    pub fn missing_chars(&self, text: &str) -> Vec<char> {
+        text.chars()
+            .filter(|&ch| !self.can_encode_char(ch))
+            .collect()
     }
 
     /// Encodes a text string into the font's native character/glyph byte representation.
@@ -403,12 +660,6 @@ impl Font {
         let mut output = Vec::with_capacity(text.len().saturating_mul(2));
         for character in text.chars() {
             if self.is_composite {
-                if !self.composite_identity_mapping {
-                    return Err(crate::error::PdfError::UnsupportedCompositeMapping(
-                        "composite font requires Identity-H/Identity-V and an identity CIDToGIDMap"
-                            .into(),
-                    ));
-                }
                 let glyph = if let Some(sfnt) = &self.embedded_sfnt {
                     sfnt.cmap
                         .as_ref()
@@ -443,9 +694,7 @@ impl Font {
                 }
 
                 if mapped_code.is_none() {
-                    mapped_code = (0u16..=255)
-                        .find(|&code| self.encoding.decode_byte(code as u8) == character)
-                        .map(|c| c as u8);
+                    mapped_code = self.encoding.encode_char(character);
                 }
 
                 let code = mapped_code.ok_or_else(|| {
@@ -490,8 +739,8 @@ impl Font {
     ) -> PdfResult<f64> {
         let mut total_advance = 0.0;
         for character in text.chars() {
-            let code = if self.is_composite {
-                let glyph = if let Some(sfnt) = &self.embedded_sfnt {
+            let width = if self.is_composite {
+                let code = if let Some(sfnt) = &self.embedded_sfnt {
                     sfnt.cmap
                         .as_ref()
                         .and_then(|cmap| cmap.map_char_to_glyph(character as u32))
@@ -506,40 +755,34 @@ impl Font {
                 } else {
                     None
                 };
-                glyph.ok_or_else(|| {
-                    crate::error::PdfError::UnsupportedFontEncoding(format!(
-                        "UNREPRESENTABLE glyph U+{:04X} in font /{}",
-                        character as u32, self.base_font
-                    ))
-                })?
+                let code_val = code.unwrap_or(character as u32);
+                self.widths
+                    .get(&code_val)
+                    .copied()
+                    .or_else(|| {
+                        self.embedded_sfnt
+                            .as_ref()
+                            .and_then(|f| f.get_advance_width(code_val))
+                    })
+                    .unwrap_or(self.default_width)
             } else {
                 let code_opt = self
                     .to_unicode
                     .as_ref()
                     .and_then(|tu| tu.reverse_lookup(character))
+                    .or_else(|| self.encoding.encode_char(character).map(u32::from));
+                let code_val = code_opt.unwrap_or(character as u32);
+                self.widths
+                    .get(&code_val)
+                    .copied()
                     .or_else(|| {
-                        (0u16..=255)
-                            .find(|&c| self.encoding.decode_byte(c as u8) == character)
-                            .map(u32::from)
-                    });
-                code_opt.ok_or_else(|| {
-                    crate::error::PdfError::UnsupportedFontEncoding(format!(
-                        "UNREPRESENTABLE glyph U+{:04X} in font /{}",
-                        character as u32, self.base_font
-                    ))
-                })?
+                        self.embedded_sfnt
+                            .as_ref()
+                            .and_then(|f| f.get_advance_width(code_val))
+                    })
+                    .or_else(|| StandardFontMetrics::get_char_width(&self.base_font, character))
+                    .unwrap_or(self.default_width)
             };
-
-            let width = self
-                .widths
-                .get(&code)
-                .copied()
-                .or_else(|| {
-                    self.embedded_sfnt
-                        .as_ref()
-                        .and_then(|f| f.get_advance_width(code))
-                })
-                .unwrap_or(self.default_width);
 
             let mut advance = (width / 1000.0) * font_size;
             advance += char_spacing;
@@ -571,7 +814,7 @@ pub fn is_complex_script_char(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Font, FontProgramKind};
+    use super::{Font, FontFamily, FontProgramKind, FontStyle};
 
     fn sfnt(tags: &[[u8; 4]]) -> Vec<u8> {
         let mut output = vec![0u8; 12 + tags.len() * 16];
@@ -613,5 +856,22 @@ mod tests {
                 .unwrap_or(FontProgramKind::TrueTypeSupported),
             FontProgramKind::UnknownFontProgram
         );
+    }
+
+    #[test]
+    fn test_standard_fonts_and_style_matching() {
+        let style = FontStyle {
+            family: FontFamily::SansSerif,
+            is_bold: true,
+            is_italic: false,
+            is_monospace: false,
+        };
+        let font = Font::standard_with_style("F_Test", &style);
+        assert_eq!(font.base_font, "Helvetica-Bold");
+        assert!(font.can_encode_text("Hello World! 123"));
+        let width = font
+            .calculate_text_width("Hello", 12.0, 0.0, 0.0, 100.0)
+            .unwrap();
+        assert!(width > 0.0);
     }
 }

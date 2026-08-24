@@ -318,6 +318,10 @@ impl TextExtractor {
                 .clone()
                 .unwrap_or_else(|| font.name.clone()),
             font_base_name: font.base_font.clone(),
+            font_family: format!("{:?}", font.style.family),
+            is_bold: font.style.is_bold,
+            is_italic: font.style.is_italic,
+            is_monospace: font.style.is_monospace,
             original_bytes: bytes.to_vec(),
             is_editable,
             editability_status: editability,

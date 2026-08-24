@@ -345,7 +345,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .clone();
 
         // 1. Resolve page resources and fonts
-        let resources =
+        let mut resources =
             crate::font::resource::PageResources::resolve_for_page(&page_dict, self.store)?;
 
         // 2. Resolve target content stream
@@ -457,34 +457,72 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         }
 
         let fallback_font = crate::font::font::Font::standard_fallback("Helvetica");
-        let font = active_font_name
+        let orig_font = active_font_name
             .as_deref()
             .and_then(|name| resources.get_font(name))
-            .unwrap_or(&fallback_font);
+            .cloned()
+            .unwrap_or(fallback_font);
+        let orig_style = orig_font.style;
 
-        // 5. Validate font editability & encode replacement text
-        let editability = font.check_span_editability(replacement);
-        match editability {
-            crate::text::span::TextEditability::EditableNativeText => {}
-            crate::text::span::TextEditability::UnsupportedComplexScript(reason) => {
-                return Err(PdfError::UnsupportedComplexScript(reason));
-            }
-            crate::text::span::TextEditability::UnsupportedFontEncoding(reason) => {
-                return Err(PdfError::UnsupportedFontEncoding(reason));
-            }
-            crate::text::span::TextEditability::UnsupportedVerticalWriting => {
-                return Err(PdfError::InvalidOperation(
-                    "UNSUPPORTED_VERTICAL_WRITING".into(),
-                ));
-            }
-            other => {
-                return Err(PdfError::InvalidOperation(
-                    other.reason().unwrap_or_default(),
-                ));
+        // Check if complex script shaping is required
+        for ch in replacement.chars() {
+            if crate::font::font::is_complex_script_char(ch) {
+                return Err(PdfError::UnsupportedComplexScript(format!(
+                    "Character U+{:04X} requires complex script shaping",
+                    ch as u32
+                )));
             }
         }
 
-        let encoded_replacement = font.encode_text(replacement)?;
+        // Determine effective font for replacement:
+        // Priority 1: Keep original font if it can encode the requested text
+        // Priority 2: Use a compatible existing font from page resources matching style
+        // Priority 3: Inject and use a standard style-matched Type1 font
+        let mut font_switch: Option<(String, f64, String)> = None;
+        let effective_font = if orig_font.can_encode_text(replacement) {
+            orig_font.clone()
+        } else if let Some((comp_name, comp_font)) =
+            resources.find_compatible_font(&orig_style, replacement)
+        {
+            let orig_name = active_font_name
+                .as_deref()
+                .unwrap_or(&orig_font.name)
+                .to_string();
+            let comp_name_str = comp_name.to_string();
+            let comp_font_clone = comp_font.clone();
+            font_switch = Some((comp_name_str, active_font_size, orig_name));
+            comp_font_clone
+        } else {
+            let font_ref = self.allocate_object_ref()?;
+            let std_res_name = resources.ensure_standard_font(
+                &orig_style,
+                &mut page_dict,
+                font_ref,
+                self.store,
+                modified,
+            )?;
+            let std_font = resources
+                .get_font(&std_res_name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::font::font::Font::standard_with_style(&std_res_name, &orig_style)
+                });
+            if !std_font.can_encode_text(replacement) {
+                let missing = std_font.missing_chars(replacement);
+                return Err(PdfError::UnsupportedFontEncoding(format!(
+                    "Character(s) {:?} cannot be encoded by font /{} or compatible fallback",
+                    missing, orig_font.base_font
+                )));
+            }
+            let orig_name = active_font_name
+                .as_deref()
+                .unwrap_or(&orig_font.name)
+                .to_string();
+            font_switch = Some((std_res_name, active_font_size, orig_name));
+            std_font
+        };
+
+        let encoded_replacement = effective_font.encode_text(replacement)?;
 
         // 6. Evaluate layout / width policy & downstream dependencies
         let target_instr = &instructions[target.instruction_index];
@@ -512,17 +550,17 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             _ => &[],
         };
 
-        let decoded_original = font.decode_bytes(original_bytes);
+        let decoded_original = orig_font.decode_bytes(original_bytes);
         let orig_text: String = decoded_original.into_iter().map(|(s, _)| s).collect();
 
-        let orig_width = font.calculate_text_width(
+        let orig_width = orig_font.calculate_text_width(
             &orig_text,
             active_font_size,
             char_spacing,
             word_spacing,
             horiz_scaling,
         )?;
-        let new_width = font.calculate_text_width(
+        let new_width = effective_font.calculate_text_width(
             replacement,
             active_font_size,
             char_spacing,
@@ -603,13 +641,16 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             }
         };
 
-        // 7. Mutate content stream
-        let modified_decompressed = ContentStreamEditor::replace_in_stream_with_compensation(
-            &decompressed_data,
-            target,
-            &encoded_replacement,
-            compensation,
-        )?;
+        // 7. Mutate content stream with optional font switch
+        let modified_decompressed =
+            ContentStreamEditor::replace_multiple_in_stream_with_font_switch(
+                &decompressed_data,
+                &[(target, &encoded_replacement)],
+                compensation,
+                font_switch
+                    .as_ref()
+                    .map(|(n, s, o)| (n.as_str(), *s, o.as_str())),
+            )?;
 
         // 8. Re-compress or update stream data
         let final_stream_data = if target_stream_obj.dict.contains_key("Filter") {
@@ -711,7 +752,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .clone();
 
         // 1. Resolve page resources and fonts
-        let resources =
+        let mut resources =
             crate::font::resource::PageResources::resolve_for_page(&page_dict, self.store)?;
 
         // 2. Validate all targets share same stream_index
@@ -835,34 +876,69 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         }
 
         let fallback_font = crate::font::font::Font::standard_fallback("Helvetica");
-        let font = active_font_name
+        let orig_font = active_font_name
             .as_deref()
             .and_then(|name| resources.get_font(name))
-            .unwrap_or(&fallback_font);
+            .cloned()
+            .unwrap_or(fallback_font);
+        let orig_style = orig_font.style;
 
-        // 6. Validate font editability & encode replacement text
-        let editability = font.check_span_editability(replacement);
-        match editability {
-            crate::text::span::TextEditability::EditableNativeText => {}
-            crate::text::span::TextEditability::UnsupportedComplexScript(reason) => {
-                return Err(PdfError::UnsupportedComplexScript(reason));
-            }
-            crate::text::span::TextEditability::UnsupportedFontEncoding(reason) => {
-                return Err(PdfError::UnsupportedFontEncoding(reason));
-            }
-            crate::text::span::TextEditability::UnsupportedVerticalWriting => {
-                return Err(PdfError::InvalidOperation(
-                    "UNSUPPORTED_VERTICAL_WRITING".into(),
-                ));
-            }
-            other => {
-                return Err(PdfError::InvalidOperation(
-                    other.reason().unwrap_or_default(),
-                ));
+        // Check if complex script shaping is required
+        for ch in replacement.chars() {
+            if crate::font::font::is_complex_script_char(ch) {
+                return Err(PdfError::UnsupportedComplexScript(format!(
+                    "Character U+{:04X} requires complex script shaping",
+                    ch as u32
+                )));
             }
         }
 
-        let encoded_replacement = font.encode_text(replacement)?;
+        // Determine effective font for replacement:
+        let mut font_switch: Option<(String, f64, String)> = None;
+        let effective_font = if orig_font.can_encode_text(replacement) {
+            orig_font.clone()
+        } else if let Some((comp_name, comp_font)) =
+            resources.find_compatible_font(&orig_style, replacement)
+        {
+            let orig_name = active_font_name
+                .as_deref()
+                .unwrap_or(&orig_font.name)
+                .to_string();
+            let comp_name_str = comp_name.to_string();
+            let comp_font_clone = comp_font.clone();
+            font_switch = Some((comp_name_str, active_font_size, orig_name));
+            comp_font_clone
+        } else {
+            let font_ref = self.allocate_object_ref()?;
+            let std_res_name = resources.ensure_standard_font(
+                &orig_style,
+                &mut page_dict,
+                font_ref,
+                self.store,
+                modified,
+            )?;
+            let std_font = resources
+                .get_font(&std_res_name)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::font::font::Font::standard_with_style(&std_res_name, &orig_style)
+                });
+            if !std_font.can_encode_text(replacement) {
+                let missing = std_font.missing_chars(replacement);
+                return Err(PdfError::UnsupportedFontEncoding(format!(
+                    "Character(s) {:?} cannot be encoded by font /{} or compatible fallback",
+                    missing, orig_font.base_font
+                )));
+            }
+            let orig_name = active_font_name
+                .as_deref()
+                .unwrap_or(&orig_font.name)
+                .to_string();
+            font_switch = Some((std_res_name, active_font_size, orig_name));
+            std_font
+        };
+
+        let encoded_replacement = effective_font.encode_text(replacement)?;
 
         // 7. Calculate combined original text advance across all targets including intermediate TJ adjustments
         let mut orig_total_advance = 0.0;
@@ -897,12 +973,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 }
                 _ => &[],
             };
-            let decoded = font.decode_bytes(original_bytes);
+            let decoded = orig_font.decode_bytes(original_bytes);
             let mut span_text = String::new();
             for (s, _) in decoded {
                 span_text.push_str(&s);
             }
-            let span_width = font.calculate_text_width(
+            let span_width = orig_font.calculate_text_width(
                 &span_text,
                 active_font_size,
                 char_spacing,
@@ -943,7 +1019,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             }
         }
 
-        let new_width = font.calculate_text_width(
+        let new_width = effective_font.calculate_text_width(
             replacement,
             active_font_size,
             char_spacing,
@@ -1034,10 +1110,13 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         }
 
         let modified_decompressed =
-            ContentStreamEditor::replace_multiple_in_stream_with_compensation(
+            ContentStreamEditor::replace_multiple_in_stream_with_font_switch(
                 &decompressed_data,
                 &edits,
                 compensation,
+                font_switch
+                    .as_ref()
+                    .map(|(n, s, o)| (n.as_str(), *s, o.as_str())),
             )?;
 
         // 9. Re-compress or update stream data
