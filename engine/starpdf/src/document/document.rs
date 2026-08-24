@@ -381,6 +381,7 @@ impl<'a> PdfDocument<'a> {
         let source_bytes = self.source.as_bytes();
 
         if self.xref_status() == XrefStatus::RecoveredMalformedPrev {
+            self.validate_recovered_compressed_entries(&plan.modified_objects)?;
             crate::writer::incremental::IncrementalWriter::write_recovered_update(
                 source_bytes,
                 &plan.modified_objects,
@@ -395,6 +396,47 @@ impl<'a> PdfDocument<'a> {
                 &trailer_dict,
             )
         }
+    }
+
+    fn validate_recovered_compressed_entries(
+        &mut self,
+        modified_objects: &BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<()> {
+        let modified_numbers = modified_objects
+            .keys()
+            .map(|reference| reference.number)
+            .collect::<std::collections::BTreeSet<_>>();
+        let retained = self
+            .store
+            .xref()
+            .entries
+            .iter()
+            .filter_map(|(&obj_num, entry)| match *entry {
+                crate::xref::XrefEntry::Compressed {
+                    stream_obj_num,
+                    index_in_stream,
+                } if !modified_numbers.contains(&obj_num) => {
+                    Some((obj_num, stream_obj_num, index_in_stream))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        for (obj_num, stream_obj_num, index_in_stream) in retained {
+            if modified_numbers.contains(&stream_obj_num) {
+                return Err(PdfError::RecoveredXrefExport(format!(
+                    "retained compressed object {obj_num} depends on modified ObjStm {stream_obj_num}"
+                )));
+            }
+            self.store
+                .resolve(ObjectRef::new(obj_num, 0))
+                .map_err(|error| {
+                    PdfError::RecoveredXrefExport(format!(
+                        "invalid compressed reference for object {obj_num} in ObjStm {stream_obj_num} at index {index_in_stream}: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     /// Mutates the document with the specified changes and exports an incrementally updated PDF.

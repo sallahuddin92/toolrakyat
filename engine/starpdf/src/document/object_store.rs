@@ -206,7 +206,7 @@ impl<'a> ObjectStore<'a> {
 
     fn resolve_compressed_object(
         &mut self,
-        _obj_ref: ObjectRef,
+        obj_ref: ObjectRef,
         stream_obj_num: u64,
         index_in_stream: u32,
     ) -> PdfResult<PdfObject> {
@@ -234,6 +234,21 @@ impl<'a> ObjectStore<'a> {
                     "Failed to retrieve decoded ObjectStream {stream_obj_num}"
                 ))
             })?;
+        let indexed_obj_num = decoded
+            .index_map
+            .get(&index_in_stream)
+            .map(|(number, _)| *number)
+            .ok_or_else(|| {
+                PdfError::InvalidSyntax(format!(
+                    "Object index {index_in_stream} not found in ObjStm {stream_obj_num}"
+                ))
+            })?;
+        if indexed_obj_num != obj_ref.number {
+            return Err(PdfError::InvalidSyntax(format!(
+                "ObjStm {stream_obj_num} index {index_in_stream} contains object {indexed_obj_num}, expected {}",
+                obj_ref.number
+            )));
+        }
         ObjectStreamReader::extract_object(decoded, index_in_stream)
     }
 

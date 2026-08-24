@@ -77,6 +77,14 @@ async function createClassicViewerFixture(): Promise<Buffer> {
   return Buffer.from(await document.save({ useObjectStreams: false }));
 }
 
+async function createCompressedRecoveryFixture(): Promise<Buffer> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([612, 792]);
+  page.drawText("Compressed xref original text", { x: 72, y: 700, size: 18, font });
+  return addBeyondEofPrev(Buffer.from(await document.save({ useObjectStreams: true })));
+}
+
 async function createRichAppearanceFixture(): Promise<Buffer> {
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
@@ -4180,10 +4188,48 @@ test.describe("SmartPDF malformed xref recovery states", () => {
     await expect(page.locator("body")).not.toContainText("Invalid cross-reference table/stream");
     await expect(page.locator("body")).not.toContainText("XREF_STATUS_UNRECOVERABLE");
   });
+
+  test("recovered compressed xref edits, exports an xref stream, and reopens valid", async ({
+    page,
+  }) => {
+    const fixture = await createCompressedRecoveryFixture();
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "compressed-recovery.pdf", fixture);
+
+    await expect(page.getByTestId("starpdf-xref-recovered-note")).toBeVisible();
+    const textSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await expect(textSpan).toBeVisible();
+    await textSpan.click();
+    const input = page.getByTestId("context-text-input");
+    await expect(input).toBeVisible();
+    await input.fill("Compressed xref healed text");
+    await page.getByTestId("context-text-save-btn").click();
+    await expect(page.getByTestId("document-modified-dot")).toBeVisible({ timeout: 10_000 });
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    const output = fs.readFileSync(downloadPath!);
+    const startxrefMarker = output.lastIndexOf(Buffer.from("startxref\n"));
+    const offsetStart = startxrefMarker + "startxref\n".length;
+    const offsetEnd = output.indexOf(0x0a, offsetStart);
+    const terminalOffset = Number(output.subarray(offsetStart, offsetEnd).toString("ascii"));
+    const terminalRevision = output.subarray(terminalOffset);
+    expect(terminalRevision.includes(Buffer.from("/Type /XRef"))).toBe(true);
+    expect(terminalRevision.includes(Buffer.from("/Prev"))).toBe(false);
+    expect(terminalRevision.includes(Buffer.from("/XRefStm"))).toBe(false);
+
+    const canvas = await uploadPdfBytes(page, "compressed-recovery-edited.pdf", output);
+    await expect(page.getByTestId("starpdf-xref-recovered-note")).toHaveCount(0);
+    await expect(page.getByTestId("starpdf-read-only-note")).toHaveCount(0);
+    expect((await canvas.screenshot()).byteLength).toBeGreaterThan(1_000);
+    await page.getByLabel("Search text").click();
+    await page.getByPlaceholder("Search in document...").fill("Compressed xref healed text");
+    await expect(page.getByTestId("search-results-count")).toHaveText("1/1");
+  });
 });
-
-
-
 
 
 

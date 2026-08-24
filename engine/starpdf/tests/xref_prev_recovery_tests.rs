@@ -103,6 +103,7 @@ fn fixture_d_prev_beyond_eof_recovers_current_graph_and_exports_cleanly() {
         .replace_text_span(0, &span.span_id, "Recovered Omega Text")
         .expect("safe edit");
     let output = document.export_incremental(&plan).expect("clean export");
+    assert!(output[find_last(&output, b"xref\n")..].starts_with(b"xref\n"));
     let terminal_trailer = &output[find_last(&output, b"trailer\n")..];
     assert!(!terminal_trailer.windows(5).any(|window| window == b"/Prev"));
 

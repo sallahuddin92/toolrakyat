@@ -8,6 +8,7 @@ pub enum PdfError {
     InvalidHeader,
     InvalidXref(String),
     UnrecoverableXref(String),
+    RecoveredXrefExport(String),
     ObjectNotFound {
         number: u64,
         generation: u16,
@@ -61,6 +62,9 @@ impl fmt::Display for PdfError {
             Self::InvalidXref(msg) => write!(f, "Invalid cross-reference table/stream: {msg}"),
             Self::UnrecoverableXref(msg) => {
                 write!(f, "XREF_STATUS_UNRECOVERABLE: {msg}")
+            }
+            Self::RecoveredXrefExport(msg) => {
+                write!(f, "XREF_RECOVERED_EXPORT_REFUSED: {msg}")
             }
             Self::ObjectNotFound { number, generation } => {
                 write!(
