@@ -62,6 +62,23 @@ export function starpdf_add_rectangle(handle, input_val) {
 
 /**
  * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @param {any} patch_value
+ * @returns {any}
+ */
+export function starpdf_apply_text_style(handle, page_index, span_id, patch_value) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_apply_text_style(handle, page_index, ptr0, len0, patch_value);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {boolean}
  */
 export function starpdf_close(handle) {
@@ -385,6 +402,22 @@ export function starpdf_insert_imported_page(handle, imported_bytes, imported_pa
 }
 
 /**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @returns {any}
+ */
+export function starpdf_inspect_text_style(handle, page_index, span_id) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_inspect_text_style(handle, page_index, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {any} documents
  * @returns {Uint8Array}
  */
@@ -490,6 +523,23 @@ export function starpdf_plan_text_replacement(handle, page_index, span_id, new_t
     const ptr1 = passStringToWasm0(new_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.starpdf_plan_text_replacement(handle, page_index, ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
+ * @param {string} span_id
+ * @param {any} patch_value
+ * @returns {any}
+ */
+export function starpdf_plan_text_style_change(handle, page_index, span_id, patch_value) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_plan_text_style_change(handle, page_index, ptr0, len0, patch_value);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -836,6 +886,10 @@ function __wbg_get_imports() {
             const ret = typeof(val) === 'object' && val !== null;
             return ret;
         },
+        __wbg___wbindgen_is_string_e6f02f0ea5f20a32: function(arg0) {
+            const ret = typeof(arg0) === 'string';
+            return ret;
+        },
         __wbg___wbindgen_is_undefined_6cff064c44e0d823: function(arg0) {
             const ret = arg0 === undefined;
             return ret;
@@ -871,6 +925,14 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_done_669171204c3dcae2: function(arg0) {
             const ret = arg0.done;
+            return ret;
+        },
+        __wbg_entries_7774d489e1da5f4f: function(arg0) {
+            const ret = Object.entries(arg0);
+            return ret;
+        },
+        __wbg_get_c0c8f8d7da0c03dd: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
             return ret;
         },
         __wbg_get_d173c0308df22d37: function() { return handleError(function (arg0, arg1) {

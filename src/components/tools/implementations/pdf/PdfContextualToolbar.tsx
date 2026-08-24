@@ -16,6 +16,8 @@ import {
   Upload,
   Trash2,
   Lock,
+  Bold as BoldIcon,
+  Italic as ItalicIcon,
 } from "lucide-react";
 import type {
   StarPdfTextSpan,
@@ -23,6 +25,7 @@ import type {
   StarPdfVectorGraphicInfo,
   StarPdfUpdateVectorGraphicInput,
   StarPdfUpdateAnnotationInput,
+  StarPdfTextStylePatch,
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { SmartPdfSelection, SelectionType } from "@/lib/pdf/selection";
@@ -35,6 +38,11 @@ interface PdfContextualToolbarProps {
   containerRef?: React.RefObject<HTMLElement | null>;
   onDeselect: () => void;
   onReplaceText: (spanId: string | string[], newText: string) => Promise<void>;
+  onApplyTextStyle: (
+    spanId: string | string[],
+    text: string,
+    patch: StarPdfTextStylePatch,
+  ) => Promise<void>;
   onDeleteText?: (spanId: string | string[]) => Promise<void>;
   onReplaceImage: (imageId: string, file: File) => Promise<void>;
   onRemoveImage: (imageId: string) => Promise<void>;
@@ -54,6 +62,7 @@ function TextControls({
   span,
   group,
   onReplaceText,
+  onApplyTextStyle,
   onDeleteText,
   onDeselect,
   onAddTextInstead,
@@ -61,14 +70,33 @@ function TextControls({
   span: StarPdfTextSpan;
   group?: import("@/lib/pdf/grouping").HumanTextGroup;
   onReplaceText: (spanId: string | string[], newText: string) => Promise<void>;
+  onApplyTextStyle: (
+    spanId: string | string[],
+    text: string,
+    patch: StarPdfTextStylePatch,
+  ) => Promise<void>;
   onDeleteText?: (spanId: string | string[]) => Promise<void>;
   onDeselect: () => void;
   onAddTextInstead?: () => void;
 }) {
+  const initialTextColor = `#${(span.fill_color ?? [0, 0, 0])
+    .map((channel) => Math.round(channel * 255).toString(16).padStart(2, "0"))
+    .join("")}`;
   const originalText = group?.text || span.text;
   const [editText, setEditText] = useState(originalText);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const initialFamily =
+    span.font_family === "Serif" || span.font_family === "Monospace"
+      ? span.font_family
+      : "SansSerif";
+  const [fontFamily, setFontFamily] = useState<"SansSerif" | "Serif" | "Monospace">(
+    initialFamily,
+  );
+  const [fontSize, setFontSize] = useState(span.font_size);
+  const [isBold, setIsBold] = useState(Boolean(span.is_bold));
+  const [isItalic, setIsItalic] = useState(Boolean(span.is_italic));
+  const [textColor, setTextColor] = useState(initialTextColor);
 
   const isEditable = group ? group.editability === "EDITABLE_ATOMIC" : span.is_editable;
   const targetSpanIds =
@@ -125,13 +153,36 @@ function TextControls({
   }
 
   const handleTextSubmit = async () => {
-    if (editText === originalText) {
+    const styleChanged =
+      fontFamily !== initialFamily ||
+      Math.abs(fontSize - span.font_size) > 0.001 ||
+      isBold !== Boolean(span.is_bold) ||
+      isItalic !== Boolean(span.is_italic) ||
+      textColor !== initialTextColor;
+    if (editText === originalText && !styleChanged) {
       onDeselect();
       return;
     }
     setIsSubmitting(true);
     try {
-      if (!editText.trim()) {
+      if (styleChanged && editText.trim()) {
+        const channels = textColor
+          .replace("#", "")
+          .match(/.{2}/g)
+          ?.map((part) => Number.parseInt(part, 16) / 255);
+        await onApplyTextStyle(targetSpanIds, editText, {
+          ...(fontFamily !== initialFamily ? { font_family: fontFamily } : {}),
+          ...(Math.abs(fontSize - span.font_size) > 0.001 ? { font_size: fontSize } : {}),
+          ...(isBold !== Boolean(span.is_bold)
+            ? { weight: isBold ? "BOLD" : "NORMAL" }
+            : {}),
+          ...(isItalic !== Boolean(span.is_italic) ? { italic: isItalic } : {}),
+          ...(textColor !== initialTextColor && channels?.length === 3
+            ? { fill_color: channels as [number, number, number] }
+            : {}),
+          ...(editText !== originalText ? { replacement_text: editText } : {}),
+        });
+      } else if (!editText.trim()) {
         if (onDeleteText) {
           await onDeleteText(targetSpanIds);
         } else {
@@ -147,19 +198,82 @@ function TextControls({
 
 
   return (
-    <div className="flex items-center gap-2 min-w-0" data-testid="context-text-controls">
+    <div className="flex items-center gap-1.5 min-w-0 flex-wrap" data-testid="context-text-controls">
       <Input
         type="text"
         value={editText}
         onChange={(e) => setEditText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") void handleTextSubmit();
-          if (e.key === "Escape") onDeselect();
+          if (e.key === "Escape") {
+            setEditText(originalText);
+            setFontFamily(initialFamily);
+            setFontSize(span.font_size);
+            setIsBold(Boolean(span.is_bold));
+            setIsItalic(Boolean(span.is_italic));
+            setTextColor(initialTextColor);
+            onDeselect();
+          }
         }}
-        className="h-8 text-xs w-48 sm:w-72 bg-white"
+        className="h-8 text-xs w-36 sm:w-52 bg-white"
         placeholder="Edit text content..."
         data-testid="context-text-input"
         autoFocus
+      />
+      <select
+        value={fontFamily}
+        onChange={(event) => setFontFamily(event.target.value as typeof fontFamily)}
+        className="h-8 rounded border border-slate-300 bg-white px-1.5 text-xs"
+        aria-label="Font family"
+        data-testid="context-text-font-family"
+      >
+        <option value={initialFamily}>Current ({span.font_base_name || span.font_name})</option>
+        {initialFamily !== "SansSerif" && <option value="SansSerif">Helvetica</option>}
+        {initialFamily !== "Serif" && <option value="Serif">Times</option>}
+        {initialFamily !== "Monospace" && <option value="Monospace">Courier</option>}
+      </select>
+      <Input
+        type="number"
+        min={6}
+        max={144}
+        step={0.5}
+        value={fontSize}
+        onChange={(event) => setFontSize(Number(event.target.value))}
+        className="h-8 w-16 px-1.5 text-xs"
+        aria-label="Font size"
+        data-testid="context-text-font-size"
+      />
+      <Button
+        type="button"
+        variant={isBold ? "default" : "outline"}
+        size="icon"
+        onClick={() => setIsBold((value) => !value)}
+        className="size-8"
+        aria-label="Bold"
+        aria-pressed={isBold}
+        data-testid="context-text-bold"
+      >
+        <BoldIcon className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        variant={isItalic ? "default" : "outline"}
+        size="icon"
+        onClick={() => setIsItalic((value) => !value)}
+        className="size-8"
+        aria-label="Italic"
+        aria-pressed={isItalic}
+        data-testid="context-text-italic"
+      >
+        <ItalicIcon className="size-3.5" />
+      </Button>
+      <input
+        type="color"
+        value={textColor}
+        onChange={(event) => setTextColor(event.target.value)}
+        className="size-8 rounded border border-slate-300 bg-white p-0.5"
+        aria-label="Text color"
+        data-testid="context-text-color"
       />
       <Button
         type="button"
@@ -429,8 +543,50 @@ function AnnotationControls({
   const [borderWidth, setBorderWidth] = useState(1.5);
   const [highlightColor, setHighlightColor] = useState("#ffeb3b");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [freeTextFamily, setFreeTextFamily] = useState<"SansSerif" | "Serif" | "Monospace">(
+    annot.fontFamily ?? "SansSerif",
+  );
+  const [freeTextSize, setFreeTextSize] = useState(annot.fontSize ?? 12);
+  const [freeTextBold, setFreeTextBold] = useState(Boolean(annot.isBold));
+  const [freeTextItalic, setFreeTextItalic] = useState(Boolean(annot.isItalic));
+  const initialTextColor = annot.textColor
+    ? `#${annot.textColor
+        .map((component) => Math.round(component * 255).toString(16).padStart(2, "0"))
+        .join("")}`
+    : "#000000";
+  const [freeTextColor, setFreeTextColor] = useState(initialTextColor);
+
+  const freeTextStyleChanged =
+    freeTextFamily !== (annot.fontFamily ?? "SansSerif") ||
+    Math.abs(freeTextSize - (annot.fontSize ?? 12)) > 0.001 ||
+    freeTextBold !== Boolean(annot.isBold) ||
+    freeTextItalic !== Boolean(annot.isItalic) ||
+    freeTextColor !== initialTextColor;
 
   const commitContents = async () => {
+    if (annot.subtype === "FreeText" && onUpdateAnnotationProperties) {
+      if ((localText === sourceText && !freeTextStyleChanged) || isSubmitting) return;
+      setIsSubmitting(true);
+      try {
+        await onUpdateAnnotationProperties(annot.id, {
+          ...(localText !== sourceText ? { contents: localText } : {}),
+          ...(freeTextFamily !== (annot.fontFamily ?? "SansSerif")
+            ? { font_family: freeTextFamily }
+            : {}),
+          ...(Math.abs(freeTextSize - (annot.fontSize ?? 12)) > 0.001
+            ? { font_size: freeTextSize }
+            : {}),
+          ...(freeTextBold !== Boolean(annot.isBold) ? { bold: freeTextBold } : {}),
+          ...(freeTextItalic !== Boolean(annot.isItalic) ? { italic: freeTextItalic } : {}),
+          ...(freeTextColor !== initialTextColor
+            ? { text_color: hexToRgb(freeTextColor) }
+            : {}),
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
     if (!onAnnotationChange || localText === sourceText || isSubmitting) return;
     setIsSubmitting(true);
     try {
@@ -674,6 +830,11 @@ function AnnotationControls({
             e.preventDefault();
             e.stopPropagation();
             setLocalText(sourceText);
+            setFreeTextFamily(annot.fontFamily ?? "SansSerif");
+            setFreeTextSize(annot.fontSize ?? 12);
+            setFreeTextBold(Boolean(annot.isBold));
+            setFreeTextItalic(Boolean(annot.isItalic));
+            setFreeTextColor(initialTextColor);
             onDeselect?.();
           }
         }}
@@ -682,12 +843,70 @@ function AnnotationControls({
         data-testid="context-annotation-input"
         autoFocus
       />
+      {annot.subtype === "FreeText" && (
+        <>
+          <select
+            value={freeTextFamily}
+            onChange={(event) => setFreeTextFamily(event.target.value as typeof freeTextFamily)}
+            className="h-8 rounded border border-slate-300 bg-white px-1.5 text-xs"
+            aria-label="Font family"
+            data-testid="context-freetext-font-family"
+          >
+            <option value="SansSerif">Helvetica</option>
+            <option value="Serif">Times</option>
+            <option value="Monospace">Courier</option>
+          </select>
+          <Input
+            type="number"
+            min={6}
+            max={144}
+            step={0.5}
+            value={freeTextSize}
+            onChange={(event) => setFreeTextSize(Number(event.target.value))}
+            className="h-8 w-16 px-1.5 text-xs"
+            aria-label="Font size"
+            data-testid="context-freetext-font-size"
+          />
+          <Button
+            type="button"
+            variant={freeTextBold ? "default" : "outline"}
+            size="icon"
+            onClick={() => setFreeTextBold((value) => !value)}
+            className="size-8"
+            aria-label="Bold"
+            aria-pressed={freeTextBold}
+            data-testid="context-freetext-bold"
+          >
+            <BoldIcon className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant={freeTextItalic ? "default" : "outline"}
+            size="icon"
+            onClick={() => setFreeTextItalic((value) => !value)}
+            className="size-8"
+            aria-label="Italic"
+            aria-pressed={freeTextItalic}
+            data-testid="context-freetext-italic"
+          >
+            <ItalicIcon className="size-3.5" />
+          </Button>
+          <input
+            type="color"
+            value={freeTextColor}
+            onChange={(event) => setFreeTextColor(event.target.value)}
+            className="size-8 rounded border border-slate-300 bg-white p-0.5"
+            aria-label="Text color"
+            data-testid="context-freetext-color"
+          />
+        </>
+      )}
       <Button
         type="button"
         variant="outline"
         size="sm"
         onClick={() => void commitContents()}
-        disabled={isSubmitting || localText === sourceText}
+        disabled={isSubmitting || (localText === sourceText && !freeTextStyleChanged)}
         className="h-8 text-xs px-2 shrink-0"
         data-testid="context-annotation-apply-btn"
       >
@@ -732,6 +951,7 @@ export function PdfContextualToolbar({
   containerRef,
   onDeselect,
   onReplaceText,
+  onApplyTextStyle,
   onDeleteText,
   onReplaceImage,
   onRemoveImage,
@@ -885,10 +1105,11 @@ export function PdfContextualToolbar({
       {/* TEXT SELECTION CONTROLS */}
       {selection.type === "text" && (
         <TextControls
-          key={selection.id}
+          key={`${selection.id}:${(selection.data as StarPdfTextSpan).text}:${(selection.data as StarPdfTextSpan).font_family ?? ""}:${(selection.data as StarPdfTextSpan).font_size}:${Boolean((selection.data as StarPdfTextSpan).is_bold)}:${Boolean((selection.data as StarPdfTextSpan).is_italic)}:${(selection.data as StarPdfTextSpan).fill_color?.join(",") ?? ""}`}
           span={selection.data as StarPdfTextSpan}
           group={selection.group}
           onReplaceText={onReplaceText}
+          onApplyTextStyle={onApplyTextStyle}
           onDeleteText={onDeleteText}
           onDeselect={onDeselect}
           onAddTextInstead={onAddTextInstead}
@@ -1075,7 +1296,7 @@ export function PdfContextualToolbar({
       {/* MARKUP ANNOTATION SELECTION CONTROLS */}
       {selection.type === "annotation" && (
         <AnnotationControls
-          key={`${selection.id}:${annotationValue ?? (selection.data as PdfMarkupAnnotation).contents ?? ""}`}
+          key={`${selection.id}:${annotationValue ?? (selection.data as PdfMarkupAnnotation).contents ?? ""}:${(selection.data as PdfMarkupAnnotation).fontFamily ?? ""}:${(selection.data as PdfMarkupAnnotation).fontSize ?? ""}:${Boolean((selection.data as PdfMarkupAnnotation).isBold)}:${Boolean((selection.data as PdfMarkupAnnotation).isItalic)}:${(selection.data as PdfMarkupAnnotation).textColor?.join(",") ?? ""}`}
           annot={selection.data as PdfMarkupAnnotation}
           annotationValue={annotationValue}
           onAnnotationChange={onAnnotationChange}

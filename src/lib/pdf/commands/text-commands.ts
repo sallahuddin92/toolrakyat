@@ -1,5 +1,41 @@
 import type { SmartPdfCommand, SmartPdfCommandContext, SmartPdfCommandResult } from "./types";
-import type { StarPdfReplaceTextResult } from "../starpdf-types";
+import type { StarPdfReplaceTextResult, StarPdfTextStylePatch } from "../starpdf-types";
+
+export class ApplyTextStyleCommand implements SmartPdfCommand {
+  readonly id = "text.apply_style";
+  readonly label = "Format text";
+  readonly isMutating = true;
+
+  constructor(
+    public readonly spanId: string | string[],
+    public readonly text: string,
+    public readonly patch: StarPdfTextStylePatch,
+  ) {}
+
+  async execute(context: SmartPdfCommandContext): Promise<SmartPdfCommandResult> {
+    const { starPdfDoc, currentPage } = context;
+    if (!starPdfDoc) {
+      throw new Error("No active StarPDF document handle available.");
+    }
+    const targets = Array.isArray(this.spanId) ? this.spanId : [this.spanId];
+    if (targets.length !== 1) {
+      throw new Error(
+        "TEXT_STYLE_GROUP_NOT_ISOLATABLE: select one native text run to apply formatting safely.",
+      );
+    }
+    const result = await starPdfDoc.applyTextStyle(
+      currentPage - 1,
+      targets[0],
+      this.text,
+      this.patch,
+    );
+    const updatedBytes = await starPdfDoc.exportIncremental();
+    return {
+      bytes: updatedBytes,
+      message: `Text formatting applied (${result.layout_result}).`,
+    };
+  }
+}
 
 export class ReplaceTextCommand implements SmartPdfCommand {
   readonly id = "text.replace";
@@ -116,6 +152,5 @@ export class MoveTextCommand implements SmartPdfCommand {
     };
   }
 }
-
 
 

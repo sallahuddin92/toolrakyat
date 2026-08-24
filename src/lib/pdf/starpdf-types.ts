@@ -77,6 +77,11 @@ export interface StarPdfTextSpan {
   operator_name: string;
   font_resource_name?: string;
   font_base_name?: string;
+  font_family?: string;
+  is_bold?: boolean;
+  is_italic?: boolean;
+  is_monospace?: boolean;
+  fill_color?: [number, number, number];
   is_editable: boolean;
   editability_code:
     | "EDITABLE_NATIVE_TEXT"
@@ -100,6 +105,36 @@ export interface StarPdfReplaceTextResult {
     | "UNSUPPORTED_LAYOUT"
     | string;
   modified_object_count: number;
+}
+
+export type StarPdfTextWeight = "NORMAL" | "BOLD";
+
+export interface StarPdfComputedTextStyle {
+  font_family: "SansSerif" | "Serif" | "Monospace" | "Symbolic" | string;
+  font_size: number;
+  weight: StarPdfTextWeight;
+  italic: boolean;
+  fill_color: [number, number, number];
+  source_font: string;
+  capability: "EDITABLE" | "SAFE_REFUSAL";
+}
+
+export interface StarPdfTextStylePatch {
+  font_family?: "SansSerif" | "Serif" | "Monospace";
+  font_size?: number;
+  weight?: StarPdfTextWeight;
+  italic?: boolean;
+  fill_color?: [number, number, number];
+  replacement_text?: string;
+}
+
+export interface StarPdfTextStylePlan {
+  is_executable: boolean;
+  computed: StarPdfComputedTextStyle;
+  requested: StarPdfComputedTextStyle;
+  strategy: string;
+  layout_safety: string;
+  refusal_reason?: string;
 }
 
 export interface StarPdfMoveTextResult {
@@ -226,6 +261,11 @@ export interface StarPdfUpdateAnnotationInput {
   line_endings?: StarPdfAddAnnotationInput["line_endings"];
   quad_points?: number[];
   ink_list?: [number, number][][];
+  font_family?: "SansSerif" | "Serif" | "Monospace";
+  font_size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  text_color?: [number, number, number];
 }
 
 /**

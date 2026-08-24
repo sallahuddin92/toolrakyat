@@ -3,12 +3,14 @@ use crate::text::matrix::Matrix2D;
 #[derive(Debug, Clone)]
 pub struct GraphicsState {
     pub ctm: Matrix2D,
+    pub fill_color: [f64; 3],
 }
 
 impl Default for GraphicsState {
     fn default() -> Self {
         Self {
             ctm: Matrix2D::identity(),
+            fill_color: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -26,6 +28,18 @@ pub struct TextState {
     pub text_rise: f64,
     pub render_mode: i32,
     pub in_text_object: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextStateParameters {
+    font_name: Option<String>,
+    font_size: f64,
+    char_spacing: f64,
+    word_spacing: f64,
+    horizontal_scaling: f64,
+    leading: f64,
+    text_rise: f64,
+    render_mode: i32,
 }
 
 impl Default for TextState {
@@ -47,6 +61,30 @@ impl Default for TextState {
 }
 
 impl TextState {
+    pub fn save_parameters(&self) -> TextStateParameters {
+        TextStateParameters {
+            font_name: self.font_name.clone(),
+            font_size: self.font_size,
+            char_spacing: self.char_spacing,
+            word_spacing: self.word_spacing,
+            horizontal_scaling: self.horizontal_scaling,
+            leading: self.leading,
+            text_rise: self.text_rise,
+            render_mode: self.render_mode,
+        }
+    }
+
+    pub fn restore_parameters(&mut self, saved: TextStateParameters) {
+        self.font_name = saved.font_name;
+        self.font_size = saved.font_size;
+        self.char_spacing = saved.char_spacing;
+        self.word_spacing = saved.word_spacing;
+        self.horizontal_scaling = saved.horizontal_scaling;
+        self.leading = saved.leading;
+        self.text_rise = saved.text_rise;
+        self.render_mode = saved.render_mode;
+    }
+
     pub fn begin_text(&mut self) {
         self.tm = Matrix2D::identity();
         self.tlm = Matrix2D::identity();

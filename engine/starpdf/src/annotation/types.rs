@@ -231,4 +231,9 @@ pub struct AnnotationUpdateSpec {
     pub line_endings: Option<[LineEndingStyle; 2]>,
     pub quad_points: Option<Vec<f64>>,
     pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
+    pub font_family: Option<String>,
+    pub font_size: Option<f64>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub text_color: Option<[f64; 3]>,
 }

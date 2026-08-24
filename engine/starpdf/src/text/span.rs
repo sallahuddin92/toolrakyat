@@ -65,6 +65,7 @@ pub struct TextSpan {
     pub is_bold: bool,
     pub is_italic: bool,
     pub is_monospace: bool,
+    pub fill_color: [f64; 3],
     pub original_bytes: Vec<u8>,
     pub is_editable: bool,
     pub editability_status: TextEditability,
@@ -108,6 +109,7 @@ impl TextSpan {
             is_bold: false,
             is_italic: false,
             is_monospace: false,
+            fill_color: [0.0, 0.0, 0.0],
             original_bytes: Vec::new(),
             is_editable: false,
             editability_status: TextEditability::ReadOnlyNativeText(

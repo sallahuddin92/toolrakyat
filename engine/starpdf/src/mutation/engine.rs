@@ -18,7 +18,7 @@ use crate::font::{
     plan_adaptive_text, FontFamily, FontProgramKind, FontStyle, SfntFont, Type0FontEmbedder,
 };
 use crate::forms::field::FieldType;
-use crate::mutation::change::PdfChange;
+use crate::mutation::change::{PdfChange, TextStyleMutation};
 use crate::mutation::result::MutationPlan;
 use crate::mutation::text_edit::{ContentStreamEditor, LayoutPolicyResult, TextEditTarget};
 use crate::syntax::object::{ObjectRef, PdfObject, StreamObject};
@@ -186,6 +186,25 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                         *page_index,
                         target,
                         replacement,
+                        None,
+                        &mut modified_objects,
+                    )?;
+                    overall_status = overall_status.combine(status);
+                    if last_layout_result.is_none() {
+                        last_layout_result = Some(layout);
+                    }
+                }
+                PdfChange::StyleText {
+                    page_index,
+                    target,
+                    replacement,
+                    style,
+                } => {
+                    let (status, layout) = self.mutate_replace_text(
+                        *page_index,
+                        target,
+                        replacement,
+                        Some(style),
                         &mut modified_objects,
                     )?;
                     overall_status = overall_status.combine(status);
@@ -332,6 +351,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         page_index: usize,
         target: &TextEditTarget,
         replacement: &str,
+        style_mutation: Option<&TextStyleMutation>,
         modified: &mut BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<(AppearanceStatus, LayoutPolicyResult)> {
         if page_index >= self.page_refs.len() {
@@ -346,6 +366,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 actual: page_obj.type_name(),
             })?
             .clone();
+        let original_page_dict = page_dict.clone();
 
         // 1. Resolve page resources and fonts
         let mut resources =
@@ -458,6 +479,14 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 _ => {}
             }
         }
+        if let Some(style) = style_mutation {
+            if !style.font_size.is_finite() || !(6.0..=144.0).contains(&style.font_size) {
+                return Err(PdfError::InvalidOperation(
+                    "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be within 6..=144 pt".into(),
+                ));
+            }
+            active_font_size = style.font_size;
+        }
 
         let fallback_font = crate::font::font::Font::standard_fallback("Helvetica");
         let orig_font = active_font_name
@@ -465,7 +494,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .and_then(|name| resources.get_font(name))
             .cloned()
             .unwrap_or(fallback_font);
-        let orig_style = orig_font.style;
+        let orig_style = style_mutation.map_or(orig_font.style, |style| style.font_style);
 
         // Check if complex script shaping is required
         for ch in replacement.chars() {
@@ -482,11 +511,26 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         // Priority 2: Use a compatible existing font from page resources matching style
         // Priority 3: Inject and use a standard style-matched Type1 font
         let mut font_switch: Option<(String, f64, String)> = None;
-        let effective_font = if orig_font.can_encode_text(replacement) {
+        let exact_requested_font = style_mutation.and_then(|style| {
+            resources
+                .get_font(&style.font_resource_name)
+                .filter(|font| font.style == style.font_style && font.can_encode_text(replacement))
+                .map(|font| (style.font_resource_name.clone(), font.clone()))
+        });
+        let effective_font = if let Some((resource_name, font)) = exact_requested_font {
+            let orig_name = active_font_name
+                .as_deref()
+                .unwrap_or(&orig_font.name)
+                .to_string();
+            font_switch = Some((resource_name, active_font_size, orig_name));
+            font
+        } else if style_mutation.is_none() && orig_font.can_encode_text(replacement) {
             orig_font.clone()
-        } else if let Some((comp_name, comp_font)) =
+        } else if let Some((comp_name, comp_font)) = if style_mutation.is_some() {
+            resources.find_exact_style_font(&orig_style, replacement)
+        } else {
             resources.find_compatible_font(&orig_style, replacement)
-        {
+        } {
             let orig_name = active_font_name
                 .as_deref()
                 .unwrap_or(&orig_font.name)
@@ -645,7 +689,19 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         };
 
         // 7. Mutate content stream with optional font switch
-        let modified_decompressed =
+        let modified_decompressed = if let Some(style) = style_mutation {
+            ContentStreamEditor::replace_multiple_in_stream_with_isolated_style(
+                &decompressed_data,
+                &[(target, encoded_replacement.as_slice())],
+                compensation,
+                font_switch.as_ref().map_or(
+                    active_font_name.as_deref().unwrap_or(&orig_font.name),
+                    |(name, _, _)| name.as_str(),
+                ),
+                style.font_size,
+                style.fill_color,
+            )?
+        } else {
             ContentStreamEditor::replace_multiple_in_stream_with_font_switch(
                 &decompressed_data,
                 &[(target, &encoded_replacement)],
@@ -653,7 +709,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 font_switch
                     .as_ref()
                     .map(|(n, s, o)| (n.as_str(), *s, o.as_str())),
-            )?;
+            )?
+        };
 
         // 8. Re-compress or update stream data
         let final_stream_data = if target_stream_obj.dict.contains_key("Filter") {
@@ -717,6 +774,9 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             modified.insert(page_ref, PdfObject::Dictionary(page_dict));
         } else if let Some(r) = target_stream_ref {
             modified.insert(r, PdfObject::Stream(target_stream_obj));
+            if page_dict != original_page_dict {
+                modified.insert(page_ref, PdfObject::Dictionary(page_dict));
+            }
         } else if is_direct_page_stream {
             page_dict.insert("Contents".to_string(), PdfObject::Stream(target_stream_obj));
             modified.insert(page_ref, PdfObject::Dictionary(page_dict));
@@ -738,7 +798,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             ));
         }
         if targets.len() == 1 {
-            return self.mutate_replace_text(page_index, &targets[0], replacement, modified);
+            return self.mutate_replace_text(page_index, &targets[0], replacement, None, modified);
         }
 
         if page_index >= self.page_refs.len() {
@@ -2067,6 +2127,51 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             dict.insert("InkList".to_string(), PdfObject::Array(paths));
         }
 
+        let has_text_style_update = update.font_family.is_some()
+            || update.font_size.is_some()
+            || update.bold.is_some()
+            || update.italic.is_some()
+            || update.text_color.is_some();
+        if has_text_style_update {
+            if subtype != "FreeText" {
+                return Err(PdfError::InvalidOperation(
+                    "TEXT_STYLE_TARGET_UNSUPPORTED: annotation text styling is limited to FreeText"
+                        .into(),
+                ));
+            }
+            let mut da = dict
+                .get("DA")
+                .and_then(PdfObject::as_string_lossy)
+                .and_then(|value| DefaultAppearance::parse(&value).ok())
+                .unwrap_or_default();
+            let current = crate::font::style_from_da_font_name(&da.font_name);
+            let family = update
+                .font_family
+                .as_deref()
+                .map(crate::font::parse_font_family)
+                .transpose()?
+                .unwrap_or(current.family);
+            let style = FontStyle {
+                family,
+                is_bold: update.bold.unwrap_or(current.is_bold),
+                is_italic: update.italic.unwrap_or(current.is_italic),
+                is_monospace: family == FontFamily::Monospace,
+            };
+            if let Some(size) = update.font_size {
+                if !size.is_finite() || !(6.0..=144.0).contains(&size) {
+                    return Err(PdfError::InvalidOperation(
+                        "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be within 6..=144 pt".into(),
+                    ));
+                }
+                da.font_size = size;
+            }
+            if let Some(color) = update.text_color {
+                da.color = crate::appearance::PdfColor::rgb(color[0], color[1], color[2])?;
+            }
+            da.font_name = style.standard_base_font_name().replace('-', "");
+            dict.insert("DA".to_string(), PdfObject::text_string(&da.to_da_string()));
+        }
+
         let visual_change = update.rect.is_some()
             || update.color.is_some()
             || update.fill_color.is_some()
@@ -2075,6 +2180,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             || update.line_endings.is_some()
             || update.quad_points.is_some()
             || update.ink_list.is_some()
+            || has_text_style_update
             || (subtype == "FreeText" && update.contents.is_some());
 
         let status = if visual_change {
@@ -2166,17 +2272,29 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .and_then(|value| DefaultAppearance::parse(&value).ok())
             .unwrap_or_default();
         let font_size = da.font_size.clamp(6.0, 72.0);
-        let style = FontStyle {
-            family: FontFamily::SansSerif,
-            is_bold: false,
-            is_italic: false,
-            is_monospace: false,
-        };
+        let style = crate::font::style_from_da_font_name(&da.font_name);
         let plan = plan_adaptive_text(&text, &style, font_size)?.ok_or_else(|| {
             PdfError::UnsupportedFontEncoding(
                 "No qualified adaptive font covers the complete FreeText value".into(),
             )
         })?;
+        let exact_variant = plan.fallback_runs.iter().all(|fallback| {
+            crate::font::BUILTIN_FONT_CATALOG
+                .iter()
+                .find(|entry| entry.font_id == fallback.font_id)
+                .is_some_and(|entry| {
+                    entry.family == style.family
+                        && (entry.weight >= 600) == style.is_bold
+                        && entry.is_italic == style.is_italic
+                        && entry.is_monospace == style.is_monospace
+                })
+        });
+        if !exact_variant {
+            return Err(PdfError::UnsupportedFontEncoding(
+                "TEXT_STYLE_VARIANT_UNAVAILABLE: no qualified real font variant covers the complete FreeText value"
+                    .into(),
+            ));
+        }
         if plan.fallback_runs.len() != plan.runs.len() {
             return Err(PdfError::InvalidOperation(
                 "Adaptive FreeText run metadata is inconsistent".into(),

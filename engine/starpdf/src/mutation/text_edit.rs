@@ -116,6 +116,45 @@ impl LayoutPolicyResult {
 pub struct ContentStreamEditor;
 
 impl ContentStreamEditor {
+    /// Verifies that a style operation can be scoped to exactly one text-show operation.
+    pub fn ensure_isolatable_style_target(
+        stream_bytes: &[u8],
+        target: &TextEditTarget,
+    ) -> PdfResult<()> {
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let instructions = parser.parse_instructions()?;
+        let instruction = instructions.get(target.instruction_index).ok_or_else(|| {
+            PdfError::TargetTextNotFound("Text style instruction is out of bounds".into())
+        })?;
+        if instruction.operator == ContentOperator::TJ {
+            let items = instruction
+                .operands
+                .first()
+                .and_then(ContentOperand::as_array)
+                .ok_or_else(|| PdfError::TargetTextNotFound("Malformed TJ array".into()))?;
+            let string_count = items
+                .iter()
+                .filter(|item| matches!(item, ContentOperand::String(_)))
+                .count();
+            if string_count != 1 {
+                return Err(PdfError::UnsupportedLayout(
+                    "TEXT_STYLE_SHARED_TJ_REFUSAL: selected text shares one TJ operation with unrelated text"
+                        .into(),
+                ));
+            }
+        }
+        if !matches!(
+            instruction.operator,
+            ContentOperator::Tj | ContentOperator::TJ
+        ) {
+            return Err(PdfError::UnsupportedLayout(
+                "TEXT_STYLE_OPERATOR_UNSUPPORTED: selected target is not an isolatable text-show operation"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Replaces targeted text bytes in raw content stream data, preserving all unrelated operators and graphics state.
     /// Replaces targeted text bytes in raw content stream data, preserving all unrelated operators and graphics state.
     pub fn replace_in_stream(
@@ -401,6 +440,81 @@ impl ContentStreamEditor {
         }
 
         Self::replace_multiple_in_stream_with_compensation(stream_bytes, edits, compensation)
+    }
+
+    /// Applies font, size, and RGB fill color to one exact text-show target inside a saved
+    /// graphics state. This refuses partial `TJ` arrays because styling the instruction would
+    /// otherwise affect sibling strings that were not selected.
+    pub fn replace_multiple_in_stream_with_isolated_style(
+        stream_bytes: &[u8],
+        edits: &[(&TextEditTarget, &[u8])],
+        compensation: Option<f64>,
+        font_name: &str,
+        font_size: f64,
+        fill_color: [f64; 3],
+    ) -> PdfResult<Vec<u8>> {
+        if edits.len() != 1 {
+            return Err(PdfError::UnsupportedLayout(
+                "TEXT_STYLE_GROUP_NOT_ISOLATABLE: style Apply requires one isolated text-show target"
+                    .into(),
+            ));
+        }
+        let (target, new_bytes) = edits[0];
+        Self::ensure_isolatable_style_target(stream_bytes, target)?;
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let mut instructions = parser.parse_instructions()?;
+
+        let prefix = vec![
+            ContentInstruction::new(Vec::new(), ContentOperator::Q),
+            ContentInstruction::new(
+                fill_color.into_iter().map(ContentOperand::Real).collect(),
+                ContentOperator::RGFill,
+            ),
+            ContentInstruction::new(
+                vec![
+                    ContentOperand::Name(font_name.trim_start_matches('/').to_string()),
+                    ContentOperand::Real(font_size),
+                ],
+                ContentOperator::Tf,
+            ),
+        ];
+        let prefix_len = prefix.len();
+        instructions.splice(target.instruction_index..target.instruction_index, prefix);
+        let styled_index = target.instruction_index + prefix_len;
+        let styled = &mut instructions[styled_index];
+        match styled.operator {
+            ContentOperator::Tj => {
+                if compensation.is_some_and(|value| value.abs() >= 0.001) {
+                    styled.operator = ContentOperator::TJ;
+                    styled.operands = vec![ContentOperand::Array(vec![
+                        ContentOperand::String(new_bytes.to_vec()),
+                        ContentOperand::Real(compensation.unwrap_or(0.0)),
+                    ])];
+                } else {
+                    styled.operands[0] = ContentOperand::String(new_bytes.to_vec());
+                }
+            }
+            ContentOperator::TJ => {
+                let items = styled
+                    .operands
+                    .first_mut()
+                    .and_then(|operand| match operand {
+                        ContentOperand::Array(items) => Some(items),
+                        _ => None,
+                    })
+                    .ok_or_else(|| PdfError::TargetTextNotFound("Malformed TJ array".into()))?;
+                items[target.operand_index] = ContentOperand::String(new_bytes.to_vec());
+                if compensation.is_some_and(|value| value.abs() >= 0.001) {
+                    items.push(ContentOperand::Real(compensation.unwrap_or(0.0)));
+                }
+            }
+            _ => unreachable!(),
+        }
+        instructions.insert(
+            styled_index + 1,
+            ContentInstruction::new(Vec::new(), ContentOperator::QEnd),
+        );
+        Ok(Self::serialize_instructions(&instructions))
     }
 
     /// Deterministically serializes content stream instructions into valid PDF content stream bytes.

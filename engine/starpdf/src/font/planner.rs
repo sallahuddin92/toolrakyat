@@ -69,6 +69,9 @@ pub struct TextReplacementPlan {
     pub layout_safety: LayoutSafetyClassification,
     pub fallback_runs: Vec<ShapedFallbackData>,
     pub refusal_reason: Option<String>,
+    pub requested_style: Option<FontStyle>,
+    pub fill_color: Option<[f64; 3]>,
+    pub isolated_style: bool,
 }
 
 impl TextReplacementPlan {
@@ -344,7 +347,9 @@ impl TextPlanner {
         let orig_style = requested_style.copied().unwrap_or(orig_font.style);
 
         // 1. FAST PATH: Check if original font can directly encode the replacement text
-        if orig_font.can_encode_text(replacement) {
+        if requested_style.is_none_or(|style| orig_font.style == *style)
+            && orig_font.can_encode_text(replacement)
+        {
             let runs = TextShaper::shape_text(orig_font, replacement);
             let total_font_units: f64 = runs.iter().map(|r| r.total_advance).sum();
             let predicted_width = (total_font_units / 1000.0) * font_size;
@@ -364,13 +369,19 @@ impl TextPlanner {
                 layout_safety: LayoutSafetyClassification::SafeExact,
                 fallback_runs: Vec::new(),
                 refusal_reason: None,
+                requested_style: requested_style.copied(),
+                fill_color: None,
+                isolated_style: false,
             });
         }
 
         // 2. ADAPTIVE PATH: Document font reuse
-        if let Some((compat_res_name, compat_font)) =
+        let compatible = if requested_style.is_some() {
+            resources.find_exact_style_font(&orig_style, replacement)
+        } else {
             resources.find_compatible_font(&orig_style, replacement)
-        {
+        };
+        if let Some((compat_res_name, compat_font)) = compatible {
             let runs = TextShaper::shape_text(compat_font, replacement);
             let total_font_units: f64 = runs.iter().map(|r| r.total_advance).sum();
             let predicted_width = (total_font_units / 1000.0) * font_size;
@@ -390,6 +401,9 @@ impl TextPlanner {
                 layout_safety: LayoutSafetyClassification::SafeBounded,
                 fallback_runs: Vec::new(),
                 refusal_reason: None,
+                requested_style: requested_style.copied(),
+                fill_color: None,
+                isolated_style: false,
             });
         }
 
@@ -420,10 +434,50 @@ impl TextPlanner {
                 layout_safety: LayoutSafetyClassification::SafeFallback,
                 fallback_runs: Vec::new(),
                 refusal_reason: None,
+                requested_style: requested_style.copied(),
+                fill_color: None,
+                isolated_style: false,
             });
         }
 
         if let Some(adaptive) = plan_adaptive_text(replacement, &orig_style, font_size)? {
+            let exact_variant = requested_style.is_none_or(|style| {
+                adaptive.fallback_runs.iter().all(|fallback| {
+                    crate::font::catalog::BUILTIN_FONT_CATALOG
+                        .iter()
+                        .find(|entry| entry.font_id == fallback.font_id)
+                        .is_some_and(|entry| {
+                            entry.family == style.family
+                                && (entry.weight >= 600) == style.is_bold
+                                && entry.is_italic == style.is_italic
+                                && entry.is_monospace == style.is_monospace
+                        })
+                })
+            });
+            if !exact_variant {
+                return Ok(TextReplacementPlan {
+                    page_index,
+                    target: target.clone(),
+                    original_text: orig_text,
+                    replacement_text: replacement.to_string(),
+                    strategy: ReplacementStrategy::SafeRefusal,
+                    runs: Vec::new(),
+                    direction,
+                    font_resource_name: span.font_resource_name.clone(),
+                    font_size,
+                    predicted_width: 0.0,
+                    available_width: span.width,
+                    layout_safety: LayoutSafetyClassification::UnsupportedFont,
+                    fallback_runs: Vec::new(),
+                    refusal_reason: Some(
+                        "TEXT_STYLE_VARIANT_UNAVAILABLE: no qualified real font variant covers the selected Unicode text"
+                            .into(),
+                    ),
+                    requested_style: requested_style.copied(),
+                    fill_color: None,
+                    isolated_style: false,
+                });
+            }
             let primary_res_name = format!(
                 "F_StarPDF_{}",
                 adaptive.fallback_runs[0].font_name.replace([' ', '-'], "")
@@ -443,6 +497,9 @@ impl TextPlanner {
                 layout_safety: LayoutSafetyClassification::SafeShaped,
                 fallback_runs: adaptive.fallback_runs,
                 refusal_reason: None,
+                requested_style: requested_style.copied(),
+                fill_color: None,
+                isolated_style: false,
             });
         }
 
@@ -468,6 +525,9 @@ impl TextPlanner {
             layout_safety: LayoutSafetyClassification::UnsupportedFont,
             fallback_runs: Vec::new(),
             refusal_reason: Some(reason),
+            requested_style: requested_style.copied(),
+            fill_color: None,
+            isolated_style: false,
         })
     }
 
@@ -485,11 +545,28 @@ impl TextPlanner {
             ReplacementStrategy::OriginalFont
             | ReplacementStrategy::DocumentFont
             | ReplacementStrategy::BundledFallback => {
-                doc.apply_mutation(&[crate::mutation::PdfChange::ReplaceText {
-                    page_index: plan.page_index,
-                    target: plan.target.clone(),
-                    replacement: plan.replacement_text.clone(),
-                }])
+                if plan.isolated_style {
+                    let font_style = plan.requested_style.ok_or_else(|| {
+                        PdfError::InvalidOperation("Missing requested text style".into())
+                    })?;
+                    doc.apply_mutation(&[crate::mutation::PdfChange::StyleText {
+                        page_index: plan.page_index,
+                        target: plan.target.clone(),
+                        replacement: plan.replacement_text.clone(),
+                        style: crate::mutation::TextStyleMutation {
+                            font_style,
+                            font_size: plan.font_size,
+                            fill_color: plan.fill_color.unwrap_or([0.0, 0.0, 0.0]),
+                            font_resource_name: plan.font_resource_name.clone(),
+                        },
+                    }])
+                } else {
+                    doc.apply_mutation(&[crate::mutation::PdfChange::ReplaceText {
+                        page_index: plan.page_index,
+                        target: plan.target.clone(),
+                        replacement: plan.replacement_text.clone(),
+                    }])
+                }
             }
             ReplacementStrategy::ShapedFallback => {
                 if plan.fallback_runs.is_empty() {
@@ -620,6 +697,13 @@ impl TextPlanner {
                     }
                 };
 
+                if plan.isolated_style {
+                    ContentStreamEditor::ensure_isolatable_style_target(
+                        &decompressed,
+                        &plan.target,
+                    )?;
+                }
+
                 let original_span = doc
                     .extract_page_text(plan.page_index)?
                     .spans
@@ -635,6 +719,15 @@ impl TextPlanner {
 
                 // 4. Build sequence of Tf + Tj instructions for the shaped runs
                 let mut replacement_instructions = Vec::new();
+                if plan.isolated_style {
+                    replacement_instructions
+                        .push(ContentInstruction::new(Vec::new(), ContentOperator::Q));
+                    let color = plan.fill_color.unwrap_or([0.0, 0.0, 0.0]);
+                    replacement_instructions.push(ContentInstruction::new(
+                        color.into_iter().map(ContentOperand::Real).collect(),
+                        ContentOperator::RGFill,
+                    ));
+                }
                 for fb in &plan.fallback_runs {
                     let font_tag = font_tags.get(&fb.font_id).ok_or_else(|| {
                         PdfError::InvalidOperation("Missing allocated font tag".into())
@@ -653,19 +746,24 @@ impl TextPlanner {
                     ));
                 }
 
-                // Restore original font if downstream text exists
-                replacement_instructions.push(ContentInstruction::new(
-                    vec![
-                        ContentOperand::Name(
-                            original_span
-                                .font_resource_name
-                                .trim_start_matches('/')
-                                .to_string(),
-                        ),
-                        ContentOperand::Real(original_span.font_size),
-                    ],
-                    ContentOperator::Tf,
-                ));
+                if plan.isolated_style {
+                    replacement_instructions
+                        .push(ContentInstruction::new(Vec::new(), ContentOperator::QEnd));
+                } else {
+                    // Restore original font if downstream text exists.
+                    replacement_instructions.push(ContentInstruction::new(
+                        vec![
+                            ContentOperand::Name(
+                                original_span
+                                    .font_resource_name
+                                    .trim_start_matches('/')
+                                    .to_string(),
+                            ),
+                            ContentOperand::Real(original_span.font_size),
+                        ],
+                        ContentOperator::Tf,
+                    ));
+                }
 
                 let modified_stream = ContentStreamEditor::replace_instruction_with_sequence(
                     &decompressed,

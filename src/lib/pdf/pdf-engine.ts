@@ -178,6 +178,40 @@ export async function inspectPdfDocument(
             author = (tEntry as unknown as { decodeText: () => string }).decodeText();
           }
 
+          let fontFamily: PdfMarkupAnnotation["fontFamily"];
+          let fontSize: number | undefined;
+          let isBold: boolean | undefined;
+          let isItalic: boolean | undefined;
+          let textColor: [number, number, number] | undefined;
+          if (subtypeRaw === "FreeText") {
+            const daEntry = annotDict.get(PDFName.of("DA"));
+            const da =
+              daEntry &&
+              typeof (daEntry as unknown as { decodeText?: () => string }).decodeText === "function"
+                ? (daEntry as unknown as { decodeText: () => string }).decodeText()
+                : daEntry?.toString().replace(/^\(|\)$/g, "") ?? "";
+            const fontMatch = /\/([^\s]+)\s+([+-]?(?:\d+\.?\d*|\.\d+))\s+Tf/.exec(da);
+            const fontName = fontMatch?.[1] ?? "Helvetica";
+            const lowerFont = fontName.toLowerCase();
+            fontFamily = lowerFont.includes("times")
+              ? "Serif"
+              : lowerFont.includes("courier")
+                ? "Monospace"
+                : "SansSerif";
+            fontSize = fontMatch ? Number(fontMatch[2]) : 12;
+            isBold = lowerFont.includes("bold");
+            isItalic = lowerFont.includes("italic") || lowerFont.includes("oblique");
+            const rgbMatch = /([+-]?(?:\d+\.?\d*|\.\d+))\s+([+-]?(?:\d+\.?\d*|\.\d+))\s+([+-]?(?:\d+\.?\d*|\.\d+))\s+rg/.exec(
+              da,
+            );
+            const grayMatch = /([+-]?(?:\d+\.?\d*|\.\d+))\s+g(?:\s|$)/.exec(da);
+            textColor = rgbMatch
+              ? [Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3])]
+              : grayMatch
+                ? [Number(grayMatch[1]), Number(grayMatch[1]), Number(grayMatch[1])]
+                : [0, 0, 0];
+          }
+
           let objectNumber: number | undefined;
           let generationNumber: number | undefined;
           if (annotRef instanceof PDFRef) {
@@ -200,6 +234,11 @@ export async function inspectPdfDocument(
             author,
             objectNumber,
             generationNumber,
+            fontFamily,
+            fontSize,
+            isBold,
+            isItalic,
+            textColor,
           });
         } catch {
           // Ignore malformed individual annotation

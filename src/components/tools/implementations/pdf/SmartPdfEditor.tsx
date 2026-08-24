@@ -37,6 +37,7 @@ import {
   undoHistory,
   redoHistory,
   ReplaceTextCommand,
+  ApplyTextStyleCommand,
   DeleteTextCommand,
   MoveTextCommand,
   ReplaceImageCommand,
@@ -1555,6 +1556,9 @@ export function SmartPdfEditor() {
               onDeselect={() => setSelectedItem(null)}
               onReplaceText={async (spanId, newText) => {
                 await executeCommand(new ReplaceTextCommand(spanId, newText));
+              }}
+              onApplyTextStyle={async (spanId, text, patch) => {
+                await executeCommand(new ApplyTextStyleCommand(spanId, text, patch));
               }}
               onDeleteText={async (spanId) => {
                 setSelectedItem(null);

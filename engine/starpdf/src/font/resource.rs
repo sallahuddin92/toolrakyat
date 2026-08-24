@@ -124,6 +124,13 @@ impl PageResources {
         best_match.map(|(name, font, _)| (name, font))
     }
 
+    /// Finds an existing page font with an exact family/weight/italic match and glyph coverage.
+    pub fn find_exact_style_font(&self, style: &FontStyle, text: &str) -> Option<(&str, &Font)> {
+        self.fonts.iter().find_map(|(name, font)| {
+            (font.style == *style && font.can_encode_text(text)).then_some((name.as_str(), font))
+        })
+    }
+
     /// Ensures a standard style-matched font is registered in the page resources.
     /// Returns the font resource name (e.g. `F_StarPDF_HelveticaBold`).
     pub fn ensure_standard_font(

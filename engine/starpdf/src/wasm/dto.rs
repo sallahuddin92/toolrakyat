@@ -56,6 +56,7 @@ pub struct WasmTextSpan {
     pub is_bold: Option<bool>,
     pub is_italic: Option<bool>,
     pub is_monospace: Option<bool>,
+    pub fill_color: Option<[f64; 3]>,
     pub base_font: Option<String>,
     pub is_editable: bool,
     pub editability_code: String,
@@ -79,6 +80,17 @@ pub struct WasmTextReplacementPlan {
     pub font_resource_name: String,
     pub predicted_width: f64,
     pub available_width: f64,
+    pub layout_safety: String,
+    pub refusal_reason: Option<String>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmTextStylePlan {
+    pub is_executable: bool,
+    pub computed: crate::font::ComputedTextStyle,
+    pub requested: crate::font::ComputedTextStyle,
+    pub strategy: String,
     pub layout_safety: String,
     pub refusal_reason: Option<String>,
 }
@@ -218,6 +230,11 @@ pub struct WasmUpdateAnnotationInput {
     pub line_endings: Option<[String; 2]>,
     pub quad_points: Option<Vec<f64>>,
     pub ink_list: Option<Vec<Vec<[f64; 2]>>>,
+    pub font_family: Option<String>,
+    pub font_size: Option<f64>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub text_color: Option<[f64; 3]>,
 }
 
 #[cfg(feature = "wasm")]

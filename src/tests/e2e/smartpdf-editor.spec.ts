@@ -4414,3 +4414,112 @@ test.describe("SmartPDF malformed xref recovery states", () => {
     await expect(page.getByTestId("search-results-count")).toHaveText("1/1");
   });
 });
+
+test.describe("SmartPDF basic text formatting", () => {
+  test("native formatting drafts until Apply and roundtrips through undo/redo and export", async ({
+    page,
+  }) => {
+    const fixture = await createClassicViewerFixture();
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "native-formatting.pdf", fixture);
+
+    const span = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await expect(span).toBeVisible();
+    await span.click();
+    await expect(page.getByTestId("context-text-font-family")).toBeVisible();
+    await page.getByTestId("context-text-font-family").selectOption("Serif");
+    await page.getByTestId("context-text-font-size").fill("20");
+    await page.getByTestId("context-text-bold").click();
+    await page.getByTestId("context-text-italic").click();
+    await page.getByTestId("context-text-color").fill("#336699");
+
+    await expect(page.getByTestId("document-modified-dot")).toBeHidden();
+    await page.getByTestId("context-text-save-btn").click();
+    await expect(page.getByTestId("document-modified-dot")).toBeVisible();
+
+    await page.getByTestId("toolbar-undo-btn").click();
+    await page.waitForTimeout(500);
+    const undoneSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await undoneSpan.click();
+    await expect(page.getByTestId("context-text-font-family")).toHaveValue("SansSerif");
+    await expect(page.getByTestId("context-text-font-size")).toHaveValue("18");
+    await expect(page.getByTestId("context-text-bold")).toHaveAttribute("aria-pressed", "false");
+    await page.keyboard.press("Escape");
+    await page.getByTestId("toolbar-redo-btn").click();
+    await page.waitForTimeout(500);
+    const redoneSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await redoneSpan.click();
+    await expect(page.getByTestId("context-text-font-family")).toHaveValue("Serif");
+    await expect(page.getByTestId("context-text-font-size")).toHaveValue("20");
+    await page.keyboard.press("Escape");
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    const output = fs.readFileSync(downloadPath!);
+    await uploadPdfBytes(page, "native-formatting-reopened.pdf", output);
+
+    const reopenedSpan = page.locator('[data-testid^="canvas-text-span-"]').first();
+    await reopenedSpan.click();
+    await expect(page.getByTestId("context-text-font-family")).toHaveValue("Serif");
+    await expect(page.getByTestId("context-text-font-size")).toHaveValue("20");
+    await expect(page.getByTestId("context-text-bold")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-text-italic")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-text-color")).toHaveValue("#336699");
+  });
+
+  test("FreeText content and formatting commit atomically with stable object identity", async ({
+    page,
+  }) => {
+    const fixture = await createClassicViewerFixture();
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "freetext-formatting.pdf", fixture);
+    await page.getByTestId("toolbar-mode-fill-sign-btn").click();
+    await page.getByTestId("fill-sign-tool-text-btn").click();
+    await page.getByTestId("pdf-interactive-overlay").click({ position: { x: 170, y: 170 } });
+    await page.getByTestId("inline-text-placement-input").fill("Original note");
+    await page.getByTestId("inline-text-placement-commit-btn").click();
+
+    const created = page
+      .locator('[data-testid^="canvas-annotation-annot-obj-"][title*="Original note"]')
+      .first();
+    await expect(created).toBeVisible();
+    const stableId = await created.getAttribute("data-testid");
+    expect(stableId).toMatch(/^canvas-annotation-annot-obj-\d+-\d+$/);
+
+    await page.getByTestId("context-annotation-input").fill("Formatted note");
+    await page.getByTestId("context-freetext-font-family").selectOption("Serif");
+    await page.getByTestId("context-freetext-font-size").fill("19");
+    await page.getByTestId("context-freetext-bold").click();
+    await page.getByTestId("context-freetext-italic").click();
+    await page.getByTestId("context-freetext-color").fill("#993366");
+    await page.getByTestId("context-annotation-apply-btn").click();
+
+    const styled = page.locator(`[data-testid="${stableId}"][title*="Formatted note"]`);
+    await expect(styled).toBeVisible();
+    await page.getByTestId("toolbar-undo-btn").click();
+    await expect(page.locator(`[data-testid="${stableId}"][title*="Original note"]`)).toBeVisible();
+    await page.getByTestId("toolbar-redo-btn").click();
+    await expect(styled).toBeVisible();
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export Editable" }).click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    await uploadPdfBytes(page, "freetext-formatting-reopened.pdf", fs.readFileSync(downloadPath!));
+    const reopened = page.locator(`[data-testid="${stableId}"][title*="Formatted note"]`);
+    await expect(reopened).toBeVisible();
+    await reopened.click();
+    await expect(page.getByTestId("context-freetext-font-family")).toHaveValue("Serif");
+    await expect(page.getByTestId("context-freetext-font-size")).toHaveValue("19");
+    await expect(page.getByTestId("context-freetext-bold")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-italic")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByTestId("context-freetext-color")).toHaveValue("#993366");
+  });
+});

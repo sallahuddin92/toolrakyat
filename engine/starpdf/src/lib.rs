@@ -70,7 +70,10 @@ pub use document::{
 };
 pub use error::{PdfError, PdfResult};
 pub use filter::{DecompressLimits, FlateDecoder, PredictorDecoder, PredictorParams};
-pub use font::{Font, PageResources, SimpleEncoding, UnicodeCMap};
+pub use font::{
+    ComputedTextStyle, Font, PageResources, SimpleEncoding, TextStyleCapability, TextStylePatch,
+    TextStylePlan, TextStylePlanner, TextWeight, UnicodeCMap,
+};
 pub use forms::{
     AcroForm, AcroFormParser, ChoiceOption, FieldType, FieldValue, FormField, WidgetAnnotation,
 };
@@ -81,7 +84,7 @@ pub use image::{
 pub use io::{ByteCursor, ByteSource};
 pub use mutation::{
     ContentStreamEditor, LayoutPolicyResult, MutationEngine, MutationPlan, PdfChange,
-    TextEditTarget,
+    TextEditTarget, TextStyleMutation,
 };
 pub use page_ops::{
     DependencyDisposition, DocumentBuilder, DocumentWriteMode, IncrementalPageEditor, PageEdit,

@@ -11,6 +11,7 @@ pub mod resource;
 pub mod sfnt;
 pub mod shaping;
 pub mod standard_metrics;
+pub mod style;
 pub mod subset;
 
 pub use cache::{get_font_cache, FontRuntimeCache};
@@ -31,3 +32,7 @@ pub use resource::PageResources;
 pub use sfnt::SfntFont;
 pub use shaping::{ShapedGlyph, ShapedRun, TextDirection, TextShaper};
 pub use standard_metrics::StandardFontMetrics;
+pub use style::{
+    font_family_name, parse_font_family, style_from_da_font_name, ComputedTextStyle,
+    TextStyleCapability, TextStylePatch, TextStylePlan, TextStylePlanner, TextWeight,
+};

@@ -49,6 +49,11 @@ export interface PdfMarkupAnnotation {
   author?: string;
   objectNumber?: number;
   generationNumber?: number;
+  fontFamily?: "SansSerif" | "Serif" | "Monospace";
+  fontSize?: number;
+  isBold?: boolean;
+  isItalic?: boolean;
+  textColor?: [number, number, number];
 }
 
 

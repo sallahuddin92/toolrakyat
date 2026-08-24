@@ -1,6 +1,14 @@
 use crate::annotation::types::{AnnotationSpec, AnnotationUpdateSpec};
 use crate::syntax::object::ObjectRef;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextStyleMutation {
+    pub font_style: crate::font::FontStyle,
+    pub font_size: f64,
+    pub fill_color: [f64; 3],
+    pub font_resource_name: String,
+}
+
 /// Strongly-typed discrete document mutation operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfChange {
@@ -56,6 +64,13 @@ pub enum PdfChange {
         page_index: usize,
         targets: Vec<crate::mutation::text_edit::TextEditTarget>,
         replacement: String,
+    },
+    /// Rewrites one native text-show target with an isolated, planned font/size/color state.
+    StyleText {
+        page_index: usize,
+        target: crate::mutation::text_edit::TextEditTarget,
+        replacement: String,
+        style: TextStyleMutation,
     },
     /// Moves native existing content-stream text by (dx, dy) in PDF default user space.
     MoveText {

@@ -19,8 +19,8 @@ use crate::wasm::dto::{
     WasmChoiceOption, WasmDeleteVectorGraphicInput, WasmDocumentInfo, WasmFormField, WasmImageInfo,
     WasmImageMutationResult, WasmMoveTextResult, WasmPageText, WasmReplaceTextResult,
     WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextReplacementPlan,
-    WasmTextSpan, WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo,
-    WasmVectorMutationResult, WasmWidget,
+    WasmTextSpan, WasmTextStylePlan, WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput,
+    WasmVectorGraphicInfo, WasmVectorMutationResult, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -163,6 +163,7 @@ pub fn starpdf_extract_page_text(handle: u32, page_index: u32) -> Result<JsValue
                     is_bold: Some(s.is_bold),
                     is_italic: Some(s.is_italic),
                     is_monospace: Some(s.is_monospace),
+                    fill_color: Some(s.fill_color),
                     base_font: Some(s.font_base_name.clone()),
                     is_editable: s.is_editable,
                     editability_code: s.editability_status.code().to_string(),
@@ -214,6 +215,7 @@ pub fn starpdf_extract_all_text(handle: u32) -> Result<JsValue, JsValue> {
                             is_bold: Some(s.is_bold),
                             is_italic: Some(s.is_italic),
                             is_monospace: Some(s.is_monospace),
+                            fill_color: Some(s.fill_color),
                             base_font: Some(s.font_base_name.clone()),
                             is_editable: s.is_editable,
                             editability_code: s.editability_status.code().to_string(),
@@ -265,6 +267,82 @@ pub fn starpdf_replace_text(
 
     serde_wasm_bindgen::to_value(&dto)
         .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_inspect_text_style(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let target = crate::mutation::TextEditTarget::from_span_id(span_id)?;
+            let style = doc.inspect_text_style(page_index as usize, &target)?;
+            serde_wasm_bindgen::to_value(&style)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_plan_text_style_change(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+    patch_value: JsValue,
+) -> Result<JsValue, JsValue> {
+    let patch: crate::font::TextStylePatch = serde_wasm_bindgen::from_value(patch_value)
+        .map_err(|error| JsValue::from_str(&format!("Invalid text style patch: {error}")))?;
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let target = crate::mutation::TextEditTarget::from_span_id(span_id)?;
+            let plan = doc.plan_text_style_change(page_index as usize, &target, &patch)?;
+            let value = WasmTextStylePlan {
+                is_executable: plan.replacement.is_executable(),
+                computed: plan.computed,
+                requested: plan.requested,
+                strategy: format!("{:?}", plan.replacement.strategy),
+                layout_safety: format!("{:?}", plan.replacement.layout_safety),
+                refusal_reason: plan.replacement.refusal_reason,
+            };
+            serde_wasm_bindgen::to_value(&value)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_apply_text_style(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+    patch_value: JsValue,
+) -> Result<JsValue, JsValue> {
+    let patch: crate::font::TextStylePatch = serde_wasm_bindgen::from_value(patch_value)
+        .map_err(|error| JsValue::from_str(&format!("Invalid text style patch: {error}")))?;
+    let mut layout = String::from("EXACT_FIT");
+    let mut modified_object_count = 0;
+    let _ = REGISTRY
+        .transform_and_replace(handle, |doc| {
+            let target = crate::mutation::TextEditTarget::from_span_id(span_id)?;
+            let plan = doc.style_text(page_index as usize, &target, &patch)?;
+            if let Some(result) = &plan.layout_policy_result {
+                layout = result.as_str().to_string();
+            }
+            modified_object_count = plan.modified_objects.len();
+            doc.export_incremental(&plan)
+        })
+        .map_err(to_js_error)?;
+    serde_wasm_bindgen::to_value(&WasmReplaceTextResult {
+        success: true,
+        layout_result: layout,
+        modified_object_count,
+    })
+    .map_err(|error| to_js_error(crate::error::PdfError::InvalidOperation(error.to_string())))
 }
 
 #[cfg(feature = "wasm")]
@@ -429,6 +507,7 @@ pub fn starpdf_get_text_editability(
                 is_bold: Some(span.is_bold),
                 is_italic: Some(span.is_italic),
                 is_monospace: Some(span.is_monospace),
+                fill_color: Some(span.fill_color),
                 base_font: Some(span.font_base_name.clone()),
                 is_editable: span.is_editable,
                 editability_code: span.editability_status.code().to_string(),
@@ -815,6 +894,11 @@ pub fn starpdf_update_annotation(
         line_endings,
         quad_points: input.quad_points,
         ink_list: input.ink_list,
+        font_family: input.font_family,
+        font_size: input.font_size,
+        bold: input.bold,
+        italic: input.italic,
+        text_color: input.text_color,
     };
 
     let change = PdfChange::UpdateAnnotation {

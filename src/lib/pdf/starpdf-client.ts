@@ -15,6 +15,9 @@ import type {
   StarPdfSearchResult,
   StarPdfSecurityInfo,
   StarPdfTextSpan,
+  StarPdfComputedTextStyle,
+  StarPdfTextStylePatch,
+  StarPdfTextStylePlan,
   StarPdfUpdateAnnotationInput,
   StarPdfUpdateVectorGraphicInput,
   StarPdfVectorGraphicInfo,
@@ -49,6 +52,9 @@ import initWasm, {
   starpdf_move_page,
   starpdf_remove_annotation,
   starpdf_replace_text,
+  starpdf_inspect_text_style,
+  starpdf_plan_text_style_change,
+  starpdf_apply_text_style,
   starpdf_replace_text_group,
   starpdf_move_text,
   starpdf_move_text_group,
@@ -413,6 +419,51 @@ export class StarPdfDocumentHandle {
       pageIndex,
       spanIds,
       newText
+    ) as StarPdfReplaceTextResult;
+  }
+
+  async inspectTextStyle(
+    pageIndex: number,
+    spanId: string,
+  ): Promise<StarPdfComputedTextStyle> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_inspect_text_style(
+      this._handle,
+      pageIndex,
+      spanId,
+    ) as StarPdfComputedTextStyle;
+  }
+
+  async planTextStyleChange(
+    pageIndex: number,
+    spanId: string,
+    text: string,
+    patch: StarPdfTextStylePatch,
+  ): Promise<StarPdfTextStylePlan> {
+    this.assertOpen();
+    await registerFallbackFontsForText(text);
+    return starpdf_plan_text_style_change(
+      this._handle,
+      pageIndex,
+      spanId,
+      patch,
+    ) as StarPdfTextStylePlan;
+  }
+
+  async applyTextStyle(
+    pageIndex: number,
+    spanId: string,
+    text: string,
+    patch: StarPdfTextStylePatch,
+  ): Promise<StarPdfReplaceTextResult> {
+    this.assertOpen();
+    await registerFallbackFontsForText(text);
+    return starpdf_apply_text_style(
+      this._handle,
+      pageIndex,
+      spanId,
+      patch,
     ) as StarPdfReplaceTextResult;
   }
 

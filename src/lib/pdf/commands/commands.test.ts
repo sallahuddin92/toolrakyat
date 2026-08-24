@@ -221,6 +221,62 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       );
     });
 
+    it("ApplyTextStyleCommand sends one combined mutation and one exported snapshot", async () => {
+      const { ApplyTextStyleCommand } = await import("./text-commands");
+      const applyTextStyle = vi.fn().mockResolvedValue({
+        success: true,
+        layout_result: "EXACT_FIT",
+        modified_object_count: 2,
+      });
+      const exportIncremental = vi.fn().mockResolvedValue(new Uint8Array([9, 8, 7]));
+      const context = {
+        ...baseContext,
+        currentPage: 2,
+        starPdfDoc: {
+          applyTextStyle,
+          exportIncremental,
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+      const patch = {
+        font_family: "Serif" as const,
+        font_size: 18,
+        weight: "BOLD" as const,
+        italic: true,
+        fill_color: [0.1, 0.2, 0.3] as [number, number, number],
+        replacement_text: "Styled once",
+      };
+
+      const result = await new ApplyTextStyleCommand("p1_s0_i4_o0", "Styled once", patch).execute(
+        context,
+      );
+
+      expect(applyTextStyle).toHaveBeenCalledTimes(1);
+      expect(applyTextStyle).toHaveBeenCalledWith(1, "p1_s0_i4_o0", "Styled once", patch);
+      expect(exportIncremental).toHaveBeenCalledTimes(1);
+      expect(result.bytes).toEqual(new Uint8Array([9, 8, 7]));
+    });
+
+    it("ApplyTextStyleCommand refuses grouped native targets before mutation", async () => {
+      const { ApplyTextStyleCommand } = await import("./text-commands");
+      const applyTextStyle = vi.fn();
+      const exportIncremental = vi.fn();
+      const context = {
+        ...baseContext,
+        starPdfDoc: {
+          applyTextStyle,
+          exportIncremental,
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+
+      await expect(
+        new ApplyTextStyleCommand(["span-a", "span-b"], "Text", { font_size: 16 }).execute(
+          context,
+        ),
+      ).rejects.toThrow("TEXT_STYLE_GROUP_NOT_ISOLATABLE");
+      expect(applyTextStyle).not.toHaveBeenCalled();
+      expect(exportIncremental).not.toHaveBeenCalled();
+    });
+
     it("Image and Vector direct manipulation commands declare mutating flag and execute through handle", async () => {
       const { UpdateImageCommand } = await import("./image-commands");
       const { AddRectangleCommand, AddLineCommand, UpdateVectorCommand } = await import(
@@ -558,4 +614,3 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
   });
 
 });
-

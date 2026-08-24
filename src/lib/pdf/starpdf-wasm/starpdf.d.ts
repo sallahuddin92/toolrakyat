@@ -9,6 +9,8 @@ export function starpdf_add_line(handle: number, input_val: any): any;
 
 export function starpdf_add_rectangle(handle: number, input_val: any): any;
 
+export function starpdf_apply_text_style(handle: number, page_index: number, span_id: string, patch_value: any): any;
+
 export function starpdf_close(handle: number): boolean;
 
 export function starpdf_create_minimal_pdf(text: string): Uint8Array;
@@ -53,6 +55,8 @@ export function starpdf_insert_blank_page(handle: number, page_index: number, wi
 
 export function starpdf_insert_imported_page(handle: number, imported_bytes: Uint8Array, imported_page_index: number, insert_at: number): Uint8Array;
 
+export function starpdf_inspect_text_style(handle: number, page_index: number, span_id: string): any;
+
 export function starpdf_merge_documents(documents: any): Uint8Array;
 
 export function starpdf_merge_selected(documents: any, page_sources: any): Uint8Array;
@@ -66,6 +70,8 @@ export function starpdf_move_text_group(handle: number, page_index: number, span
 export function starpdf_open(bytes: Uint8Array): number;
 
 export function starpdf_plan_text_replacement(handle: number, page_index: number, span_id: string, new_text: string): any;
+
+export function starpdf_plan_text_style_change(handle: number, page_index: number, span_id: string, patch_value: any): any;
 
 export function starpdf_register_font_asset(font_id: string, bytes: Uint8Array): void;
 
@@ -111,6 +117,7 @@ export interface InitOutput {
     readonly starpdf_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];
     readonly starpdf_add_line: (a: number, b: any) => [number, number, number];
     readonly starpdf_add_rectangle: (a: number, b: any) => [number, number, number];
+    readonly starpdf_apply_text_style: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly starpdf_close: (a: number) => [number, number, number];
     readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
     readonly starpdf_delete_graphic: (a: number, b: any) => [number, number, number];
@@ -133,6 +140,7 @@ export interface InitOutput {
     readonly starpdf_get_text_editability: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_insert_imported_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly starpdf_inspect_text_style: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_merge_documents: (a: any) => [number, number, number, number];
     readonly starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
     readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
@@ -140,6 +148,7 @@ export interface InitOutput {
     readonly starpdf_move_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
     readonly starpdf_plan_text_replacement: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
+    readonly starpdf_plan_text_style_change: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
     readonly starpdf_register_font_asset: (a: number, b: number, c: number, d: number) => void;
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];

@@ -4,7 +4,7 @@ use crate::font::font::Font;
 use crate::font::resource::PageResources;
 use crate::text::matrix::Matrix2D;
 use crate::text::span::{PageText, TextSpan};
-use crate::text::state::{GraphicsState, TextState};
+use crate::text::state::{GraphicsState, TextState, TextStateParameters};
 
 pub struct TextExtractor;
 
@@ -25,7 +25,7 @@ impl TextExtractor {
         resources: &PageResources,
     ) -> PdfResult<PageText> {
         let mut page_text = PageText::new(page_index);
-        let mut graphics_stack: Vec<GraphicsState> = Vec::new();
+        let mut graphics_stack: Vec<(GraphicsState, TextStateParameters)> = Vec::new();
         let mut current_graphics = GraphicsState::default();
         let mut text_state = TextState::default();
 
@@ -58,7 +58,7 @@ impl TextExtractor {
         resources: &PageResources,
     ) -> PdfResult<PageText> {
         let mut page_text = PageText::new(page_index);
-        let mut graphics_stack: Vec<GraphicsState> = Vec::new();
+        let mut graphics_stack: Vec<(GraphicsState, TextStateParameters)> = Vec::new();
         let mut current_graphics = GraphicsState::default();
         let mut text_state = TextState::default();
 
@@ -85,7 +85,7 @@ impl TextExtractor {
         instructions: &[ContentInstruction],
         resources: &PageResources,
         fallback_font: &Font,
-        graphics_stack: &mut Vec<GraphicsState>,
+        graphics_stack: &mut Vec<(GraphicsState, TextStateParameters)>,
         current_graphics: &mut GraphicsState,
         text_state: &mut TextState,
         page_text: &mut PageText,
@@ -94,12 +94,13 @@ impl TextExtractor {
             match instr.operator {
                 ContentOperator::Q => {
                     // Save graphics state
-                    graphics_stack.push(current_graphics.clone());
+                    graphics_stack.push((current_graphics.clone(), text_state.save_parameters()));
                 }
                 ContentOperator::QEnd => {
                     // Restore graphics state
-                    if let Some(prev) = graphics_stack.pop() {
-                        *current_graphics = prev;
+                    if let Some((graphics, text_parameters)) = graphics_stack.pop() {
+                        *current_graphics = graphics;
+                        text_state.restore_parameters(text_parameters);
                     }
                 }
                 ContentOperator::Cm => {
@@ -130,6 +131,38 @@ impl TextExtractor {
                         let font_name = instr.operands[0].as_name().unwrap_or("");
                         let size = instr.operands[1].as_f64().unwrap_or(12.0);
                         text_state.set_font(font_name, size);
+                    }
+                }
+                ContentOperator::GFill => {
+                    if let Some(gray) = instr.operands.first().and_then(ContentOperand::as_f64) {
+                        current_graphics.fill_color = [gray, gray, gray];
+                    }
+                }
+                ContentOperator::RGFill => {
+                    if instr.operands.len() >= 3 {
+                        if let (Some(r), Some(g), Some(b)) = (
+                            instr.operands[0].as_f64(),
+                            instr.operands[1].as_f64(),
+                            instr.operands[2].as_f64(),
+                        ) {
+                            current_graphics.fill_color = [r, g, b];
+                        }
+                    }
+                }
+                ContentOperator::KFill => {
+                    if instr.operands.len() >= 4 {
+                        if let (Some(c), Some(m), Some(y), Some(k)) = (
+                            instr.operands[0].as_f64(),
+                            instr.operands[1].as_f64(),
+                            instr.operands[2].as_f64(),
+                            instr.operands[3].as_f64(),
+                        ) {
+                            current_graphics.fill_color = [
+                                1.0 - (c + k).min(1.0),
+                                1.0 - (m + k).min(1.0),
+                                1.0 - (y + k).min(1.0),
+                            ];
+                        }
                     }
                 }
                 ContentOperator::Tm => {
@@ -322,6 +355,7 @@ impl TextExtractor {
             is_bold: font.style.is_bold,
             is_italic: font.style.is_italic,
             is_monospace: font.style.is_monospace,
+            fill_color: graphics.fill_color,
             original_bytes: bytes.to_vec(),
             is_editable,
             editability_status: editability,

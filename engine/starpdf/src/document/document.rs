@@ -476,6 +476,44 @@ impl<'a> PdfDocument<'a> {
         crate::font::planner::TextPlanner::apply(self, &plan)
     }
 
+    /// Inspects the effective style of one exact native text target.
+    pub fn inspect_text_style(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+    ) -> PdfResult<crate::font::ComputedTextStyle> {
+        crate::font::TextStylePlanner::inspect_native(self, page_index, target)
+    }
+
+    /// Plans a safe, isolated native text style change without mutating the document.
+    pub fn plan_text_style_change(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+        patch: &crate::font::TextStylePatch,
+    ) -> PdfResult<crate::font::TextStylePlan> {
+        crate::font::TextStylePlanner::plan_native(self, page_index, target, patch)
+    }
+
+    /// Applies an already validated native text style plan atomically.
+    pub fn apply_text_style_plan(
+        &mut self,
+        plan: &crate::font::TextStylePlan,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        crate::font::TextStylePlanner::apply_native(self, plan)
+    }
+
+    /// Plans and applies one safe native text style change.
+    pub fn style_text(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+        patch: &crate::font::TextStylePatch,
+    ) -> PdfResult<crate::mutation::MutationPlan> {
+        let plan = self.plan_text_style_change(page_index, target, patch)?;
+        self.apply_text_style_plan(&plan)
+    }
+
     /// Replaces native existing content-stream text specified by a structural span ID.
     pub fn replace_text_span(
         &mut self,
