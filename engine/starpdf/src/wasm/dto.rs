@@ -70,6 +70,19 @@ pub struct WasmReplaceTextResult {
 
 #[cfg(feature = "wasm")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmTextReplacementPlan {
+    pub is_executable: bool,
+    pub strategy: String,
+    pub direction: String,
+    pub font_resource_name: String,
+    pub predicted_width: f64,
+    pub available_width: f64,
+    pub layout_safety: String,
+    pub refusal_reason: Option<String>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmMoveTextResult {
     pub success: bool,
     pub modified_object_count: usize,

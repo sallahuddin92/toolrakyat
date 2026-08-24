@@ -18,8 +18,8 @@ use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAddLineInput, WasmAddRectangleInput, WasmAnnotation,
     WasmChoiceOption, WasmDeleteVectorGraphicInput, WasmDocumentInfo, WasmFormField, WasmImageInfo,
     WasmImageMutationResult, WasmMoveTextResult, WasmPageText, WasmReplaceTextResult,
-    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextSpan,
-    WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo,
+    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextReplacementPlan,
+    WasmTextSpan, WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo,
     WasmVectorMutationResult, WasmWidget,
 };
 #[cfg(feature = "wasm")]
@@ -257,6 +257,34 @@ pub fn starpdf_replace_text(
 
     serde_wasm_bindgen::to_value(&dto)
         .map_err(|e| to_js_error(crate::error::PdfError::InvalidOperation(e.to_string())))
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_plan_text_replacement(
+    handle: u32,
+    page_index: u32,
+    span_id: &str,
+    new_text: &str,
+) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let target = crate::mutation::text_edit::TextEditTarget::from_span_id(span_id)?;
+            let plan = doc.plan_text_replacement(page_index as usize, &target, new_text, None)?;
+            let dto = WasmTextReplacementPlan {
+                is_executable: plan.is_executable(),
+                strategy: format!("{:?}", plan.strategy),
+                direction: format!("{:?}", plan.direction),
+                font_resource_name: plan.font_resource_name,
+                predicted_width: plan.predicted_width,
+                available_width: plan.available_width,
+                layout_safety: format!("{:?}", plan.layout_safety),
+                refusal_reason: plan.refusal_reason,
+            };
+            serde_wasm_bindgen::to_value(&dto)
+                .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
+        })
+        .map_err(to_js_error)
 }
 
 #[cfg(feature = "wasm")]

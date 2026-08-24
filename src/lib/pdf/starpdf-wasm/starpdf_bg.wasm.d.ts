@@ -33,6 +33,7 @@ export const starpdf_move_page: (a: number, b: number, c: number) => [number, nu
 export const starpdf_move_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const starpdf_move_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
 export const starpdf_open: (a: number, b: number) => [number, number, number];
+export const starpdf_plan_text_replacement: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
 export const starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const starpdf_replace_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];

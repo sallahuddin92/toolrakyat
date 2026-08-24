@@ -360,6 +360,23 @@ impl<'a> PdfDocument<'a> {
         self.export_incremental(&plan)
     }
 
+    /// Plans a native text replacement without mutating the document state.
+    pub fn plan_text_replacement(
+        &mut self,
+        page_index: usize,
+        target: &crate::mutation::text_edit::TextEditTarget,
+        replacement: &str,
+        requested_style: Option<&crate::font::font::FontStyle>,
+    ) -> PdfResult<crate::font::planner::TextReplacementPlan> {
+        crate::font::planner::TextPlanner::plan(
+            self,
+            page_index,
+            target,
+            replacement,
+            requested_style,
+        )
+    }
+
     /// Replaces native existing content-stream text at a specific target.
     pub fn replace_text(
         &mut self,

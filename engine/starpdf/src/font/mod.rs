@@ -1,15 +1,27 @@
 pub mod appearance;
+pub mod cache;
+pub mod catalog;
 pub mod cmap;
+pub mod coverage;
 pub mod encoding;
 pub mod font;
+pub mod planner;
 pub mod resource;
 pub mod sfnt;
+pub mod shaping;
 pub mod standard_metrics;
 pub mod subset;
 
+pub use cache::{get_font_cache, FontRuntimeCache};
+pub use catalog::{find_candidate_fallbacks, FontCatalogEntry, BUILTIN_FONT_CATALOG};
 pub use cmap::UnicodeCMap;
+pub use coverage::{CoarseCoverageBitmap, COARSE_COVERAGE_BITMAP_BYTES, COARSE_UNICODE_PAGE_COUNT};
 pub use encoding::SimpleEncoding;
 pub use font::{Font, FontFamily, FontProgramKind, FontStyle};
+pub use planner::{
+    LayoutSafetyClassification, ReplacementStrategy, TextPlanner, TextReplacementPlan,
+};
 pub use resource::PageResources;
 pub use sfnt::SfntFont;
+pub use shaping::{ShapedGlyph, ShapedRun, TextDirection, TextShaper};
 pub use standard_metrics::StandardFontMetrics;

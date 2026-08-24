@@ -65,6 +65,8 @@ export function starpdf_move_text_group(handle: number, page_index: number, span
 
 export function starpdf_open(bytes: Uint8Array): number;
 
+export function starpdf_plan_text_replacement(handle: number, page_index: number, span_id: string, new_text: string): any;
+
 export function starpdf_remove_annotation(handle: number, page_index: number, obj_num: bigint, obj_gen: number): boolean;
 
 export function starpdf_remove_image(handle: number, page_index: number, image_id: string): any;
@@ -135,6 +137,7 @@ export interface InitOutput {
     readonly starpdf_move_text: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly starpdf_move_text_group: (a: number, b: number, c: any, d: number, e: number) => [number, number, number];
     readonly starpdf_open: (a: number, b: number) => [number, number, number];
+    readonly starpdf_plan_text_replacement: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly starpdf_remove_annotation: (a: number, b: number, c: bigint, d: number) => [number, number, number];
     readonly starpdf_remove_image: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_replace_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];

@@ -480,6 +480,25 @@ export function starpdf_open(bytes) {
 /**
  * @param {number} handle
  * @param {number} page_index
+ * @param {string} span_id
+ * @param {string} new_text
+ * @returns {any}
+ */
+export function starpdf_plan_text_replacement(handle, page_index, span_id, new_text) {
+    const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(new_text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_plan_text_replacement(handle, page_index, ptr0, len0, ptr1, len1);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {number} page_index
  * @param {bigint} obj_num
  * @param {number} obj_gen
  * @returns {boolean}
