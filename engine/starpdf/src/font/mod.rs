@@ -3,6 +3,7 @@ pub mod cache;
 pub mod catalog;
 pub mod cmap;
 pub mod coverage;
+pub mod embed;
 pub mod encoding;
 pub mod font;
 pub mod planner;
@@ -13,9 +14,13 @@ pub mod standard_metrics;
 pub mod subset;
 
 pub use cache::{get_font_cache, FontRuntimeCache};
-pub use catalog::{find_candidate_fallbacks, FontCatalogEntry, BUILTIN_FONT_CATALOG};
+pub use catalog::{
+    find_candidate_fallbacks, get_font_registry, FontAssetRegistry, FontCatalogEntry,
+    BUILTIN_FONT_CATALOG,
+};
 pub use cmap::UnicodeCMap;
 pub use coverage::{CoarseCoverageBitmap, COARSE_COVERAGE_BITMAP_BYTES, COARSE_UNICODE_PAGE_COUNT};
+pub use embed::Type0FontEmbedder;
 pub use encoding::SimpleEncoding;
 pub use font::{Font, FontFamily, FontProgramKind, FontStyle};
 pub use planner::{

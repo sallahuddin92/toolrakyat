@@ -5,7 +5,7 @@ use crate::error::{PdfError, PdfResult};
 use crate::font::Font;
 use crate::syntax::object::{ObjectRef, PdfObject};
 
-pub const MAX_EMBEDDED_FONT_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_EMBEDDED_FONT_BYTES: usize = 32 * 1024 * 1024; // 32MB to support full CJK font programs
 pub const MAX_APPEARANCE_RESOURCES: usize = 256;
 const MAX_RESOURCE_ANCESTORS: usize = 64;
 

@@ -24,7 +24,11 @@ impl TextMatcher {
                 .checked_sub(1)
                 .and_then(|index| page_text.spans.get(index))
                 .is_some_and(|previous| Self::overlapping_line_fragment(previous, span));
-            if !char_vec.is_empty() && char_vec.last() != Some(&' ') && !joins_previous_fragment {
+            if !char_vec.is_empty()
+                && char_vec.last().is_some_and(|ch| !ch.is_whitespace())
+                && !span.text.starts_with(char::is_whitespace)
+                && !joins_previous_fragment
+            {
                 char_vec.push(' ');
                 // Sentinel for inter-span separator space
                 char_map.push((span_idx, usize::MAX));

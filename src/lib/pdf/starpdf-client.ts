@@ -40,6 +40,7 @@ import initWasm, {
   starpdf_get_page_count,
   starpdf_get_security_info,
   starpdf_open,
+  starpdf_register_font_asset,
   starpdf_insert_blank_page,
   starpdf_insert_imported_page,
   starpdf_merge_documents,
@@ -78,6 +79,63 @@ import initWasm, {
 } from "./starpdf-wasm/starpdf.js";
 
 let wasmInitialized: Promise<void> | null = null;
+const registeredFallbackFonts = new Set<string>();
+
+const FALLBACK_FONT_ASSETS = {
+  arabic: ["noto-sans-arabic", "NotoSansArabic-Regular.ttf"],
+  hebrew: ["noto-sans-hebrew", "NotoSansHebrew-Regular.ttf"],
+  devanagari: ["noto-sans-devanagari", "NotoSansDevanagari-Regular.ttf"],
+  japanese: ["noto-sans-cjk-jp", "NotoSansJP-Regular.ttf"],
+  korean: ["noto-sans-cjk-kr", "NotoSansKR-Regular.ttf"],
+  simplifiedChinese: ["noto-sans-cjk-sc", "NotoSansSC-Regular.ttf"],
+  traditionalChinese: ["noto-sans-cjk-tc", "NotoSansTC-Regular.ttf"],
+} as const;
+
+type FallbackFontKind = keyof typeof FALLBACK_FONT_ASSETS;
+
+function fallbackFontsForText(text: string): FallbackFontKind[] {
+  const kinds = new Set<FallbackFontKind>();
+  if (/\p{Script=Arabic}/u.test(text)) kinds.add("arabic");
+  if (/\p{Script=Hebrew}/u.test(text)) kinds.add("hebrew");
+  if (/\p{Script=Devanagari}/u.test(text)) kinds.add("devanagari");
+  if (/\p{Script=Hangul}/u.test(text)) kinds.add("korean");
+  if (/[\u3040-\u30ff\u31f0-\u31ff]/u.test(text)) kinds.add("japanese");
+  if (/\p{Script=Han}/u.test(text) && !kinds.has("japanese") && !kinds.has("korean")) {
+    // Locale cannot be inferred perfectly from Han alone. Prefer TC when the replacement
+    // contains common Traditional-only forms; otherwise use the SC fallback.
+    if (/[體測試繁國語學書車門風馬龍臺灣]/u.test(text)) {
+      kinds.add("traditionalChinese");
+    } else {
+      kinds.add("simplifiedChinese");
+    }
+  }
+  return [...kinds];
+}
+
+async function registerFallbackFontsForText(text: string): Promise<void> {
+  await ensureWasmInitialized();
+  await Promise.all(
+    fallbackFontsForText(text).map(async (kind) => {
+      const [fontId, filename] = FALLBACK_FONT_ASSETS[kind];
+      if (registeredFallbackFonts.has(fontId)) return;
+
+      let bytes: Uint8Array;
+      if (typeof window === "undefined") {
+        const fs = await import("fs");
+        const path = await import("path");
+        bytes = fs.readFileSync(path.resolve(process.cwd(), "public/fonts", filename));
+      } else {
+        const response = await fetch(`/fonts/${filename}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load fallback font ${fontId}: HTTP ${response.status}`);
+        }
+        bytes = new Uint8Array(await response.arrayBuffer());
+      }
+      starpdf_register_font_asset(fontId, bytes);
+      registeredFallbackFonts.add(fontId);
+    }),
+  );
+}
 
 export async function ensureWasmInitialized(): Promise<void> {
   if (!wasmInitialized) {
@@ -316,7 +374,7 @@ export class StarPdfDocumentHandle {
     newText: string
   ): Promise<StarPdfReplaceTextResult> {
     this.assertOpen();
-    await ensureWasmInitialized();
+    await registerFallbackFontsForText(newText);
     return starpdf_replace_text(
       this._handle,
       pageIndex,
@@ -331,7 +389,7 @@ export class StarPdfDocumentHandle {
     newText: string
   ): Promise<StarPdfReplaceTextResult> {
     this.assertOpen();
-    await ensureWasmInitialized();
+    await registerFallbackFontsForText(newText);
     return starpdf_replace_text_group(
       this._handle,
       pageIndex,

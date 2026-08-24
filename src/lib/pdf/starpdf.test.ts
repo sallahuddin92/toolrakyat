@@ -377,16 +377,25 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     await doc.close();
   });
 
-  it("refuses complex script replacement safely without crashing", async () => {
+  it("shapes, embeds, and reopens Arabic replacement text", async () => {
     const bytes = await StarPdfClient.createMinimalPdf("Ascii Title");
     const doc = await StarPdfClient.open(bytes);
 
     const pageText = await doc.extractPageText(0);
     const span = pageText.spans[0];
 
-    // Arabic requires complex script shaping not supported in bounded simple font replacement
-    await expect(doc.replaceText(0, span.span_id, "العربية")).rejects.toThrow();
+    const replacement = "العربية";
+    const result = await doc.replaceText(0, span.span_id, replacement);
+    expect(result.success).toBe(true);
 
+    const exported = await doc.exportIncremental();
+    const reopened = await StarPdfClient.open(exported);
+    const reopenedText = await reopened.extractPageText(0);
+    expect(reopenedText.plain_text).toContain(replacement);
+    const hits = await reopened.search(replacement, { caseSensitive: true });
+    expect(hits).toHaveLength(1);
+
+    await reopened.close();
     await doc.close();
   });
 

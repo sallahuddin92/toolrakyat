@@ -40,6 +40,12 @@ pub fn starpdf_version() -> String {
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
+pub fn starpdf_register_font_asset(font_id: &str, bytes: &[u8]) {
+    crate::font::catalog::get_font_registry().register_font(font_id, bytes.to_vec());
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
 pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
     REGISTRY
         .with_doc(handle, |doc| {

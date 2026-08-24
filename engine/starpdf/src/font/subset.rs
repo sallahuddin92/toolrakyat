@@ -4,9 +4,14 @@ use crate::error::{PdfError, PdfResult};
 use crate::font::appearance::MAX_EMBEDDED_FONT_BYTES;
 use crate::font::sfnt::table::{read_i16_be, read_u16_be, read_u32_be, TableDirectory};
 use crate::font::SfntFont;
+use skera::{
+    parse_name_ids, parse_name_languages, parse_tag_list, parse_unicodes, populate_gids,
+    subset_font, Plan, SubsetFlags,
+};
+use write_fonts::read::FontRef as SkeraFontRef;
 
 pub const MAX_SUBSET_GLYPHS: usize = 4_096;
-pub const MAX_SUBSET_FONT_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_SUBSET_FONT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_SOURCE_GLYPHS: usize = 65_535;
 const MAX_COMPOSITE_DEPTH: usize = 32;
 
@@ -83,6 +88,18 @@ impl TrueTypeSubsetter {
             )));
         }
 
+        if let Ok(skera_subset) = Self::subset_with_skera(data, &selected) {
+            if skera_subset.len() <= MAX_SUBSET_FONT_BYTES {
+                SfntFont::parse(&skera_subset)?;
+                return Ok(FontSubset {
+                    bytes: skera_subset,
+                    glyph_ids: selected.into_iter().collect(),
+                });
+            }
+        }
+
+        // Keep the existing bounded retain-GID implementation as a defensive fallback for
+        // valid TrueType tables that skera does not yet support.
         let mut new_glyf = Vec::new();
         let mut new_loca = Vec::with_capacity((num_glyphs + 1).saturating_mul(4));
         for glyph_index in 0..num_glyphs {
@@ -127,6 +144,40 @@ impl TrueTypeSubsetter {
             bytes: output,
             glyph_ids: selected.into_iter().collect(),
         })
+    }
+
+    fn subset_with_skera(data: &[u8], selected: &BTreeSet<u16>) -> PdfResult<Vec<u8>> {
+        let font = SkeraFontRef::new(data).map_err(|e| {
+            PdfError::InvalidOperation(format!("Skera could not parse source font: {e}"))
+        })?;
+        let gids_csv = selected
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let gids = populate_gids(&gids_csv)
+            .map_err(|e| PdfError::InvalidOperation(format!("Invalid subset glyph set: {e}")))?;
+        let unicodes = parse_unicodes("")
+            .map_err(|e| PdfError::InvalidOperation(format!("Invalid Unicode subset: {e}")))?;
+        let empty_tags = parse_tag_list("")
+            .map_err(|e| PdfError::InvalidOperation(format!("Invalid subset tags: {e}")))?;
+        let name_ids = parse_name_ids("1,2,3,4,6")
+            .map_err(|e| PdfError::InvalidOperation(format!("Invalid subset name IDs: {e}")))?;
+        let name_languages = parse_name_languages("1033")
+            .map_err(|e| PdfError::InvalidOperation(format!("Invalid subset languages: {e}")))?;
+        let plan = Plan::new(
+            &gids,
+            &unicodes,
+            &font,
+            SubsetFlags::SUBSET_FLAGS_RETAIN_GIDS,
+            &empty_tags,
+            &empty_tags,
+            &empty_tags,
+            &name_ids,
+            &name_languages,
+        );
+        subset_font(&font, &plan)
+            .map_err(|e| PdfError::InvalidOperation(format!("Skera subsetting failed: {e}")))
     }
 
     fn parse_loca(

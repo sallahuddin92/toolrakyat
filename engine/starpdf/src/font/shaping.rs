@@ -27,8 +27,62 @@ pub enum TextDirection {
 
 pub struct TextShaper;
 
+use harfrust::{Direction, FontRef as HrFontRef, GlyphBuffer, UnicodeBuffer};
+use read_fonts::{FontRef as ReadFontRef, TableProvider};
+
 impl TextShaper {
-    /// Itemizes input text into bidirectional runs and shapes each run using the provided font.
+    /// Shapes text using HarfRust OpenType shaping (GSUB/GPOS) if font bytes are available.
+    pub fn shape_opentype(font_bytes: &[u8], text: &str, is_rtl: bool) -> Option<ShapedRun> {
+        let font_ref = HrFontRef::from_index(font_bytes, 0).ok()?;
+        let units_per_em = ReadFontRef::from_index(font_bytes, 0)
+            .ok()?
+            .head()
+            .ok()?
+            .units_per_em() as f64;
+        let scale = 1000.0 / units_per_em;
+        let mut buffer = UnicodeBuffer::new();
+        buffer.push_str(text);
+        if is_rtl {
+            buffer.set_direction(Direction::RightToLeft);
+        } else {
+            buffer.set_direction(Direction::LeftToRight);
+        }
+        buffer.guess_segment_properties();
+
+        let shaper_data = harfrust::ShaperData::new(&font_ref);
+        let shaper = shaper_data.shaper(&font_ref).build();
+        let glyph_buffer: GlyphBuffer = shaper.shape(buffer, harfrust::ShapeOptions::default());
+        let glyph_infos = glyph_buffer.glyph_infos();
+        let glyph_positions = glyph_buffer.glyph_positions();
+
+        let mut shaped_glyphs = Vec::with_capacity(glyph_infos.len());
+        let mut total_advance = 0.0;
+
+        for (info, pos) in glyph_infos.iter().zip(glyph_positions.iter()) {
+            let gid = info.glyph_id;
+            let x_adv = pos.x_advance as f64 * scale;
+            let x_off = pos.x_offset as f64 * scale;
+            let y_off = pos.y_offset as f64 * scale;
+
+            shaped_glyphs.push(ShapedGlyph {
+                glyph_id: gid,
+                cluster: info.cluster,
+                advance: x_adv,
+                x_offset: x_off,
+                y_offset: y_off,
+            });
+            total_advance += x_adv;
+        }
+
+        Some(ShapedRun {
+            text: text.to_string(),
+            glyphs: shaped_glyphs,
+            is_rtl,
+            total_advance,
+        })
+    }
+
+    /// Itemizes input text into bidirectional runs and shapes each run using HarfRust or font metrics.
     pub fn shape_text(font: &Font, text: &str) -> Vec<ShapedRun> {
         if text.is_empty() {
             return Vec::new();
@@ -44,6 +98,15 @@ impl TextShaper {
                 let run_text = &text[run_range.clone()];
                 let is_rtl = bidi_info.levels[run_range.start].is_rtl();
 
+                // If embedded font program has raw SFNT bytes, perform real HarfRust shaping
+                if let Some(ref sfnt) = font.embedded_sfnt {
+                    if let Some(shaped) = Self::shape_opentype(&sfnt.data, run_text, is_rtl) {
+                        runs.push(shaped);
+                        continue;
+                    }
+                }
+
+                // Fallback shaping using cmap and metrics
                 let mut shaped_glyphs = Vec::with_capacity(run_text.len());
                 let mut total_advance = 0.0;
 

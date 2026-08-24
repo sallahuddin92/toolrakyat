@@ -265,6 +265,26 @@ impl ContentStreamEditor {
         Ok(Self::serialize_instructions(&instructions))
     }
 
+    /// Replaces a single targeted instruction with a custom sequence of instructions (e.g. multi-font runs).
+    pub fn replace_instruction_with_sequence(
+        stream_bytes: &[u8],
+        target_instr_idx: usize,
+        new_instructions: Vec<ContentInstruction>,
+    ) -> PdfResult<Vec<u8>> {
+        let mut parser = ContentParser::from_bytes(stream_bytes);
+        let mut instructions = parser.parse_instructions()?;
+        if target_instr_idx >= instructions.len() {
+            return Err(PdfError::TargetTextNotFound(format!(
+                "Instruction index {} out of bounds ({})",
+                target_instr_idx,
+                instructions.len()
+            )));
+        }
+
+        instructions.splice(target_instr_idx..=target_instr_idx, new_instructions);
+        Ok(Self::serialize_instructions(&instructions))
+    }
+
     /// Replaces targeted text bytes with font switching if a fallback or compatible font is used.
     pub fn replace_multiple_in_stream_with_font_switch(
         stream_bytes: &[u8],

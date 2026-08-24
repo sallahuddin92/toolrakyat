@@ -119,13 +119,38 @@ SOFTWARE.
 | `pin-project-lite` | 0.2.17 | MIT OR Apache-2.0 |
 | `slab` | 0.4.12 | MIT |
 | `rustversion` | 1.0.23 | MIT OR Apache-2.0 |
+| `unicode-bidi` | 0.3.18 | MIT OR Apache-2.0 |
+| `harfrust` | 0.13.1 | MIT OR Apache-2.0 |
+| `read-fonts` | 0.43.2 | MIT OR Apache-2.0 |
+| `skrifa` | 0.46.2 | MIT OR Apache-2.0 |
+| `skera` | 0.6.0 | MIT OR Apache-2.0 |
+| `write-fonts` | 0.52.0 | MIT OR Apache-2.0 |
 
 ---
 
-## 3. Production Dependency Graph Audit Summary
+## 3. Bundled fallback fonts
+
+All fallback font files are redistributed under the SIL Open Font License 1.1. Their embedded
+name tables contain the copyright and OFL notice, and the complete license is shipped as
+`public/fonts/OFL-1.1.txt`. The source repositories permit redistribution, modification, and
+embedding subject to the OFL terms.
+
+| Asset | Embedded version | SHA-256 | Upstream source |
+| :--- | :--- | :--- | :--- |
+| `NotoSansArabic-Regular.ttf` | 2.009 | `ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b` | [notofonts/arabic](https://github.com/notofonts/arabic) |
+| `NotoSansDevanagari-Regular.ttf` | 2.002 | `385e78e6359a9d88a0f243d53b1209d7548361ba2194e2b9ec779bcaa7e8949d` | [notofonts/devanagari](https://github.com/notofonts/devanagari) |
+| `NotoSansHebrew-Regular.ttf` | 3.000 | `a7fa16fffb27bedb060a0866267c29e9859aeb9c21cc33f5b3aaf6eb062eca85` | [notofonts/hebrew](https://github.com/notofonts/hebrew) |
+| `NotoSansJP-Regular.ttf` | 2.004-H2 | `c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f` | [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk) |
+| `NotoSansKR-Regular.ttf` | 2.004-H2 | `194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252` | [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk) |
+| `NotoSansSC-Regular.ttf` | 2.004-H2 | `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da` | [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk) |
+| `NotoSansTC-Regular.ttf` | 2.004-H2 | `864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f` | [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk) |
+
+---
+
+## 4. Production Dependency Graph Audit Summary
 
 - **Total Transitive Production NPM Packages**: 623
-- **Total Transitive Rust Crates**: 23
+- **Total Transitive Rust Crates**: see `engine/starpdf/Cargo.lock` (audited during release qualification)
 - **Unknown Licenses**: 0
 - **Known License Blockers**: NONE FOUND
-- **Manual Review Required**: 0 (all components operate under standard permissive open source licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0, Zlib, or dual-license with MIT).
+- **Manual Review Required**: 0 (all components operate under standard permissive open source licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0, Zlib, SIL OFL 1.1, or dual-license with MIT).

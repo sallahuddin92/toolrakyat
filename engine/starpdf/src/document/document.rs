@@ -384,11 +384,8 @@ impl<'a> PdfDocument<'a> {
         target: &crate::mutation::text_edit::TextEditTarget,
         replacement: &str,
     ) -> PdfResult<crate::mutation::MutationPlan> {
-        self.apply_mutation(&[crate::mutation::PdfChange::ReplaceText {
-            page_index,
-            target: target.clone(),
-            replacement: replacement.to_string(),
-        }])
+        let plan = self.plan_text_replacement(page_index, target, replacement, None)?;
+        crate::font::planner::TextPlanner::apply(self, &plan)
     }
 
     /// Replaces native existing content-stream text specified by a structural span ID.

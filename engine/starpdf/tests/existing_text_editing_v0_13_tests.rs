@@ -236,43 +236,38 @@ fn test_multi_stream_page_mutates_only_targeted_stream() {
 }
 
 #[test]
-fn test_unsupported_complex_script_refusal() {
+fn test_complex_script_uses_adaptive_fallback() {
     let original_bytes = MinimalWriter::create_minimal_pdf("English Text").unwrap();
     let mut doc = PdfDocument::from_bytes(&original_bytes).unwrap();
 
     let page_text = doc.extract_page_text(0).unwrap();
     let target = TextEditTarget::from_span(&page_text.spans[0]);
 
-    // Attempt to replace with Arabic text (requires complex shaping)
     let arabic_text = "مرحبا";
-    let result = doc.replace_text(0, &target, arabic_text);
-
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        matches!(err, starpdf::error::PdfError::UnsupportedComplexScript(_))
-            || format!("{err}").contains("UNSUPPORTED_COMPLEX_SCRIPT")
+    let plan = doc.replace_text(0, &target, arabic_text).unwrap();
+    let exported = doc.export_incremental(&plan).unwrap();
+    let mut reopened = PdfDocument::from_bytes(&exported).unwrap();
+    assert_eq!(
+        reopened.extract_page_text(0).unwrap().plain_text(),
+        arabic_text
     );
 }
 
 #[test]
-fn test_unsupported_glyph_refusal() {
+fn test_cjk_uses_adaptive_fallback() {
     let original_bytes = MinimalWriter::create_minimal_pdf("Simple Text").unwrap();
     let mut doc = PdfDocument::from_bytes(&original_bytes).unwrap();
 
     let page_text = doc.extract_page_text(0).unwrap();
     let target = TextEditTarget::from_span(&page_text.spans[0]);
 
-    // Attempt to replace with glyph not in WinAnsi/Standard fallback (e.g. Japanese Kanji)
-    let unmapped_text = "日本語";
-    let result = doc.replace_text(0, &target, unmapped_text);
-
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        matches!(err, starpdf::error::PdfError::UnsupportedFontEncoding(_))
-            || format!("{err}").contains("UNREPRESENTABLE")
-            || format!("{err}").contains("UNSUPPORTED_FONT_ENCODING")
+    let replacement = "日本語";
+    let plan = doc.replace_text(0, &target, replacement).unwrap();
+    let exported = doc.export_incremental(&plan).unwrap();
+    let mut reopened = PdfDocument::from_bytes(&exported).unwrap();
+    assert_eq!(
+        reopened.extract_page_text(0).unwrap().plain_text(),
+        replacement
     );
 }
 

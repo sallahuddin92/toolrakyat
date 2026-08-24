@@ -497,6 +497,18 @@ export function starpdf_plan_text_replacement(handle, page_index, span_id, new_t
 }
 
 /**
+ * @param {string} font_id
+ * @param {Uint8Array} bytes
+ */
+export function starpdf_register_font_asset(font_id, bytes) {
+    const ptr0 = passStringToWasm0(font_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.starpdf_register_font_asset(ptr0, len0, ptr1, len1);
+}
+
+/**
  * @param {number} handle
  * @param {number} page_index
  * @param {bigint} obj_num
