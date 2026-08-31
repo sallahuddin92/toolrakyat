@@ -82,6 +82,9 @@ export interface StarPdfTextSpan {
   is_italic?: boolean;
   is_monospace?: boolean;
   fill_color?: [number, number, number];
+  underline?: boolean;
+  strikethrough?: boolean;
+  highlight_color?: [number, number, number];
   is_editable: boolean;
   editability_code:
     | "EDITABLE_NATIVE_TEXT"
@@ -118,6 +121,9 @@ export interface StarPdfComputedTextStyle {
   weight: StarPdfTextWeight;
   italic: boolean;
   fill_color: [number, number, number];
+  underline: boolean;
+  strikethrough: boolean;
+  highlight_color?: [number, number, number];
   source_font: string;
   capability: "EDITABLE" | "SAFE_REFUSAL";
 }
@@ -128,6 +134,10 @@ export interface StarPdfTextStylePatch {
   weight?: StarPdfTextWeight;
   italic?: boolean;
   fill_color?: [number, number, number];
+  underline?: boolean;
+  strikethrough?: boolean;
+  highlight_enabled?: boolean;
+  highlight_color?: [number, number, number];
   replacement_text?: string;
 }
 
@@ -269,6 +279,10 @@ export interface StarPdfUpdateAnnotationInput {
   bold?: boolean;
   italic?: boolean;
   text_color?: [number, number, number];
+  underline?: boolean;
+  strikethrough?: boolean;
+  highlight_enabled?: boolean;
+  highlight_color?: [number, number, number];
 }
 
 /**

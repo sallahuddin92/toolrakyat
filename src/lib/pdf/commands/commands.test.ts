@@ -225,19 +225,38 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       };
       const { UpdateAnnotationPropertiesCommand } = await import("./annotation-commands");
 
-      await new UpdateAnnotationPropertiesCommand(
+      const result = await new UpdateAnnotationPropertiesCommand(
         selection.id,
-        { font_size: 18, text_color: [0.2, 0.3, 0.6] },
+        {
+          font_size: 18,
+          text_color: [0.2, 0.3, 0.6],
+          underline: true,
+          strikethrough: true,
+          highlight_enabled: true,
+          highlight_color: [1, 0.9, 0.2],
+        },
         0,
       ).execute(context);
 
       expect(updateAnnotation).toHaveBeenCalledWith(
         27,
         0,
-        { font_size: 18, text_color: [0.2, 0.3, 0.6] },
+        {
+          font_size: 18,
+          text_color: [0.2, 0.3, 0.6],
+          underline: true,
+          strikethrough: true,
+          highlight_enabled: true,
+          highlight_color: [1, 0.9, 0.2],
+        },
         "Latin تقرير 日本",
       );
       expect(exportIncremental).toHaveBeenCalledTimes(1);
+      expect(result.nextSelection?.data).toMatchObject({
+        isUnderlined: true,
+        isStruckThrough: true,
+        highlightColor: [1, 0.9, 0.2],
+      });
     });
 
     it("ReplaceTextCommand and DeleteTextCommand declare mutating flag and throw when starPdfDoc is absent", async () => {
@@ -289,6 +308,10 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         weight: "BOLD" as const,
         italic: true,
         fill_color: [0.1, 0.2, 0.3] as [number, number, number],
+        underline: true,
+        strikethrough: true,
+        highlight_enabled: true,
+        highlight_color: [1, 0.9, 0.2] as [number, number, number],
         replacement_text: "Styled once",
       };
 

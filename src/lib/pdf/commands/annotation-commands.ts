@@ -454,6 +454,12 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
       this.properties.bold !== undefined ||
       this.properties.italic !== undefined ||
       this.properties.text_color !== undefined;
+    const hasTextAppearanceUpdate =
+      hasTextStyleUpdate ||
+      this.properties.underline !== undefined ||
+      this.properties.strikethrough !== undefined ||
+      this.properties.highlight_enabled !== undefined ||
+      this.properties.highlight_color !== undefined;
     const selectedContents =
       currentSelection?.type === "annotation" && currentSelection.id === this.annotId
         ? currentSelection.data.contents
@@ -463,7 +469,7 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
       targetNum,
       targetGen,
       this.properties,
-      hasTextStyleUpdate ? selectedContents : undefined,
+      hasTextAppearanceUpdate ? selectedContents : undefined,
     );
     const updatedBytes = await starPdfDoc.exportIncremental();
     return {
@@ -490,6 +496,23 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
                 ...(this.properties.text_color !== undefined
                   ? { textColor: this.properties.text_color }
                   : {}),
+                ...(this.properties.underline !== undefined
+                  ? { isUnderlined: this.properties.underline }
+                  : {}),
+                ...(this.properties.strikethrough !== undefined
+                  ? { isStruckThrough: this.properties.strikethrough }
+                  : {}),
+                ...(this.properties.highlight_enabled === false
+                  ? { highlightColor: undefined }
+                  : this.properties.highlight_enabled === true ||
+                      this.properties.highlight_color !== undefined
+                    ? {
+                        highlightColor:
+                          this.properties.highlight_color ??
+                          currentSelection.data.highlightColor ??
+                          ([1, 0.92, 0.23] as [number, number, number]),
+                      }
+                    : {}),
               },
             }
           : undefined,

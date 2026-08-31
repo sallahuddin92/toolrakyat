@@ -5,7 +5,7 @@ pub mod text_edit;
 pub mod text_move;
 
 pub use crate::appearance::status::AppearanceStatus;
-pub use change::{PdfChange, TextStyleMutation};
+pub use change::{NativeTextDecorationMutation, PdfChange, TextStyleMutation};
 pub use engine::MutationEngine;
 pub use result::MutationPlan;
 pub use text_edit::{ContentStreamEditor, LayoutPolicyResult, TextEditTarget};

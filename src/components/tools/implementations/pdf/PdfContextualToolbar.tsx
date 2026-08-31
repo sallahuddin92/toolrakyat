@@ -18,6 +18,9 @@ import {
   Lock,
   Bold as BoldIcon,
   Italic as ItalicIcon,
+  Underline as UnderlineIcon,
+  Strikethrough as StrikethroughIcon,
+  Highlighter,
 } from "lucide-react";
 import {
   STARPDF_TEXT_FONT_SIZE_MAX,
@@ -61,6 +64,15 @@ interface PdfContextualToolbarProps {
   onAddTextInstead?: () => void;
 }
 
+const hexToRgbTuple = (hex: string): [number, number, number] => {
+  const clean = hex.replace("#", "");
+  return [
+    Number.parseInt(clean.slice(0, 2), 16) / 255,
+    Number.parseInt(clean.slice(2, 4), 16) / 255,
+    Number.parseInt(clean.slice(4, 6), 16) / 255,
+  ];
+};
+
 
 function TextControls({
   span,
@@ -101,6 +113,13 @@ function TextControls({
   const [isBold, setIsBold] = useState(Boolean(span.is_bold));
   const [isItalic, setIsItalic] = useState(Boolean(span.is_italic));
   const [textColor, setTextColor] = useState(initialTextColor);
+  const [isUnderlined, setIsUnderlined] = useState(Boolean(span.underline));
+  const [isStruckThrough, setIsStruckThrough] = useState(Boolean(span.strikethrough));
+  const initialHighlightColor = span.highlight_color
+    ? `#${span.highlight_color.map((channel) => Math.round(channel * 255).toString(16).padStart(2, "0")).join("")}`
+    : "#ffeb3b";
+  const [isHighlighted, setIsHighlighted] = useState(Boolean(span.highlight_color));
+  const [nativeHighlightColor, setNativeHighlightColor] = useState(initialHighlightColor);
 
   const isEditable = group ? group.editability === "EDITABLE_ATOMIC" : span.is_editable;
   const targetSpanIds =
@@ -165,13 +184,18 @@ function TextControls({
       isBold !== Boolean(span.is_bold) ||
       isItalic !== Boolean(span.is_italic) ||
       textColor !== initialTextColor;
-    if (editText === originalText && !styleChanged) {
+    const decorationChanged =
+      isUnderlined !== Boolean(span.underline) ||
+      isStruckThrough !== Boolean(span.strikethrough) ||
+      isHighlighted !== Boolean(span.highlight_color) ||
+      (isHighlighted && nativeHighlightColor !== initialHighlightColor);
+    if (editText === originalText && !styleChanged && !decorationChanged) {
       onDeselect();
       return;
     }
     setIsSubmitting(true);
     try {
-      if (styleChanged && editText.trim()) {
+      if ((styleChanged || decorationChanged) && editText.trim()) {
         const channels = textColor
           .replace("#", "")
           .match(/.{2}/g)
@@ -185,6 +209,16 @@ function TextControls({
           ...(isItalic !== Boolean(span.is_italic) ? { italic: isItalic } : {}),
           ...(textColor !== initialTextColor && channels?.length === 3
             ? { fill_color: channels as [number, number, number] }
+            : {}),
+          ...(isUnderlined !== Boolean(span.underline) ? { underline: isUnderlined } : {}),
+          ...(isStruckThrough !== Boolean(span.strikethrough)
+            ? { strikethrough: isStruckThrough }
+            : {}),
+          ...(isHighlighted !== Boolean(span.highlight_color)
+            ? { highlight_enabled: isHighlighted }
+            : {}),
+          ...(isHighlighted && nativeHighlightColor !== initialHighlightColor
+            ? { highlight_color: hexToRgbTuple(nativeHighlightColor) }
             : {}),
           ...(editText !== originalText ? { replacement_text: editText } : {}),
         });
@@ -218,6 +252,10 @@ function TextControls({
             setIsBold(Boolean(span.is_bold));
             setIsItalic(Boolean(span.is_italic));
             setTextColor(initialTextColor);
+            setIsUnderlined(Boolean(span.underline));
+            setIsStruckThrough(Boolean(span.strikethrough));
+            setIsHighlighted(Boolean(span.highlight_color));
+            setNativeHighlightColor(initialHighlightColor);
             onDeselect();
           }
         }}
@@ -275,6 +313,30 @@ function TextControls({
           >
             <ItalicIcon className="size-3.5" />
           </Button>
+          <Button
+            type="button"
+            variant={isUnderlined ? "default" : "outline"}
+            size="icon"
+            onClick={() => setIsUnderlined((value) => !value)}
+            className="size-8"
+            aria-label="Underline"
+            aria-pressed={isUnderlined}
+            data-testid="context-text-underline"
+          >
+            <UnderlineIcon className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant={isStruckThrough ? "default" : "outline"}
+            size="icon"
+            onClick={() => setIsStruckThrough((value) => !value)}
+            className="size-8"
+            aria-label="Strikethrough"
+            aria-pressed={isStruckThrough}
+            data-testid="context-text-strikethrough"
+          >
+            <StrikethroughIcon className="size-3.5" />
+          </Button>
           <input
             type="color"
             value={textColor}
@@ -283,6 +345,28 @@ function TextControls({
             aria-label="Text color"
             data-testid="context-text-color"
           />
+          <Button
+            type="button"
+            variant={isHighlighted ? "default" : "outline"}
+            size="icon"
+            onClick={() => setIsHighlighted((value) => !value)}
+            className="size-8"
+            aria-label="Highlight"
+            aria-pressed={isHighlighted}
+            data-testid="context-text-highlight"
+          >
+            <Highlighter className="size-3.5" />
+          </Button>
+          {isHighlighted && (
+            <input
+              type="color"
+              value={nativeHighlightColor}
+              onChange={(event) => setNativeHighlightColor(event.target.value)}
+              className="size-8 rounded border border-slate-300 bg-white p-0.5"
+              aria-label="Highlight color"
+              data-testid="context-text-highlight-color"
+            />
+          )}
         </>
       ) : (
         <span
@@ -572,13 +656,28 @@ function AnnotationControls({
         .join("")}`
     : "#000000";
   const [freeTextColor, setFreeTextColor] = useState(initialTextColor);
+  const [freeTextUnderlined, setFreeTextUnderlined] = useState(Boolean(annot.isUnderlined));
+  const [freeTextStruckThrough, setFreeTextStruckThrough] = useState(
+    Boolean(annot.isStruckThrough),
+  );
+  const initialFreeTextHighlightColor = annot.highlightColor
+    ? `#${annot.highlightColor.map((component) => Math.round(component * 255).toString(16).padStart(2, "0")).join("")}`
+    : "#ffeb3b";
+  const [freeTextHighlighted, setFreeTextHighlighted] = useState(Boolean(annot.highlightColor));
+  const [freeTextHighlightColor, setFreeTextHighlightColor] = useState(
+    initialFreeTextHighlightColor,
+  );
 
   const freeTextStyleChanged =
     freeTextFamily !== (annot.fontFamily ?? "SansSerif") ||
     Math.abs(freeTextSize - (annot.fontSize ?? 12)) > 0.001 ||
     freeTextBold !== Boolean(annot.isBold) ||
     freeTextItalic !== Boolean(annot.isItalic) ||
-    freeTextColor !== initialTextColor;
+    freeTextColor !== initialTextColor ||
+    freeTextUnderlined !== Boolean(annot.isUnderlined) ||
+    freeTextStruckThrough !== Boolean(annot.isStruckThrough) ||
+    freeTextHighlighted !== Boolean(annot.highlightColor) ||
+    (freeTextHighlighted && freeTextHighlightColor !== initialFreeTextHighlightColor);
 
   const commitContents = async () => {
     if (annot.subtype === "FreeText" && onUpdateAnnotationProperties) {
@@ -597,6 +696,18 @@ function AnnotationControls({
           ...(freeTextItalic !== Boolean(annot.isItalic) ? { italic: freeTextItalic } : {}),
           ...(freeTextColor !== initialTextColor
             ? { text_color: hexToRgb(freeTextColor) }
+            : {}),
+          ...(freeTextUnderlined !== Boolean(annot.isUnderlined)
+            ? { underline: freeTextUnderlined }
+            : {}),
+          ...(freeTextStruckThrough !== Boolean(annot.isStruckThrough)
+            ? { strikethrough: freeTextStruckThrough }
+            : {}),
+          ...(freeTextHighlighted !== Boolean(annot.highlightColor)
+            ? { highlight_enabled: freeTextHighlighted }
+            : {}),
+          ...(freeTextHighlighted && freeTextHighlightColor !== initialFreeTextHighlightColor
+            ? { highlight_color: hexToRgbTuple(freeTextHighlightColor) }
             : {}),
         });
       } finally {
@@ -830,7 +941,7 @@ function AnnotationControls({
   }
 
   return (
-    <div className="flex items-center gap-2 min-w-0" data-testid="context-annotation-controls">
+    <div className="flex flex-1 flex-wrap items-center gap-2 min-w-0" data-testid="context-annotation-controls">
       <Badge variant="secondary" className="bg-purple-100 text-purple-700 font-normal shrink-0" data-testid="context-annotation-type">
         {annot.subtype}
       </Badge>
@@ -852,6 +963,10 @@ function AnnotationControls({
             setFreeTextBold(Boolean(annot.isBold));
             setFreeTextItalic(Boolean(annot.isItalic));
             setFreeTextColor(initialTextColor);
+            setFreeTextUnderlined(Boolean(annot.isUnderlined));
+            setFreeTextStruckThrough(Boolean(annot.isStruckThrough));
+            setFreeTextHighlighted(Boolean(annot.highlightColor));
+            setFreeTextHighlightColor(initialFreeTextHighlightColor);
             onDeselect?.();
           }
         }}
@@ -908,6 +1023,30 @@ function AnnotationControls({
           >
             <ItalicIcon className="size-3.5" />
           </Button>
+          <Button
+            type="button"
+            variant={freeTextUnderlined ? "default" : "outline"}
+            size="icon"
+            onClick={() => setFreeTextUnderlined((value) => !value)}
+            className="size-8"
+            aria-label="Underline"
+            aria-pressed={freeTextUnderlined}
+            data-testid="context-freetext-underline"
+          >
+            <UnderlineIcon className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant={freeTextStruckThrough ? "default" : "outline"}
+            size="icon"
+            onClick={() => setFreeTextStruckThrough((value) => !value)}
+            className="size-8"
+            aria-label="Strikethrough"
+            aria-pressed={freeTextStruckThrough}
+            data-testid="context-freetext-strikethrough"
+          >
+            <StrikethroughIcon className="size-3.5" />
+          </Button>
           <input
             type="color"
             value={freeTextColor}
@@ -916,6 +1055,28 @@ function AnnotationControls({
             aria-label="Text color"
             data-testid="context-freetext-color"
           />
+          <Button
+            type="button"
+            variant={freeTextHighlighted ? "default" : "outline"}
+            size="icon"
+            onClick={() => setFreeTextHighlighted((value) => !value)}
+            className="size-8"
+            aria-label="Highlight"
+            aria-pressed={freeTextHighlighted}
+            data-testid="context-freetext-highlight"
+          >
+            <Highlighter className="size-3.5" />
+          </Button>
+          {freeTextHighlighted && (
+            <input
+              type="color"
+              value={freeTextHighlightColor}
+              onChange={(event) => setFreeTextHighlightColor(event.target.value)}
+              className="size-8 rounded border border-slate-300 bg-white p-0.5"
+              aria-label="Highlight color"
+              data-testid="context-freetext-highlight-color"
+            />
+          )}
         </>
       )}
       <Button
@@ -1122,7 +1283,7 @@ export function PdfContextualToolbar({
       {/* TEXT SELECTION CONTROLS */}
       {selection.type === "text" && (
         <TextControls
-          key={`${selection.id}:${(selection.data as StarPdfTextSpan).text}:${(selection.data as StarPdfTextSpan).font_family ?? ""}:${(selection.data as StarPdfTextSpan).font_size}:${Boolean((selection.data as StarPdfTextSpan).is_bold)}:${Boolean((selection.data as StarPdfTextSpan).is_italic)}:${(selection.data as StarPdfTextSpan).fill_color?.join(",") ?? ""}`}
+          key={`${selection.id}:${(selection.data as StarPdfTextSpan).text}:${(selection.data as StarPdfTextSpan).font_family ?? ""}:${(selection.data as StarPdfTextSpan).font_size}:${Boolean((selection.data as StarPdfTextSpan).is_bold)}:${Boolean((selection.data as StarPdfTextSpan).is_italic)}:${(selection.data as StarPdfTextSpan).fill_color?.join(",") ?? ""}:${Boolean((selection.data as StarPdfTextSpan).underline)}:${Boolean((selection.data as StarPdfTextSpan).strikethrough)}:${(selection.data as StarPdfTextSpan).highlight_color?.join(",") ?? ""}`}
           span={selection.data as StarPdfTextSpan}
           group={selection.group}
           onReplaceText={onReplaceText}
@@ -1313,7 +1474,7 @@ export function PdfContextualToolbar({
       {/* MARKUP ANNOTATION SELECTION CONTROLS */}
       {selection.type === "annotation" && (
         <AnnotationControls
-          key={`${selection.id}:${annotationValue ?? (selection.data as PdfMarkupAnnotation).contents ?? ""}:${(selection.data as PdfMarkupAnnotation).fontFamily ?? ""}:${(selection.data as PdfMarkupAnnotation).fontSize ?? ""}:${Boolean((selection.data as PdfMarkupAnnotation).isBold)}:${Boolean((selection.data as PdfMarkupAnnotation).isItalic)}:${(selection.data as PdfMarkupAnnotation).textColor?.join(",") ?? ""}`}
+          key={`${selection.id}:${annotationValue ?? (selection.data as PdfMarkupAnnotation).contents ?? ""}:${(selection.data as PdfMarkupAnnotation).fontFamily ?? ""}:${(selection.data as PdfMarkupAnnotation).fontSize ?? ""}:${Boolean((selection.data as PdfMarkupAnnotation).isBold)}:${Boolean((selection.data as PdfMarkupAnnotation).isItalic)}:${(selection.data as PdfMarkupAnnotation).textColor?.join(",") ?? ""}:${Boolean((selection.data as PdfMarkupAnnotation).isUnderlined)}:${Boolean((selection.data as PdfMarkupAnnotation).isStruckThrough)}:${(selection.data as PdfMarkupAnnotation).highlightColor?.join(",") ?? ""}`}
           annot={selection.data as PdfMarkupAnnotation}
           annotationValue={annotationValue}
           onAnnotationChange={onAnnotationChange}

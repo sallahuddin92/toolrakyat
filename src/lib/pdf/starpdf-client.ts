@@ -390,10 +390,16 @@ export class StarPdfDocumentHandle {
       input.bold !== undefined ||
       input.italic !== undefined ||
       input.text_color !== undefined;
+    const hasTextAppearanceUpdate =
+      hasTextStyleUpdate ||
+      input.underline !== undefined ||
+      input.strikethrough !== undefined ||
+      input.highlight_enabled !== undefined ||
+      input.highlight_color !== undefined;
     const textForFontRegistration =
       typeof input.contents === "string"
         ? input.contents
-        : hasTextStyleUpdate
+        : hasTextAppearanceUpdate
           ? existingTextForFontRegistration
           : undefined;
     if (typeof textForFontRegistration === "string") {

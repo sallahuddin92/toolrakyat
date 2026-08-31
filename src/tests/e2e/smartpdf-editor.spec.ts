@@ -4607,8 +4607,8 @@ test.describe("SmartPDF malformed xref recovery states", () => {
   });
 });
 
-test.describe("SmartPDF basic text formatting", () => {
-  test("PDF.js renders each native V1 style patch and preserves unrelated pixels", async ({
+test.describe("SmartPDF text formatting and decorations", () => {
+  test("PDF.js renders each native style/decorations patch and preserves unrelated pixels", async ({
     page,
   }) => {
     const fixture = await createTextFormattingVisualFixture();
@@ -4630,6 +4630,18 @@ test.describe("SmartPDF basic text formatting", () => {
         label: "color",
         apply: () => page.getByTestId("context-text-color").fill("#b03060"),
       },
+      { label: "underline", apply: () => page.getByTestId("context-text-underline").click() },
+      {
+        label: "strikethrough",
+        apply: () => page.getByTestId("context-text-strikethrough").click(),
+      },
+      {
+        label: "highlight",
+        apply: async () => {
+          await page.getByTestId("context-text-highlight").click();
+          await page.getByTestId("context-text-highlight-color").fill("#ffe066");
+        },
+      },
       {
         label: "combined",
         apply: async () => {
@@ -4638,6 +4650,9 @@ test.describe("SmartPDF basic text formatting", () => {
           await page.getByTestId("context-text-bold").click();
           await page.getByTestId("context-text-italic").click();
           await page.getByTestId("context-text-color").fill("#2457a7");
+          await page.getByTestId("context-text-underline").click();
+          await page.getByTestId("context-text-strikethrough").click();
+          await page.getByTestId("context-text-highlight").click();
         },
       },
     ];
@@ -4773,6 +4788,10 @@ test.describe("SmartPDF basic text formatting", () => {
       await annotation.click();
       await page.getByTestId("context-freetext-font-size").fill(String(22 + index));
       await page.getByTestId("context-freetext-color").fill("#315aa8");
+      await page.getByTestId("context-freetext-underline").click();
+      await page.getByTestId("context-freetext-strikethrough").click();
+      await page.getByTestId("context-freetext-highlight").click();
+      await page.getByTestId("context-freetext-highlight-color").fill("#ffe066");
       await runAndWaitForCanvasRenderCycle(originalCanvas, () =>
         page.getByTestId("context-annotation-apply-btn").click(),
       );
@@ -4815,7 +4834,20 @@ test.describe("SmartPDF basic text formatting", () => {
       await expect(page.getByTestId("context-freetext-font-size")).toHaveValue(
         String(22 + index),
       );
+      await expect(page.getByTestId("context-freetext-underline")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       await page.getByTestId("context-freetext-font-size").fill(String(30 + index));
+      await page.getByTestId("context-freetext-underline").click();
       await runAndWaitForCanvasRenderCycle(reopenedCanvas, () =>
         page.getByTestId("context-annotation-apply-btn").click(),
       );
@@ -4828,6 +4860,10 @@ test.describe("SmartPDF basic text formatting", () => {
       await secondReopen.click();
       await expect(page.getByTestId("context-freetext-font-size")).toHaveValue(
         String(30 + index),
+      );
+      await expect(page.getByTestId("context-freetext-underline")).toHaveAttribute(
+        "aria-pressed",
+        "false",
       );
     }
   });
@@ -4848,6 +4884,9 @@ test.describe("SmartPDF basic text formatting", () => {
     await page.getByTestId("context-text-bold").click();
     await page.getByTestId("context-text-italic").click();
     await page.getByTestId("context-text-color").fill("#336699");
+    await page.getByTestId("context-text-underline").click();
+    await page.getByTestId("context-text-strikethrough").click();
+    await page.getByTestId("context-text-highlight").click();
 
     await expect(page.getByTestId("document-modified-dot")).toBeHidden();
     await page.getByTestId("context-text-save-btn").click();
@@ -4884,6 +4923,9 @@ test.describe("SmartPDF basic text formatting", () => {
     await expect(page.getByTestId("context-text-bold")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("context-text-italic")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("context-text-color")).toHaveValue("#336699");
+    await expect(page.getByTestId("context-text-underline")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-text-strikethrough")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-text-highlight")).toHaveAttribute("aria-pressed", "true");
   });
 
   test("FreeText content and formatting commit atomically with stable object identity", async ({
@@ -4911,6 +4953,9 @@ test.describe("SmartPDF basic text formatting", () => {
     await page.getByTestId("context-freetext-bold").click();
     await page.getByTestId("context-freetext-italic").click();
     await page.getByTestId("context-freetext-color").fill("#993366");
+    await page.getByTestId("context-freetext-underline").click();
+    await page.getByTestId("context-freetext-strikethrough").click();
+    await page.getByTestId("context-freetext-highlight").click();
     await page.getByTestId("context-annotation-apply-btn").click();
 
     const styled = page.locator(`[data-testid="${stableId}"][title*="Formatted note"]`);
@@ -4937,5 +4982,8 @@ test.describe("SmartPDF basic text formatting", () => {
       "true",
     );
     await expect(page.getByTestId("context-freetext-color")).toHaveValue("#993366");
+    await expect(page.getByTestId("context-freetext-underline")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute("aria-pressed", "true");
   });
 });

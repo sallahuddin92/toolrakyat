@@ -649,11 +649,121 @@ impl AnnotationGenerator {
             _ => return Ok(AnnotationAppearance::Unsupported),
         };
 
-        let (_, stream) = Self::generate_annotation_objects(&spec)?;
+        let (_, mut stream) = Self::generate_annotation_objects(&spec)?;
+        if subtype == "FreeText" {
+            if let Some(value) = stream.take() {
+                stream = Some(Self::decorate_freetext_appearance(
+                    value, dict, rect, &spec,
+                )?);
+            }
+        }
         match stream {
             Some(stream) => Ok(AnnotationAppearance::Regenerated(stream)),
             None => Ok(AnnotationAppearance::Unsupported),
         }
+    }
+
+    fn decorate_freetext_appearance(
+        mut stream: StreamObject,
+        dict: &BTreeMap<String, PdfObject>,
+        rect: [f64; 4],
+        spec: &AnnotationSpec,
+    ) -> PdfResult<StreamObject> {
+        let underline = dict
+            .get("StarPDFUnderline")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let strike = dict
+            .get("StarPDFStrikeOut")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let highlight = dict
+            .get("StarPDFHighlight")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        if !underline && !strike && !highlight {
+            return Ok(stream);
+        }
+        let AnnotationSpec::FreeText {
+            text, font_size, ..
+        } = spec
+        else {
+            return Ok(stream);
+        };
+        let da = dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .and_then(|value| crate::appearance::DefaultAppearance::parse(&value).ok())
+            .unwrap_or_default();
+        let size = font_size.unwrap_or(da.font_size);
+        let width = (FontMetricsHelper::estimate_text_width(text, &da.font_name, size))
+            .min((rect[2] - rect[0] - 4.0).max(0.1));
+        let height = rect[3] - rect[1];
+        let baseline = ((height - size) / 2.0).max(2.0);
+        let thickness = (size * 0.05).clamp(0.5, 3.0);
+        let mut prefix = String::new();
+        use std::fmt::Write as _;
+        if highlight {
+            let color = Self::dict_number_array(dict.get("StarPDFHighlightColor"))
+                .filter(|values| values.len() == 3)
+                .unwrap_or_else(|| vec![1.0, 0.92, 0.23]);
+            write!(
+                &mut prefix,
+                "{:.4} {:.4} {:.4} rg\n2 {:.4} {:.4} {:.4} re f\n",
+                color[0],
+                color[1],
+                color[2],
+                (baseline - size * 0.2).max(0.0),
+                width,
+                (size * 1.05).min(height)
+            )
+            .map_err(|_| PdfError::InvalidOperation("Appearance serialization failed".into()))?;
+        }
+        let mut suffix = String::new();
+        if underline || strike {
+            writeln!(
+                &mut suffix,
+                "{}\n{thickness:.4} w",
+                da.color.to_stroke_ops()
+            )
+            .map_err(|_| PdfError::InvalidOperation("Appearance serialization failed".into()))?;
+            if underline {
+                let y = (baseline - size * 0.1).max(thickness / 2.0);
+                writeln!(&mut suffix, "2 {y:.4} m {:.4} {y:.4} l S", 2.0 + width).map_err(
+                    |_| PdfError::InvalidOperation("Appearance serialization failed".into()),
+                )?;
+            }
+            if strike {
+                let y = (baseline + size * 0.3).min(height - thickness / 2.0);
+                writeln!(&mut suffix, "2 {y:.4} m {:.4} {y:.4} l S", 2.0 + width).map_err(
+                    |_| PdfError::InvalidOperation("Appearance serialization failed".into()),
+                )?;
+            }
+        }
+        let original = String::from_utf8(stream.data).map_err(|_| {
+            PdfError::InvalidOperation("FreeText appearance is not valid ASCII".into())
+        })?;
+        let with_prefix = original.replacen("q\n", &format!("q\n{prefix}"), 1);
+        let decorated = if let Some(index) = with_prefix.rfind("Q\n") {
+            format!(
+                "{}{}{}",
+                &with_prefix[..index],
+                suffix,
+                &with_prefix[index..]
+            )
+        } else {
+            return Err(PdfError::InvalidOperation(
+                "FreeText appearance is missing graphics-state closure".into(),
+            ));
+        };
+        Self::validate_appearance_size(decorated.len())?;
+        stream.data = decorated.into_bytes();
+        stream.stream_length = stream.data.len();
+        stream.dict.insert(
+            "Length".to_string(),
+            PdfObject::Integer(stream.stream_length as i64),
+        );
+        Ok(stream)
     }
 
     fn create_form_dict(width: f64, height: f64, length: usize) -> BTreeMap<String, PdfObject> {

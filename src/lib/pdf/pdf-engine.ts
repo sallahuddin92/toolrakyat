@@ -145,6 +145,8 @@ export async function inspectPdfDocument(
           const subtypeRaw = annotDict.get(PDFName.of("Subtype"))?.toString()?.replace(/^\//, "") || "Unknown";
           // Exclude AcroForm widget annotations (which are handled in fields)
           if (subtypeRaw === "Widget") continue;
+          // Native text decorations are edited through their owning text run, not as loose markup.
+          if (annotDict.get(PDFName.of("StarPDFDecoration"))?.toString() === "true") continue;
 
           let contents = "";
           const contentsEntry = annotDict.get(PDFName.of("Contents"));
@@ -183,6 +185,9 @@ export async function inspectPdfDocument(
           let isBold: boolean | undefined;
           let isItalic: boolean | undefined;
           let textColor: [number, number, number] | undefined;
+          let isUnderlined: boolean | undefined;
+          let isStruckThrough: boolean | undefined;
+          let highlightColor: [number, number, number] | undefined;
           if (subtypeRaw === "FreeText") {
             const daEntry = annotDict.get(PDFName.of("DA"));
             const da =
@@ -210,6 +215,26 @@ export async function inspectPdfDocument(
               : grayMatch
                 ? [Number(grayMatch[1]), Number(grayMatch[1]), Number(grayMatch[1])]
                 : [0, 0, 0];
+            isUnderlined = annotDict.get(PDFName.of("StarPDFUnderline"))?.toString() === "true";
+            isStruckThrough = annotDict.get(PDFName.of("StarPDFStrikeOut"))?.toString() === "true";
+            const highlightEnabled =
+              annotDict.get(PDFName.of("StarPDFHighlight"))?.toString() === "true";
+            const highlightEntry = annotDict.get(PDFName.of("StarPDFHighlightColor"));
+            const highlightValues =
+              highlightEntry &&
+              typeof (highlightEntry as unknown as { asArray?: () => unknown[] }).asArray === "function"
+                ? (highlightEntry as unknown as { asArray: () => unknown[] }).asArray()
+                : [];
+            if (highlightEnabled) {
+              highlightColor =
+                highlightValues.length === 3
+                  ? [
+                      (highlightValues[0] as PDFNumber).asNumber(),
+                      (highlightValues[1] as PDFNumber).asNumber(),
+                      (highlightValues[2] as PDFNumber).asNumber(),
+                    ]
+                  : [1, 0.92, 0.23];
+            }
           }
 
           let objectNumber: number | undefined;
@@ -239,6 +264,9 @@ export async function inspectPdfDocument(
             isBold,
             isItalic,
             textColor,
+            isUnderlined,
+            isStruckThrough,
+            highlightColor,
           });
         } catch {
           // Ignore malformed individual annotation

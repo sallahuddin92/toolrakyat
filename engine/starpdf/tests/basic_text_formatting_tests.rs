@@ -92,6 +92,135 @@ fn native_individual_style_properties_use_real_pdf_state() {
 }
 
 #[test]
+fn native_decorations_are_owned_markup_and_do_not_rewrite_glyph_streams() {
+    let source = MinimalWriter::create_minimal_pdf("Decorate exactly this").unwrap();
+    let mut seeded = PdfDocument::from_bytes(&source).unwrap();
+    let seeded_bytes = seeded
+        .mutate_and_export(&[PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::Highlight {
+                rect: [40.0, 40.0, 120.0, 60.0],
+                quad_points: vec![40.0, 60.0, 120.0, 60.0, 40.0, 40.0, 120.0, 40.0],
+                color: Some(vec![0.5, 1.0, 0.5]),
+            },
+        }])
+        .unwrap();
+    let mut doc = PdfDocument::from_bytes(&seeded_bytes).unwrap();
+    let span = doc.extract_page_text(0).unwrap().spans.remove(0);
+    let target = TextEditTarget::from_span(&span);
+    let mutation = doc
+        .style_text(
+            0,
+            &target,
+            &TextStylePatch {
+                underline: Some(true),
+                strikethrough: Some(true),
+                highlight_enabled: Some(true),
+                highlight_color: Some([1.0, 0.8, 0.2]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    if let Some(stream_object) = span.source_object {
+        assert!(!mutation
+            .modified_objects
+            .keys()
+            .any(|reference| reference.number == stream_object));
+    }
+    let decorated = doc.export_incremental(&mutation).unwrap();
+    let mut reopened = PdfDocument::from_bytes(&decorated).unwrap();
+    let style = reopened.inspect_text_style(0, &target).unwrap();
+    assert!(style.underline);
+    assert!(style.strikethrough);
+    assert_eq!(style.highlight_color, Some([1.0, 0.8, 0.2]));
+    assert_eq!(reopened.page_annotations(0).unwrap().len(), 4);
+
+    let removal = reopened
+        .style_text(
+            0,
+            &target,
+            &TextStylePatch {
+                underline: Some(false),
+                strikethrough: Some(false),
+                highlight_enabled: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let removed = reopened.export_incremental(&removal).unwrap();
+    let mut verified = PdfDocument::from_bytes(&removed).unwrap();
+    let annotations = verified.page_annotations(0).unwrap();
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0].subtype.as_name(), "Highlight");
+}
+
+#[test]
+fn freetext_decorations_roundtrip_and_use_adaptive_run_appearances() {
+    register_qualified_multilingual_fonts();
+    for contents in [
+        "Latin text",
+        "ساي جاوي ڤ ڠ ڽ چ",
+        "עברית",
+        "देवनागरी",
+        "日本語の報告",
+        "中文測試報告",
+        "한국어 보고서",
+        "Report تقرير 日本 2026",
+    ] {
+        let source = MinimalWriter::create_minimal_pdf("FreeText decoration").unwrap();
+        let mut doc = PdfDocument::from_bytes(&source).unwrap();
+        let created = doc
+            .mutate_and_export(&[PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::FreeText {
+                    rect: [40.0, 50.0, 360.0, 105.0],
+                    text: contents.into(),
+                    font_size: Some(18.0),
+                    color: Some(vec![0.1, 0.2, 0.6]),
+                },
+            }])
+            .unwrap_or_else(|error| panic!("decoration creation failed for {contents}: {error}"));
+        let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+        let annotation = reopened.page_annotations(0).unwrap().remove(0);
+        let decorated = reopened
+            .mutate_and_export(&[PdfChange::UpdateAnnotation {
+                annot_ref: annotation.object_ref,
+                update: AnnotationUpdateSpec {
+                    underline: Some(true),
+                    strikethrough: Some(true),
+                    highlight_enabled: Some(true),
+                    highlight_color: Some([1.0, 0.9, 0.2]),
+                    ..Default::default()
+                },
+            }])
+            .unwrap();
+        let mut second_open = PdfDocument::from_bytes(&decorated).unwrap();
+        let after = second_open.page_annotations(0).unwrap().remove(0);
+        assert_eq!(after.object_ref, annotation.object_ref);
+        assert_eq!(after.contents.as_deref(), Some(contents));
+        let dict = second_open
+            .store_mut()
+            .resolve(after.object_ref)
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        assert_eq!(
+            dict.get("StarPDFUnderline").and_then(PdfObject::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            dict.get("StarPDFStrikeOut").and_then(PdfObject::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            dict.get("StarPDFHighlight").and_then(PdfObject::as_bool),
+            Some(true)
+        );
+        assert!(dict.contains_key("AP"));
+    }
+}
+
+#[test]
 fn native_combined_style_apply_is_isolated_and_roundtrips() {
     let bytes = MinimalWriter::create_minimal_pdf("Style me").unwrap();
     let mut doc = PdfDocument::from_bytes(&bytes).unwrap();
@@ -104,6 +233,7 @@ fn native_combined_style_apply_is_isolated_and_roundtrips() {
         italic: Some(true),
         fill_color: Some([0.1, 0.3, 0.7]),
         replacement_text: Some("Styled text".into()),
+        ..Default::default()
     };
     let inspected = doc.inspect_text_style(0, &target).unwrap();
     assert_eq!(inspected.font_size, original.spans[0].font_size);

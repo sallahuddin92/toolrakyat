@@ -57,6 +57,9 @@ pub struct WasmTextSpan {
     pub is_italic: Option<bool>,
     pub is_monospace: Option<bool>,
     pub fill_color: Option<[f64; 3]>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub highlight_color: Option<[f64; 3]>,
     pub base_font: Option<String>,
     pub is_editable: bool,
     pub editability_code: String,
@@ -235,6 +238,10 @@ pub struct WasmUpdateAnnotationInput {
     pub bold: Option<bool>,
     pub italic: Option<bool>,
     pub text_color: Option<[f64; 3]>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub highlight_enabled: Option<bool>,
+    pub highlight_color: Option<[f64; 3]>,
 }
 
 #[cfg(feature = "wasm")]

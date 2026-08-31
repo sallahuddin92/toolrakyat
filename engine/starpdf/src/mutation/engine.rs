@@ -23,6 +23,7 @@ use crate::mutation::change::{PdfChange, TextStyleMutation};
 use crate::mutation::result::MutationPlan;
 use crate::mutation::text_edit::{ContentStreamEditor, LayoutPolicyResult, TextEditTarget};
 use crate::syntax::object::{ObjectRef, PdfObject, StreamObject};
+use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 const MAX_MUTATIONS_PER_BATCH: usize = 500;
 const MAX_FIELD_VALUE_LEN: usize = 1_048_576; // 1 MB
@@ -33,6 +34,8 @@ const MAX_PDF_OBJECT_NUMBER: u64 = 9_999_999_999;
 const MAX_SUBSET_FONT_RESOURCES_PER_MUTATION: usize = 64;
 const MAX_PAGE_ROTATION_ANCESTORS: usize = 64;
 const MAX_FIELD_PROPERTY_ANCESTORS: usize = 32;
+type DecorationMetrics = (f64, f64, f64, f64, f64, f64);
+type FreeTextRunLayout = (f64, f64, DecorationMetrics);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct SubsetCacheKey {
@@ -212,6 +215,17 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     if last_layout_result.is_none() {
                         last_layout_result = Some(layout);
                     }
+                }
+                PdfChange::SetNativeTextDecorations {
+                    page_index,
+                    decoration,
+                } => {
+                    let status = self.mutate_native_text_decorations(
+                        *page_index,
+                        decoration,
+                        &mut modified_objects,
+                    )?;
+                    overall_status = overall_status.combine(status);
                 }
                 PdfChange::ReplaceTextGroup {
                     page_index,
@@ -1980,6 +1994,136 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         Ok(appearance_status)
     }
 
+    fn mutate_native_text_decorations(
+        &mut self,
+        page_index: usize,
+        decoration: &crate::mutation::NativeTextDecorationMutation,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<AppearanceStatus> {
+        Self::validate_rect(decoration.rect, "Native text decoration rectangle")?;
+        if !decoration.quad_points.iter().all(|value| value.is_finite()) {
+            return Err(PdfError::InvalidOperation(
+                "TEXT_DECORATION_GEOMETRY_UNPROVABLE: QuadPoints must be finite".into(),
+            ));
+        }
+        for color in [decoration.mark_color]
+            .into_iter()
+            .chain(decoration.highlight_color)
+        {
+            if color
+                .iter()
+                .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(PdfError::InvalidOperation(
+                    "TEXT_DECORATION_COLOR_INVALID: RGB components must be within 0..=1".into(),
+                ));
+            }
+        }
+
+        let page_ref = self.page_refs.get(page_index).copied().ok_or_else(|| {
+            PdfError::InvalidOperation(format!("Page index {page_index} out of bounds"))
+        })?;
+        let mut page_dict = self.get_dict_for_modification(page_ref, modified)?;
+        let mut annots = match page_dict.get("Annots") {
+            Some(PdfObject::Array(values)) => values.clone(),
+            Some(PdfObject::Reference(reference)) => self
+                .store
+                .resolve(*reference)?
+                .as_array()
+                .map_or_else(Vec::new, ToOwned::to_owned),
+            _ => Vec::new(),
+        };
+
+        let desired = [
+            ("Underline", decoration.underline, decoration.mark_color),
+            ("StrikeOut", decoration.strikethrough, decoration.mark_color),
+            (
+                "Highlight",
+                decoration.highlight_color.is_some(),
+                decoration.highlight_color.unwrap_or([1.0, 0.92, 0.23]),
+            ),
+        ];
+        let mut changed = false;
+        for (kind, enabled, color) in desired {
+            let existing = annots.iter().find_map(|item| {
+                let reference = item.as_reference()?;
+                let object = modified
+                    .get(&reference)
+                    .cloned()
+                    .or_else(|| self.store.resolve(reference).ok().cloned())?;
+                let dict = object.as_dict()?;
+                let owned =
+                    dict.get("StarPDFDecoration").and_then(PdfObject::as_bool) == Some(true);
+                let same_target = dict
+                    .get("StarPDFDecorationTarget")
+                    .and_then(PdfObject::as_string_lossy)
+                    .is_some_and(|target| {
+                        target == decoration.target_id
+                            || decoration.previous_target_id.as_deref() == Some(target.as_str())
+                    });
+                let same_kind = dict.get("Subtype").and_then(PdfObject::as_name) == Some(kind);
+                (owned && same_target && same_kind).then_some(reference)
+            });
+
+            if !enabled {
+                if let Some(reference) = existing {
+                    annots.retain(|item| item.as_reference() != Some(reference));
+                    changed = true;
+                }
+                continue;
+            }
+
+            let spec = match kind {
+                "Underline" => AnnotationSpec::Underline {
+                    rect: decoration.rect,
+                    quad_points: decoration.quad_points.to_vec(),
+                    color: Some(color.to_vec()),
+                },
+                "StrikeOut" => AnnotationSpec::StrikeOut {
+                    rect: decoration.rect,
+                    quad_points: decoration.quad_points.to_vec(),
+                    color: Some(color.to_vec()),
+                },
+                _ => AnnotationSpec::Highlight {
+                    rect: decoration.rect,
+                    quad_points: decoration.quad_points.to_vec(),
+                    color: Some(color.to_vec()),
+                },
+            };
+            let (mut dict, stream) = AnnotationGenerator::generate_annotation_objects(&spec)?;
+            dict.insert("P".to_string(), PdfObject::Reference(page_ref));
+            dict.insert("StarPDFDecoration".to_string(), PdfObject::Bool(true));
+            dict.insert(
+                "StarPDFDecorationTarget".to_string(),
+                PdfObject::text_string(&decoration.target_id),
+            );
+            let annotation_ref = existing.unwrap_or(self.allocate_object_ref()?);
+            if let Some(stream) = stream {
+                let stream_ref = self.allocate_object_ref()?;
+                modified.insert(stream_ref, PdfObject::Stream(stream));
+                dict.insert(
+                    "AP".to_string(),
+                    PdfObject::Dictionary(BTreeMap::from([(
+                        "N".to_string(),
+                        PdfObject::Reference(stream_ref),
+                    )])),
+                );
+            }
+            modified.insert(annotation_ref, PdfObject::Dictionary(dict));
+            if existing.is_none() {
+                annots.push(PdfObject::Reference(annotation_ref));
+            }
+            changed = true;
+        }
+        if changed {
+            page_dict.insert("Annots".to_string(), PdfObject::Array(annots));
+            modified.insert(page_ref, PdfObject::Dictionary(page_dict));
+            Ok(AppearanceStatus::AppearanceRegenerated)
+        } else {
+            Ok(AppearanceStatus::AppearancePreserved)
+        }
+    }
+
     fn mutate_update_annotation(
         &mut self,
         annot_ref: ObjectRef,
@@ -2129,6 +2273,41 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             || update.bold.is_some()
             || update.italic.is_some()
             || update.text_color.is_some();
+        let has_text_decoration_update = update.underline.is_some()
+            || update.strikethrough.is_some()
+            || update.highlight_enabled.is_some()
+            || update.highlight_color.is_some();
+        if has_text_decoration_update {
+            if subtype != "FreeText" {
+                return Err(PdfError::InvalidOperation(
+                    "TEXT_DECORATION_TARGET_UNSUPPORTED: appearance decorations are limited to FreeText"
+                        .into(),
+                ));
+            }
+            if let Some(value) = update.underline {
+                dict.insert("StarPDFUnderline".to_string(), PdfObject::Bool(value));
+            }
+            if let Some(value) = update.strikethrough {
+                dict.insert("StarPDFStrikeOut".to_string(), PdfObject::Bool(value));
+            }
+            if let Some(color) = update.highlight_color {
+                if color
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+                {
+                    return Err(PdfError::InvalidOperation(
+                        "TEXT_DECORATION_COLOR_INVALID: RGB components must be within 0..=1".into(),
+                    ));
+                }
+                dict.insert(
+                    "StarPDFHighlightColor".to_string(),
+                    PdfObject::Array(color.into_iter().map(PdfObject::Real).collect()),
+                );
+            }
+            if let Some(enabled) = update.highlight_enabled {
+                dict.insert("StarPDFHighlight".to_string(), PdfObject::Bool(enabled));
+            }
+        }
         if has_text_style_update {
             if subtype != "FreeText" {
                 return Err(PdfError::InvalidOperation(
@@ -2174,6 +2353,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             || update.quad_points.is_some()
             || update.ink_list.is_some()
             || has_text_style_update
+            || has_text_decoration_update
             || (subtype == "FreeText" && update.contents.is_some());
 
         let status = if visual_change {
@@ -2347,18 +2527,70 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             font_tags.insert(font_id.clone(), tag);
         }
 
-        let mut content = format!(
-            "q\n0 0 {:.4} {:.4} re W n\n{}\nBT\n",
-            width,
-            height,
-            da.color.to_fill_ops()
-        );
+        let underline = dict
+            .get("StarPDFUnderline")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let strike = dict
+            .get("StarPDFStrikeOut")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let highlight = dict
+            .get("StarPDFHighlight")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let highlight_color = dict
+            .get("StarPDFHighlightColor")
+            .and_then(PdfObject::as_array)
+            .filter(|values| values.len() == 3)
+            .map_or([1.0, 0.92, 0.23], |values| {
+                [
+                    values[0].as_real().unwrap_or(1.0),
+                    values[1].as_real().unwrap_or(0.92),
+                    values[2].as_real().unwrap_or(0.23),
+                ]
+            });
         let mut cursor_x = if plan.direction == crate::font::TextDirection::RightToLeft {
             (width - 2.0 - plan.predicted_width).max(2.0)
         } else {
             2.0
         };
         let baseline = ((height - font_size) / 2.0).max(2.0);
+        let run_layout: Vec<FreeTextRunLayout> = plan
+            .runs
+            .iter()
+            .zip(&plan.fallback_runs)
+            .scan(cursor_x, |x, (run, fallback)| {
+                let start = *x;
+                let run_width = run.total_advance * font_size / 1000.0;
+                *x += run_width;
+                Some((
+                    start,
+                    run_width,
+                    Self::font_decoration_metrics(&fallback.font_bytes, font_size),
+                ))
+            })
+            .collect();
+        let mut content = format!("q\n0 0 {:.4} {:.4} re W n\n", width, height);
+        if highlight {
+            use std::fmt::Write as _;
+            writeln!(
+                &mut content,
+                "{:.4} {:.4} {:.4} rg",
+                highlight_color[0], highlight_color[1], highlight_color[2]
+            )
+            .map_err(|_| PdfError::InvalidOperation("Appearance serialization failed".into()))?;
+            for (start, run_width, (_, _, _, _, ascent, descent)) in &run_layout {
+                let y = (baseline + descent).max(0.0);
+                let h = (ascent - descent).min(height).max(font_size * 0.5);
+                writeln!(&mut content, "{start:.4} {y:.4} {run_width:.4} {h:.4} re f").map_err(
+                    |_| PdfError::InvalidOperation("Appearance serialization failed".into()),
+                )?;
+            }
+        }
+        use std::fmt::Write as _;
+        writeln!(&mut content, "{}\nBT", da.color.to_fill_ops())
+            .map_err(|_| PdfError::InvalidOperation("Appearance serialization failed".into()))?;
         for (run, fallback) in plan.runs.iter().zip(&plan.fallback_runs) {
             let tag = font_tags.get(&fallback.font_id).ok_or_else(|| {
                 PdfError::InvalidOperation("Missing adaptive FreeText font resource".into())
@@ -2386,7 +2618,42 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 cursor_x += glyph.advance * font_size / 1000.0;
             }
         }
-        content.push_str("ET\nQ\n");
+        content.push_str("ET\n");
+        if underline || strike {
+            use std::fmt::Write as _;
+            writeln!(&mut content, "{}", da.color.to_stroke_ops()).map_err(|_| {
+                PdfError::InvalidOperation("Appearance serialization failed".into())
+            })?;
+            for (start, run_width, (underline_y, underline_width, strike_y, strike_width, _, _)) in
+                &run_layout
+            {
+                if underline {
+                    writeln!(
+                        &mut content,
+                        "{underline_width:.4} w {start:.4} {:.4} m {:.4} {:.4} l S",
+                        baseline + underline_y,
+                        start + run_width,
+                        baseline + underline_y
+                    )
+                    .map_err(|_| {
+                        PdfError::InvalidOperation("Appearance serialization failed".into())
+                    })?;
+                }
+                if strike {
+                    writeln!(
+                        &mut content,
+                        "{strike_width:.4} w {start:.4} {:.4} m {:.4} {:.4} l S",
+                        baseline + strike_y,
+                        start + run_width,
+                        baseline + strike_y
+                    )
+                    .map_err(|_| {
+                        PdfError::InvalidOperation("Appearance serialization failed".into())
+                    })?;
+                }
+            }
+        }
+        content.push_str("Q\n");
         if content.len() > MAX_ANNOTATION_APPEARANCE_BYTES {
             return Err(PdfError::InvalidOperation(format!(
                 "Annotation appearance exceeds maximum length of {MAX_ANNOTATION_APPEARANCE_BYTES} bytes"
@@ -2418,6 +2685,55 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             stream_length: data.len(),
             data,
         })
+    }
+
+    fn font_decoration_metrics(font_bytes: &[u8], font_size: f64) -> DecorationMetrics {
+        let Ok(font) = ReadFontRef::from_index(font_bytes, 0) else {
+            return (
+                -font_size * 0.1,
+                font_size * 0.05,
+                font_size * 0.3,
+                font_size * 0.05,
+                font_size * 0.8,
+                -font_size * 0.2,
+            );
+        };
+        let units = font
+            .head()
+            .map_or(1000.0, |head| f64::from(head.units_per_em()));
+        let scale = font_size / units.max(1.0);
+        let (underline_y, underline_width) =
+            font.post()
+                .map_or((-font_size * 0.1, font_size * 0.05), |post| {
+                    (
+                        f64::from(post.underline_position().to_i16()) * scale,
+                        (f64::from(post.underline_thickness().to_i16()).abs() * scale).max(0.5),
+                    )
+                });
+        let (strike_y, strike_width) =
+            font.os2()
+                .map_or((font_size * 0.3, font_size * 0.05), |os2| {
+                    (
+                        f64::from(os2.y_strikeout_position()) * scale,
+                        (f64::from(os2.y_strikeout_size()).abs() * scale).max(0.5),
+                    )
+                });
+        let (ascent, descent) = font
+            .hhea()
+            .map_or((font_size * 0.8, -font_size * 0.2), |hhea| {
+                (
+                    f64::from(hhea.ascender().to_i16()) * scale,
+                    f64::from(hhea.descender().to_i16()) * scale,
+                )
+            });
+        (
+            underline_y,
+            underline_width,
+            strike_y,
+            strike_width,
+            ascent,
+            descent,
+        )
     }
 
     fn mutate_remove_annotation(

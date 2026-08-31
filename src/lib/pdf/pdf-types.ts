@@ -54,6 +54,9 @@ export interface PdfMarkupAnnotation {
   isBold?: boolean;
   isItalic?: boolean;
   textColor?: [number, number, number];
+  isUnderlined?: boolean;
+  isStruckThrough?: boolean;
+  highlightColor?: [number, number, number];
 }
 
 

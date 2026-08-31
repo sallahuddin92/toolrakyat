@@ -9,6 +9,19 @@ pub struct TextStyleMutation {
     pub font_resource_name: String,
 }
 
+/// Exact, StarPDF-owned text-markup state for one native text-show target.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeTextDecorationMutation {
+    pub target_id: String,
+    pub previous_target_id: Option<String>,
+    pub rect: [f64; 4],
+    pub quad_points: [f64; 8],
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub highlight_color: Option<[f64; 3]>,
+    pub mark_color: [f64; 3],
+}
+
 /// Strongly-typed discrete document mutation operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfChange {
@@ -71,6 +84,11 @@ pub enum PdfChange {
         target: crate::mutation::text_edit::TextEditTarget,
         replacement: String,
         style: TextStyleMutation,
+    },
+    /// Synchronizes only the markup annotations owned by one native text target.
+    SetNativeTextDecorations {
+        page_index: usize,
+        decoration: NativeTextDecorationMutation,
     },
     /// Moves native existing content-stream text by (dx, dy) in PDF default user space.
     MoveText {

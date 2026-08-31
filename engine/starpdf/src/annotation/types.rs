@@ -236,4 +236,8 @@ pub struct AnnotationUpdateSpec {
     pub bold: Option<bool>,
     pub italic: Option<bool>,
     pub text_color: Option<[f64; 3]>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub highlight_enabled: Option<bool>,
+    pub highlight_color: Option<[f64; 3]>,
 }

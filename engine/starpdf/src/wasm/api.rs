@@ -143,33 +143,43 @@ pub fn starpdf_extract_page_text(handle: u32, page_index: u32) -> Result<JsValue
             let spans = page_text
                 .spans
                 .iter()
-                .map(|s| WasmTextSpan {
-                    page_index: s.page_index,
-                    text: s.text.clone(),
-                    x: s.x,
-                    y: s.y,
-                    width: s.width,
-                    height: s.height,
-                    rotation: s.rotation,
-                    font_name: s.font_name.clone(),
-                    font_size: s.font_size,
-                    confidence: s.confidence,
-                    span_id: s.span_id.clone(),
-                    stream_index: s.stream_index,
-                    instruction_index: s.instruction_index,
-                    operand_index: s.operand_index,
-                    operator_name: s.operator_name.clone(),
-                    font_family: Some(s.font_family.clone()),
-                    is_bold: Some(s.is_bold),
-                    is_italic: Some(s.is_italic),
-                    is_monospace: Some(s.is_monospace),
-                    fill_color: Some(s.fill_color),
-                    base_font: Some(s.font_base_name.clone()),
-                    is_editable: s.is_editable,
-                    editability_code: s.editability_status.code().to_string(),
-                    refusal_reason: s.refusal_reason.clone(),
+                .map(|s| {
+                    let decoration = crate::font::style::inspect_owned_decorations(
+                        doc,
+                        s.page_index,
+                        &s.span_id,
+                    )?;
+                    Ok(WasmTextSpan {
+                        page_index: s.page_index,
+                        text: s.text.clone(),
+                        x: s.x,
+                        y: s.y,
+                        width: s.width,
+                        height: s.height,
+                        rotation: s.rotation,
+                        font_name: s.font_name.clone(),
+                        font_size: s.font_size,
+                        confidence: s.confidence,
+                        span_id: s.span_id.clone(),
+                        stream_index: s.stream_index,
+                        instruction_index: s.instruction_index,
+                        operand_index: s.operand_index,
+                        operator_name: s.operator_name.clone(),
+                        font_family: Some(s.font_family.clone()),
+                        is_bold: Some(s.is_bold),
+                        is_italic: Some(s.is_italic),
+                        is_monospace: Some(s.is_monospace),
+                        fill_color: Some(s.fill_color),
+                        underline: Some(decoration.0),
+                        strikethrough: Some(decoration.1),
+                        highlight_color: decoration.2,
+                        base_font: Some(s.font_base_name.clone()),
+                        is_editable: s.is_editable,
+                        editability_code: s.editability_status.code().to_string(),
+                        refusal_reason: s.refusal_reason.clone(),
+                    })
                 })
-                .collect();
+                .collect::<crate::error::PdfResult<Vec<_>>>()?;
 
             let result = WasmPageText {
                 page_index: page_text.page_index,
@@ -195,40 +205,50 @@ pub fn starpdf_extract_all_text(handle: u32) -> Result<JsValue, JsValue> {
                     let spans = page_text
                         .spans
                         .iter()
-                        .map(|s| WasmTextSpan {
-                            page_index: s.page_index,
-                            text: s.text.clone(),
-                            x: s.x,
-                            y: s.y,
-                            width: s.width,
-                            height: s.height,
-                            rotation: s.rotation,
-                            font_name: s.font_name.clone(),
-                            font_size: s.font_size,
-                            confidence: s.confidence,
-                            span_id: s.span_id.clone(),
-                            stream_index: s.stream_index,
-                            instruction_index: s.instruction_index,
-                            operand_index: s.operand_index,
-                            operator_name: s.operator_name.clone(),
-                            font_family: Some(s.font_family.clone()),
-                            is_bold: Some(s.is_bold),
-                            is_italic: Some(s.is_italic),
-                            is_monospace: Some(s.is_monospace),
-                            fill_color: Some(s.fill_color),
-                            base_font: Some(s.font_base_name.clone()),
-                            is_editable: s.is_editable,
-                            editability_code: s.editability_status.code().to_string(),
-                            refusal_reason: s.refusal_reason.clone(),
+                        .map(|s| {
+                            let decoration = crate::font::style::inspect_owned_decorations(
+                                doc,
+                                s.page_index,
+                                &s.span_id,
+                            )?;
+                            Ok(WasmTextSpan {
+                                page_index: s.page_index,
+                                text: s.text.clone(),
+                                x: s.x,
+                                y: s.y,
+                                width: s.width,
+                                height: s.height,
+                                rotation: s.rotation,
+                                font_name: s.font_name.clone(),
+                                font_size: s.font_size,
+                                confidence: s.confidence,
+                                span_id: s.span_id.clone(),
+                                stream_index: s.stream_index,
+                                instruction_index: s.instruction_index,
+                                operand_index: s.operand_index,
+                                operator_name: s.operator_name.clone(),
+                                font_family: Some(s.font_family.clone()),
+                                is_bold: Some(s.is_bold),
+                                is_italic: Some(s.is_italic),
+                                is_monospace: Some(s.is_monospace),
+                                fill_color: Some(s.fill_color),
+                                underline: Some(decoration.0),
+                                strikethrough: Some(decoration.1),
+                                highlight_color: decoration.2,
+                                base_font: Some(s.font_base_name.clone()),
+                                is_editable: s.is_editable,
+                                editability_code: s.editability_status.code().to_string(),
+                                refusal_reason: s.refusal_reason.clone(),
+                            })
                         })
-                        .collect();
-                    WasmPageText {
+                        .collect::<crate::error::PdfResult<Vec<_>>>()?;
+                    Ok(WasmPageText {
                         page_index: page_text.page_index,
                         plain_text: page_text.plain_text(),
                         spans,
-                    }
+                    })
                 })
-                .collect();
+                .collect::<crate::error::PdfResult<Vec<_>>>()?;
 
             serde_wasm_bindgen::to_value(&results)
                 .map_err(|e| crate::error::PdfError::InvalidOperation(e.to_string()))
@@ -329,12 +349,31 @@ pub fn starpdf_apply_text_style(
     let _ = REGISTRY
         .transform_and_replace(handle, |doc| {
             let target = crate::mutation::TextEditTarget::from_span_id(span_id)?;
-            let plan = doc.style_text(page_index as usize, &target, &patch)?;
+            let style_plan = doc.plan_text_style_change(page_index as usize, &target, &patch)?;
+            let shaped_decoration_followup = style_plan.decoration_changed
+                && style_plan.rewrite_text
+                && style_plan.replacement.strategy
+                    == crate::font::ReplacementStrategy::ShapedFallback;
+            let decoration = style_plan.decoration.clone();
+            let plan = doc.apply_text_style_plan(&style_plan)?;
             if let Some(result) = &plan.layout_policy_result {
                 layout = result.as_str().to_string();
             }
             modified_object_count = plan.modified_objects.len();
-            doc.export_incremental(&plan)
+            let bytes = doc.export_incremental(&plan)?;
+            if shaped_decoration_followup {
+                let mut reopened = crate::PdfDocument::from_bytes(&bytes)?;
+                let decoration_plan = reopened.apply_mutation(&[
+                    crate::mutation::PdfChange::SetNativeTextDecorations {
+                        page_index: page_index as usize,
+                        decoration,
+                    },
+                ])?;
+                modified_object_count += decoration_plan.modified_objects.len();
+                reopened.export_incremental(&decoration_plan)
+            } else {
+                Ok(bytes)
+            }
         })
         .map_err(to_js_error)?;
     serde_wasm_bindgen::to_value(&WasmReplaceTextResult {
@@ -486,6 +525,8 @@ pub fn starpdf_get_text_editability(
                         "Span ID '{span_id}' not found on page {page_index}"
                     ))
                 })?;
+            let decoration =
+                crate::font::style::inspect_owned_decorations(doc, span.page_index, &span.span_id)?;
 
             let dto = WasmTextSpan {
                 page_index: span.page_index,
@@ -508,6 +549,9 @@ pub fn starpdf_get_text_editability(
                 is_italic: Some(span.is_italic),
                 is_monospace: Some(span.is_monospace),
                 fill_color: Some(span.fill_color),
+                underline: Some(decoration.0),
+                strikethrough: Some(decoration.1),
+                highlight_color: decoration.2,
                 base_font: Some(span.font_base_name.clone()),
                 is_editable: span.is_editable,
                 editability_code: span.editability_status.code().to_string(),
@@ -899,6 +943,10 @@ pub fn starpdf_update_annotation(
         bold: input.bold,
         italic: input.italic,
         text_color: input.text_color,
+        underline: input.underline,
+        strikethrough: input.strikethrough,
+        highlight_enabled: input.highlight_enabled,
+        highlight_color: input.highlight_color,
     };
 
     let change = PdfChange::UpdateAnnotation {
