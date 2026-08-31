@@ -1,3 +1,7 @@
+import {
+  STARPDF_TEXT_FONT_SIZE_MAX,
+  STARPDF_TEXT_FONT_SIZE_MIN,
+} from "./starpdf-types";
 import type {
   StarPdfAddAnnotationInput,
   StarPdfAddLineInput,
@@ -142,6 +146,19 @@ async function registerFallbackFontsForText(text: string): Promise<void> {
       registeredFallbackFonts.add(fontId);
     }),
   );
+}
+
+function validateTextFontSize(size: number | undefined): void {
+  if (size === undefined) return;
+  if (
+    !Number.isFinite(size) ||
+    size < STARPDF_TEXT_FONT_SIZE_MIN ||
+    size > STARPDF_TEXT_FONT_SIZE_MAX
+  ) {
+    throw new Error(
+      `TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be finite and within ${STARPDF_TEXT_FONT_SIZE_MIN}..=${STARPDF_TEXT_FONT_SIZE_MAX} pt`,
+    );
+  }
 }
 
 export async function ensureWasmInitialized(): Promise<void> {
@@ -350,6 +367,7 @@ export class StarPdfDocumentHandle {
     input: StarPdfAddAnnotationInput
   ): Promise<boolean> {
     this.assertOpen();
+    validateTextFontSize(input.subtype === "FreeText" ? input.font_size : undefined);
     if (input.subtype === "FreeText") {
       await registerFallbackFontsForText(input.contents ?? "");
     } else {
@@ -361,11 +379,25 @@ export class StarPdfDocumentHandle {
   async updateAnnotation(
     objectNum: number,
     objectGen: number,
-    input: StarPdfUpdateAnnotationInput
+    input: StarPdfUpdateAnnotationInput,
+    existingTextForFontRegistration?: string,
   ): Promise<boolean> {
     this.assertOpen();
-    if (typeof input.contents === "string") {
-      await registerFallbackFontsForText(input.contents);
+    validateTextFontSize(input.font_size);
+    const hasTextStyleUpdate =
+      input.font_family !== undefined ||
+      input.font_size !== undefined ||
+      input.bold !== undefined ||
+      input.italic !== undefined ||
+      input.text_color !== undefined;
+    const textForFontRegistration =
+      typeof input.contents === "string"
+        ? input.contents
+        : hasTextStyleUpdate
+          ? existingTextForFontRegistration
+          : undefined;
+    if (typeof textForFontRegistration === "string") {
+      await registerFallbackFontsForText(textForFontRegistration);
     } else {
       await ensureWasmInitialized();
     }
@@ -458,6 +490,7 @@ export class StarPdfDocumentHandle {
     patch: StarPdfTextStylePatch,
   ): Promise<StarPdfReplaceTextResult> {
     this.assertOpen();
+    validateTextFontSize(patch.font_size);
     await registerFallbackFontsForText(text);
     return starpdf_apply_text_style(
       this._handle,

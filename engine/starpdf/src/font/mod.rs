@@ -33,6 +33,7 @@ pub use sfnt::SfntFont;
 pub use shaping::{ShapedGlyph, ShapedRun, TextDirection, TextShaper};
 pub use standard_metrics::StandardFontMetrics;
 pub use style::{
-    font_family_name, parse_font_family, style_from_da_font_name, ComputedTextStyle,
-    TextStyleCapability, TextStylePatch, TextStylePlan, TextStylePlanner, TextWeight,
+    font_family_name, parse_font_family, style_from_da_font_name, validate_text_font_size,
+    ComputedTextStyle, TextStyleCapability, TextStylePatch, TextStylePlan, TextStylePlanner,
+    TextWeight, MAX_TEXT_FONT_SIZE, MIN_TEXT_FONT_SIZE,
 };

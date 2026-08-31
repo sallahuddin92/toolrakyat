@@ -4,7 +4,7 @@ use crate::annotation::types::{AnnotationSpec, LineEndingStyle};
 use crate::appearance::color::PdfColor;
 use crate::appearance::fonts::FontMetricsHelper;
 use crate::error::{PdfError, PdfResult};
-use crate::font::Font;
+use crate::font::{validate_text_font_size, Font};
 use crate::syntax::object::{PdfObject, StreamObject};
 
 pub const MAX_ANNOTATION_CONTENTS_LEN: usize = 1_048_576;
@@ -72,10 +72,8 @@ impl AnnotationGenerator {
                 ..
             } => {
                 Self::validate_contents(text)?;
-                if font_size.is_some_and(|size| !size.is_finite()) {
-                    return Err(PdfError::InvalidOperation(
-                        "FreeText font size must be finite".into(),
-                    ));
+                if let Some(size) = font_size {
+                    validate_text_font_size(*size)?;
                 }
                 Self::validate_optional_color(color.as_deref(), "FreeText color")?;
                 dict.insert(
@@ -84,7 +82,7 @@ impl AnnotationGenerator {
                 );
                 dict.insert("Contents".to_string(), PdfObject::text_string(text));
 
-                let sz = font_size.unwrap_or(12.0).clamp(6.0, 72.0);
+                let sz = font_size.unwrap_or(12.0);
                 let col = color
                     .as_deref()
                     .and_then(PdfColor::parse_from_slice)

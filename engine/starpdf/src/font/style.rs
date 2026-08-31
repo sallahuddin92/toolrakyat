@@ -8,6 +8,18 @@ use crate::PdfDocument;
 #[cfg(feature = "wasm")]
 use serde::{Deserialize, Serialize};
 
+pub const MIN_TEXT_FONT_SIZE: f64 = 6.0;
+pub const MAX_TEXT_FONT_SIZE: f64 = 144.0;
+
+pub fn validate_text_font_size(size: f64) -> PdfResult<()> {
+    if !size.is_finite() || !(MIN_TEXT_FONT_SIZE..=MAX_TEXT_FONT_SIZE).contains(&size) {
+        return Err(PdfError::InvalidOperation(
+            "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be finite and within 6..=144 pt".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "wasm", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "wasm", serde(rename_all = "SCREAMING_SNAKE_CASE"))]
@@ -50,14 +62,8 @@ pub struct TextStylePatch {
 
 impl TextStylePatch {
     pub fn validate(&self) -> PdfResult<()> {
-        if self
-            .font_size
-            .is_some_and(|size| !size.is_finite() || !(6.0..=144.0).contains(&size))
-        {
-            return Err(PdfError::InvalidOperation(
-                "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be finite and within 6..=144 pt"
-                    .into(),
-            ));
+        if let Some(size) = self.font_size {
+            validate_text_font_size(size)?;
         }
         if self.fill_color.is_some_and(|color| {
             color

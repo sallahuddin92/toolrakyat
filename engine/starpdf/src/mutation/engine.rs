@@ -15,7 +15,8 @@ use crate::font::appearance::{AppearanceFont, AppearanceFontResolver, GlyphMappi
 use crate::font::planner::ShapedFallbackData;
 use crate::font::subset::TrueTypeSubsetter;
 use crate::font::{
-    plan_adaptive_text, FontFamily, FontProgramKind, FontStyle, SfntFont, Type0FontEmbedder,
+    plan_adaptive_text, validate_text_font_size, FontFamily, FontProgramKind, FontStyle, SfntFont,
+    Type0FontEmbedder,
 };
 use crate::forms::field::FieldType;
 use crate::mutation::change::{PdfChange, TextStyleMutation};
@@ -480,11 +481,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             }
         }
         if let Some(style) = style_mutation {
-            if !style.font_size.is_finite() || !(6.0..=144.0).contains(&style.font_size) {
-                return Err(PdfError::InvalidOperation(
-                    "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be within 6..=144 pt".into(),
-                ));
-            }
+            validate_text_font_size(style.font_size)?;
             active_font_size = style.font_size;
         }
 
@@ -2158,11 +2155,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 is_monospace: family == FontFamily::Monospace,
             };
             if let Some(size) = update.font_size {
-                if !size.is_finite() || !(6.0..=144.0).contains(&size) {
-                    return Err(PdfError::InvalidOperation(
-                        "TEXT_STYLE_SIZE_OUT_OF_RANGE: font size must be within 6..=144 pt".into(),
-                    ));
-                }
+                validate_text_font_size(size)?;
                 da.font_size = size;
             }
             if let Some(color) = update.text_color {
@@ -2271,7 +2264,8 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             .and_then(PdfObject::as_string_lossy)
             .and_then(|value| DefaultAppearance::parse(&value).ok())
             .unwrap_or_default();
-        let font_size = da.font_size.clamp(6.0, 72.0);
+        let font_size = da.font_size;
+        validate_text_font_size(font_size)?;
         let style = crate::font::style_from_da_font_name(&da.font_name);
         let plan = plan_adaptive_text(&text, &style, font_size)?.ok_or_else(|| {
             PdfError::UnsupportedFontEncoding(

@@ -194,6 +194,52 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       expect(exportIncremental).not.toHaveBeenCalled();
     });
 
+    it("passes existing FreeText contents for style-only adaptive font registration", async () => {
+      const updateAnnotation = vi.fn().mockResolvedValue(true);
+      const exportIncremental = vi.fn().mockResolvedValue(new Uint8Array([7, 8, 9]));
+      const selection = {
+        type: "annotation" as const,
+        id: "annot-obj-27-0",
+        pageIndex: 0,
+        pdfRect: { x: 40, y: 50, width: 220, height: 40 },
+        data: {
+          id: "annot-obj-27-0",
+          subtype: "FreeText",
+          contents: "Latin تقرير 日本",
+          rect: { x: 40, y: 50, width: 220, height: 40 },
+          pageIndex: 0,
+          objectNumber: 27,
+          generationNumber: 0,
+        },
+      };
+      const context = {
+        ...baseContext,
+        selection,
+        starPdfDoc: {
+          getAnnotations: vi.fn().mockResolvedValue([
+            { object_num: 27, object_gen: 0, page_index: 0, contents: selection.data.contents },
+          ]),
+          updateAnnotation,
+          exportIncremental,
+        } as unknown as NonNullable<SmartPdfCommandContext["starPdfDoc"]>,
+      };
+      const { UpdateAnnotationPropertiesCommand } = await import("./annotation-commands");
+
+      await new UpdateAnnotationPropertiesCommand(
+        selection.id,
+        { font_size: 18, text_color: [0.2, 0.3, 0.6] },
+        0,
+      ).execute(context);
+
+      expect(updateAnnotation).toHaveBeenCalledWith(
+        27,
+        0,
+        { font_size: 18, text_color: [0.2, 0.3, 0.6] },
+        "Latin تقرير 日本",
+      );
+      expect(exportIncremental).toHaveBeenCalledTimes(1);
+    });
+
     it("ReplaceTextCommand and DeleteTextCommand declare mutating flag and throw when starPdfDoc is absent", async () => {
       const { ReplaceTextCommand, DeleteTextCommand } = await import("./text-commands");
       const replaceCmd = new ReplaceTextCommand("span-1", "New Text");

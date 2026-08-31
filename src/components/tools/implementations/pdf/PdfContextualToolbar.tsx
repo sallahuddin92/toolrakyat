@@ -19,6 +19,10 @@ import {
   Bold as BoldIcon,
   Italic as ItalicIcon,
 } from "lucide-react";
+import {
+  STARPDF_TEXT_FONT_SIZE_MAX,
+  STARPDF_TEXT_FONT_SIZE_MIN,
+} from "@/lib/pdf/starpdf-types";
 import type {
   StarPdfTextSpan,
   StarPdfImageInfo,
@@ -103,6 +107,8 @@ function TextControls({
     group && group.sourceSpans.length > 0
       ? group.sourceSpans.map((s) => s.span_id)
       : span.span_id;
+  const formattingAvailable =
+    !Array.isArray(targetSpanIds) || targetSpanIds.length === 1;
 
   if (!isEditable) {
     const detailedReason =
@@ -220,61 +226,72 @@ function TextControls({
         data-testid="context-text-input"
         autoFocus
       />
-      <select
-        value={fontFamily}
-        onChange={(event) => setFontFamily(event.target.value as typeof fontFamily)}
-        className="h-8 rounded border border-slate-300 bg-white px-1.5 text-xs"
-        aria-label="Font family"
-        data-testid="context-text-font-family"
-      >
-        <option value={initialFamily}>Current ({span.font_base_name || span.font_name})</option>
-        {initialFamily !== "SansSerif" && <option value="SansSerif">Helvetica</option>}
-        {initialFamily !== "Serif" && <option value="Serif">Times</option>}
-        {initialFamily !== "Monospace" && <option value="Monospace">Courier</option>}
-      </select>
-      <Input
-        type="number"
-        min={6}
-        max={144}
-        step={0.5}
-        value={fontSize}
-        onChange={(event) => setFontSize(Number(event.target.value))}
-        className="h-8 w-16 px-1.5 text-xs"
-        aria-label="Font size"
-        data-testid="context-text-font-size"
-      />
-      <Button
-        type="button"
-        variant={isBold ? "default" : "outline"}
-        size="icon"
-        onClick={() => setIsBold((value) => !value)}
-        className="size-8"
-        aria-label="Bold"
-        aria-pressed={isBold}
-        data-testid="context-text-bold"
-      >
-        <BoldIcon className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant={isItalic ? "default" : "outline"}
-        size="icon"
-        onClick={() => setIsItalic((value) => !value)}
-        className="size-8"
-        aria-label="Italic"
-        aria-pressed={isItalic}
-        data-testid="context-text-italic"
-      >
-        <ItalicIcon className="size-3.5" />
-      </Button>
-      <input
-        type="color"
-        value={textColor}
-        onChange={(event) => setTextColor(event.target.value)}
-        className="size-8 rounded border border-slate-300 bg-white p-0.5"
-        aria-label="Text color"
-        data-testid="context-text-color"
-      />
+      {formattingAvailable ? (
+        <>
+          <select
+            value={fontFamily}
+            onChange={(event) => setFontFamily(event.target.value as typeof fontFamily)}
+            className="h-8 rounded border border-slate-300 bg-white px-1.5 text-xs"
+            aria-label="Font family"
+            data-testid="context-text-font-family"
+          >
+            <option value={initialFamily}>Current ({span.font_base_name || span.font_name})</option>
+            {initialFamily !== "SansSerif" && <option value="SansSerif">Helvetica</option>}
+            {initialFamily !== "Serif" && <option value="Serif">Times</option>}
+            {initialFamily !== "Monospace" && <option value="Monospace">Courier</option>}
+          </select>
+          <Input
+            type="number"
+            min={STARPDF_TEXT_FONT_SIZE_MIN}
+            max={STARPDF_TEXT_FONT_SIZE_MAX}
+            step={0.5}
+            value={fontSize}
+            onChange={(event) => setFontSize(Number(event.target.value))}
+            className="h-8 w-16 px-1.5 text-xs"
+            aria-label="Font size"
+            data-testid="context-text-font-size"
+          />
+          <Button
+            type="button"
+            variant={isBold ? "default" : "outline"}
+            size="icon"
+            onClick={() => setIsBold((value) => !value)}
+            className="size-8"
+            aria-label="Bold"
+            aria-pressed={isBold}
+            data-testid="context-text-bold"
+          >
+            <BoldIcon className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant={isItalic ? "default" : "outline"}
+            size="icon"
+            onClick={() => setIsItalic((value) => !value)}
+            className="size-8"
+            aria-label="Italic"
+            aria-pressed={isItalic}
+            data-testid="context-text-italic"
+          >
+            <ItalicIcon className="size-3.5" />
+          </Button>
+          <input
+            type="color"
+            value={textColor}
+            onChange={(event) => setTextColor(event.target.value)}
+            className="size-8 rounded border border-slate-300 bg-white p-0.5"
+            aria-label="Text color"
+            data-testid="context-text-color"
+          />
+        </>
+      ) : (
+        <span
+          className="text-[11px] text-slate-600"
+          data-testid="context-text-formatting-unavailable"
+        >
+          Formatting is available for a single text run.
+        </span>
+      )}
       <Button
         type="button"
         size="sm"
@@ -858,8 +875,8 @@ function AnnotationControls({
           </select>
           <Input
             type="number"
-            min={6}
-            max={144}
+            min={STARPDF_TEXT_FONT_SIZE_MIN}
+            max={STARPDF_TEXT_FONT_SIZE_MAX}
             step={0.5}
             value={freeTextSize}
             onChange={(event) => setFreeTextSize(Number(event.target.value))}

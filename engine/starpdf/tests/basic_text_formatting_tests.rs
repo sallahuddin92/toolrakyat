@@ -394,6 +394,77 @@ fn freetext_multilingual_second_edit_roundtrips_with_stable_identity() {
 }
 
 #[test]
+fn freetext_multilingual_style_only_after_reopen_uses_shared_adaptive_runtime() {
+    register_qualified_multilingual_fonts();
+    for (label, contents) in [
+        ("Jawi", "ساي جاوي ڤ ڠ ڽ چ"),
+        ("Arabic", "تقرير عربي"),
+        ("Japanese", "日本語の報告"),
+        ("Chinese", "中文測試報告"),
+        ("Korean", "한국어 보고서"),
+        ("mixed", "Report تقرير 日本 2026"),
+    ] {
+        let source = MinimalWriter::create_minimal_pdf(label).unwrap();
+        let mut doc = PdfDocument::from_bytes(&source).unwrap();
+        let created = doc
+            .mutate_and_export(&[PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::FreeText {
+                    rect: [40.0, 50.0, 360.0, 105.0],
+                    text: contents.into(),
+                    font_size: Some(14.0),
+                    color: Some(vec![0.0, 0.0, 0.0]),
+                },
+            }])
+            .unwrap();
+
+        let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+        let original = reopened.page_annotations(0).unwrap().remove(0);
+        let styled = reopened
+            .mutate_and_export(&[PdfChange::UpdateAnnotation {
+                annot_ref: original.object_ref,
+                update: AnnotationUpdateSpec {
+                    font_size: Some(23.0),
+                    text_color: Some([0.12, 0.34, 0.68]),
+                    ..Default::default()
+                },
+            }])
+            .unwrap();
+        assert!(styled
+            .windows(b"/Subtype /Type0".len())
+            .any(|w| w == b"/Subtype /Type0"));
+        assert!(styled
+            .windows(b"/ToUnicode".len())
+            .any(|w| w == b"/ToUnicode"));
+
+        let mut second_open = PdfDocument::from_bytes(&styled).unwrap();
+        let after_first = second_open.page_annotations(0).unwrap().remove(0);
+        assert_eq!(after_first.object_ref, original.object_ref, "{label}");
+        assert_eq!(after_first.contents.as_deref(), Some(contents), "{label}");
+        assert_eq!(after_first.rect, original.rect, "{label}");
+        let second_style = second_open
+            .mutate_and_export(&[PdfChange::UpdateAnnotation {
+                annot_ref: original.object_ref,
+                update: AnnotationUpdateSpec {
+                    font_size: Some(19.0),
+                    text_color: Some([0.55, 0.16, 0.22]),
+                    ..Default::default()
+                },
+            }])
+            .unwrap();
+        let mut verified = PdfDocument::from_bytes(&second_style).unwrap();
+        let final_annotation = verified.page_annotations(0).unwrap().remove(0);
+        assert_eq!(final_annotation.object_ref, original.object_ref, "{label}");
+        assert_eq!(
+            final_annotation.contents.as_deref(),
+            Some(contents),
+            "{label}"
+        );
+        assert_eq!(final_annotation.rect, original.rect, "{label}");
+    }
+}
+
+#[test]
 fn multilingual_style_apply_preserves_unicode_and_reports_timings() {
     register_qualified_multilingual_fonts();
     let cases = [
@@ -500,4 +571,41 @@ fn invalid_style_values_refuse_before_mutation() {
         .unwrap_err()
         .to_string()
         .contains("TEXT_STYLE_SIZE_OUT_OF_RANGE"));
+
+    let source = MinimalWriter::create_minimal_pdf("FreeText size validation").unwrap();
+    let mut doc = PdfDocument::from_bytes(&source).unwrap();
+    let error = doc
+        .mutate_and_export(&[PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::FreeText {
+                rect: [40.0, 50.0, 260.0, 110.0],
+                text: "No silent clamp".into(),
+                font_size: Some(145.0),
+                color: Some(vec![0.0, 0.0, 0.0]),
+            },
+        }])
+        .unwrap_err();
+    assert!(error.to_string().contains("TEXT_STYLE_SIZE_OUT_OF_RANGE"));
+
+    let accepted = doc
+        .mutate_and_export(&[PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::FreeText {
+                rect: [40.0, 50.0, 360.0, 230.0],
+                text: "Exact 144 pt".into(),
+                font_size: Some(144.0),
+                color: Some(vec![0.0, 0.0, 0.0]),
+            },
+        }])
+        .unwrap();
+    let mut reopened = PdfDocument::from_bytes(&accepted).unwrap();
+    let annotation = reopened.page_annotations(0).unwrap().remove(0);
+    let dict = reopened
+        .store_mut()
+        .resolve(annotation.object_ref)
+        .unwrap()
+        .as_dict()
+        .unwrap();
+    let da = dict.get("DA").and_then(PdfObject::as_string_lossy).unwrap();
+    assert!(da.contains("144.00 Tf"));
 }

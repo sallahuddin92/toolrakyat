@@ -109,6 +109,9 @@ export interface StarPdfReplaceTextResult {
 
 export type StarPdfTextWeight = "NORMAL" | "BOLD";
 
+export const STARPDF_TEXT_FONT_SIZE_MIN = 6;
+export const STARPDF_TEXT_FONT_SIZE_MAX = 144;
+
 export interface StarPdfComputedTextStyle {
   font_family: "SansSerif" | "Serif" | "Monospace" | "Symbolic" | string;
   font_size: number;

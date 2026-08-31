@@ -77,6 +77,112 @@ async function createClassicViewerFixture(): Promise<Buffer> {
   return Buffer.from(await document.save({ useObjectStreams: false }));
 }
 
+async function createTextFormattingVisualFixture(): Promise<Buffer> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([612, 792]);
+  page.drawText("Formatting target", { x: 72, y: 700, size: 18, font });
+  page.drawText("Unrelated control", { x: 72, y: 620, size: 18, font });
+  return Buffer.from(await document.save({ useObjectStreams: false }));
+}
+
+async function createMultilingualFreeTextFixture(
+  page: import("@playwright/test").Page,
+  contents: string,
+): Promise<Buffer> {
+  const output = await page.evaluate(async (freeTextContents) => {
+    type WorkerMessage = Record<string, unknown> & {
+      id: string;
+      success?: boolean;
+      type: string;
+    };
+    const worker = new Worker(new URL("/starpdf.worker.js", window.location.href), {
+      type: "module",
+    });
+    let requestId = 0;
+    const request = (message: Omit<WorkerMessage, "id">): Promise<WorkerMessage> => {
+      const id = `format-fixture-${++requestId}`;
+      return new Promise((resolve, reject) => {
+        const onMessage = (event: MessageEvent<WorkerMessage>) => {
+          if (event.data.id !== id) return;
+          worker.removeEventListener("message", onMessage);
+          if (event.data.success === false) {
+            reject(new Error(String(event.data.error)));
+            return;
+          }
+          resolve(event.data);
+        };
+        worker.addEventListener("message", onMessage);
+        worker.addEventListener("error", reject, { once: true });
+        worker.postMessage({ ...message, id });
+      });
+    };
+
+    await request({ type: "init" });
+    const created = await request({ type: "createMinimal", text: "Unrelated control" });
+    const source = created.bytes as Uint8Array;
+    const opened = await request({ type: "open", buffer: source.slice().buffer });
+    const handle = opened.handle as number;
+    await request({
+      type: "addAnnotation",
+      handle,
+      pageIndex: 0,
+      input: {
+        subtype: "FreeText",
+        rect: [50, 360, 420, 420],
+        contents: freeTextContents,
+        font_size: 14,
+        color: [0, 0, 0],
+      },
+    });
+    const exported = await request({ type: "exportIncremental", handle });
+    await request({ type: "close", handle });
+    worker.terminate();
+    return Array.from(exported.bytes as Uint8Array);
+  }, contents);
+  return Buffer.from(output);
+}
+
+async function exportEditableBytes(page: import("@playwright/test").Page): Promise<Buffer> {
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Editable" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error("Exported PDF has no download path");
+  return fs.readFileSync(downloadPath);
+}
+
+async function runAndWaitForCanvasRenderCycle(
+  canvas: import("@playwright/test").Locator,
+  trigger: () => Promise<unknown>,
+) {
+  const renderStarted = canvas.evaluate(
+    (node) =>
+      new Promise<void>((resolve, reject) => {
+        if (node.getAttribute("data-rendered") === "false") {
+          resolve();
+          return;
+        }
+        const timeout = window.setTimeout(() => {
+          observer.disconnect();
+          reject(new Error("PDF.js render cycle did not start"));
+        }, 10_000);
+        const observer = new MutationObserver(() => {
+          if (node.getAttribute("data-rendered") !== "false") return;
+          window.clearTimeout(timeout);
+          observer.disconnect();
+          resolve();
+        });
+        observer.observe(node, { attributes: true, attributeFilter: ["data-rendered"] });
+      }),
+  );
+  await trigger();
+  await renderStarted;
+  await expect
+    .poll(() => canvas.evaluate((node) => node.getAttribute("data-rendered")))
+    .toBe("true");
+}
+
 async function createCompressedRecoveryFixture(): Promise<Buffer> {
   const document = await PDFDocument.create();
   const font = await document.embedFont(StandardFonts.Helvetica);
@@ -423,6 +529,73 @@ async function changedRegionRatio(
     if (Math.abs(beforePixels[index] - afterPixels[index]) > 8) changedChannels += 1;
   }
   return changedChannels / beforePixels.length;
+}
+
+async function canvasElementPixelRegion(
+  canvas: import("@playwright/test").Locator,
+  element: import("@playwright/test").Locator,
+  canvasPng: Buffer,
+  padding = 12,
+) {
+  const [canvasBox, elementBox, metadata] = await Promise.all([
+    canvas.boundingBox(),
+    element.boundingBox(),
+    sharp(canvasPng).metadata(),
+  ]);
+  if (!canvasBox || !elementBox || !metadata.width || !metadata.height) {
+    throw new Error("Unable to resolve canvas element pixel region");
+  }
+  const scaleX = metadata.width / canvasBox.width;
+  const scaleY = metadata.height / canvasBox.height;
+  const left = Math.max(0, Math.floor((elementBox.x - canvasBox.x - padding) * scaleX));
+  const top = Math.max(0, Math.floor((elementBox.y - canvasBox.y - padding) * scaleY));
+  return {
+    left,
+    top,
+    width: Math.min(
+      metadata.width - left,
+      Math.ceil((elementBox.width + padding * 2) * scaleX),
+    ),
+    height: Math.min(
+      metadata.height - top,
+      Math.ceil((elementBox.height + padding * 2) * scaleY),
+    ),
+  };
+}
+
+async function changedPixelRegionRatio(
+  before: Buffer,
+  after: Buffer,
+  region: { left: number; top: number; width: number; height: number },
+) {
+  const beforePixels = await sharp(before).extract(region).raw().toBuffer();
+  const afterPixels = await sharp(after).extract(region).raw().toBuffer();
+  let changedChannels = 0;
+  for (let index = 0; index < beforePixels.length; index += 1) {
+    if (Math.abs(beforePixels[index] - afterPixels[index]) > 8) changedChannels += 1;
+  }
+  return changedChannels / beforePixels.length;
+}
+
+function unionPixelRegions(
+  first: { left: number; top: number; width: number; height: number },
+  second: { left: number; top: number; width: number; height: number },
+) {
+  const left = Math.min(first.left, second.left);
+  const top = Math.min(first.top, second.top);
+  return {
+    left,
+    top,
+    width: Math.max(first.left + first.width, second.left + second.width) - left,
+    height: Math.max(first.top + first.height, second.top + second.height) - top,
+  };
+}
+
+async function captureCanvasPng(canvas: import("@playwright/test").Locator) {
+  const dataUrl = await canvas.evaluate((node) =>
+    (node as HTMLCanvasElement).toDataURL("image/png"),
+  );
+  return Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
 }
 
 test.describe("SmartPDF — Advanced PDF Editor", () => {
@@ -3344,6 +3517,14 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const contextInput = page.locator('[data-testid="context-text-input"]');
     await expect(contextInput).toBeVisible({ timeout: 5000 });
     await expect(contextInput).toHaveValue("Architectural");
+    await expect(page.getByTestId("context-text-formatting-unavailable")).toHaveText(
+      "Formatting is available for a single text run.",
+    );
+    await expect(page.getByTestId("context-text-font-family")).toHaveCount(0);
+    await expect(page.getByTestId("context-text-font-size")).toHaveCount(0);
+    await expect(page.getByTestId("context-text-bold")).toHaveCount(0);
+    await expect(page.getByTestId("context-text-italic")).toHaveCount(0);
+    await expect(page.getByTestId("context-text-color")).toHaveCount(0);
 
     // 2. Verify subsequent words in same heading can be selected independently
     const renWord = page.locator('[data-testid^="canvas-text-span-"][title*="Renaissance"]');
@@ -3736,7 +3917,7 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
   }) => {
     const bytes = fs.readFileSync(path.resolve(process.cwd(), "test-assets/edit-test.pdf"));
     await page.goto("/smartpdf");
-    await uploadPdfBytes(page, "freetext-lifecycle.pdf", bytes);
+    const lifecycleCanvas = await uploadPdfBytes(page, "freetext-lifecycle.pdf", bytes);
 
     await page.getByTestId("toolbar-mode-fill-sign-btn").click();
     await page.getByTestId("fill-sign-tool-text-btn").click();
@@ -3792,12 +3973,16 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const moveHandle = page.getByTestId("direct-manipulation-move-handle");
     const moveBox = await moveHandle.boundingBox();
     expect(moveBox).not.toBeNull();
-    await page.mouse.move(moveBox!.x + moveBox!.width / 2, moveBox!.y + moveBox!.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(moveBox!.x + moveBox!.width / 2 + 24, moveBox!.y + moveBox!.height / 2 + 18, {
-      steps: 5,
+    await runAndWaitForCanvasRenderCycle(lifecycleCanvas, async () => {
+      await page.mouse.move(moveBox!.x + moveBox!.width / 2, moveBox!.y + moveBox!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(
+        moveBox!.x + moveBox!.width / 2 + 24,
+        moveBox!.y + moveBox!.height / 2 + 18,
+        { steps: 5 },
+      );
+      await page.mouse.up();
     });
-    await page.mouse.up();
     await expect(editedAfterRedo).toBeVisible({ timeout: 10_000 });
     await editedAfterRedo.click();
     await expect(page.getByTestId("context-annotation-input")).toHaveValue(firstEdit);
@@ -3805,12 +3990,19 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     const resizeHandle = page.getByTestId("direct-manipulation-handle-se");
     const resizeBox = await resizeHandle.boundingBox();
     expect(resizeBox).not.toBeNull();
-    await page.mouse.move(resizeBox!.x + resizeBox!.width / 2, resizeBox!.y + resizeBox!.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(resizeBox!.x + resizeBox!.width / 2 + 35, resizeBox!.y + resizeBox!.height / 2 + 12, {
-      steps: 5,
+    await runAndWaitForCanvasRenderCycle(lifecycleCanvas, async () => {
+      await page.mouse.move(
+        resizeBox!.x + resizeBox!.width / 2,
+        resizeBox!.y + resizeBox!.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        resizeBox!.x + resizeBox!.width / 2 + 35,
+        resizeBox!.y + resizeBox!.height / 2 + 12,
+        { steps: 5 },
+      );
+      await page.mouse.up();
     });
-    await page.mouse.up();
     await expect(editedAfterRedo).toBeVisible({ timeout: 10_000 });
 
     const firstDownloadPromise = page.waitForEvent("download");
@@ -4416,6 +4608,230 @@ test.describe("SmartPDF malformed xref recovery states", () => {
 });
 
 test.describe("SmartPDF basic text formatting", () => {
+  test("PDF.js renders each native V1 style patch and preserves unrelated pixels", async ({
+    page,
+  }) => {
+    const fixture = await createTextFormattingVisualFixture();
+    const cases: Array<{
+      label: string;
+      apply: () => Promise<unknown>;
+    }> = [
+      {
+        label: "family",
+        apply: () => page.getByTestId("context-text-font-family").selectOption("Serif"),
+      },
+      {
+        label: "size",
+        apply: () => page.getByTestId("context-text-font-size").fill("28"),
+      },
+      { label: "bold", apply: () => page.getByTestId("context-text-bold").click() },
+      { label: "italic", apply: () => page.getByTestId("context-text-italic").click() },
+      {
+        label: "color",
+        apply: () => page.getByTestId("context-text-color").fill("#b03060"),
+      },
+      {
+        label: "combined",
+        apply: async () => {
+          await page.getByTestId("context-text-font-family").selectOption("Monospace");
+          await page.getByTestId("context-text-font-size").fill("26");
+          await page.getByTestId("context-text-bold").click();
+          await page.getByTestId("context-text-italic").click();
+          await page.getByTestId("context-text-color").fill("#2457a7");
+        },
+      },
+    ];
+
+    for (const styleCase of cases) {
+      await page.goto("/smartpdf");
+      const originalCanvas = await uploadPdfBytes(
+        page,
+        `native-${styleCase.label}-original.pdf`,
+        fixture,
+      );
+      const originalPng = await captureCanvasPng(originalCanvas);
+      const targetText = page.locator(
+        '[data-testid^="canvas-text-span-"][title*="Formatting target"]',
+      );
+      const unrelatedText = page.locator(
+        '[data-testid^="canvas-text-span-"][title*="Unrelated control"]',
+      );
+      const targetRegion = await canvasElementPixelRegion(
+        originalCanvas,
+        targetText,
+        originalPng,
+        24,
+      );
+      const unrelatedRegion = await canvasElementPixelRegion(
+        originalCanvas,
+        unrelatedText,
+        originalPng,
+        12,
+      );
+      await targetText.click();
+      await styleCase.apply();
+      await runAndWaitForCanvasRenderCycle(originalCanvas, () =>
+        page.getByTestId("context-text-save-btn").click(),
+      );
+      await expect(page.getByTestId("document-modified-dot")).toBeVisible();
+      const output = await exportEditableBytes(page);
+
+      await page.goto("/smartpdf");
+      const reopenedCanvas = await uploadPdfBytes(
+        page,
+        `native-${styleCase.label}-reopened.pdf`,
+        output,
+      );
+      const reopenedPng = await captureCanvasPng(reopenedCanvas);
+      expect(reopenedPng.byteLength, styleCase.label).toBeGreaterThan(1_000);
+      const reopenedTarget = page.locator(
+        '[data-testid^="canvas-text-span-"][title*="Formatting target"]',
+      );
+      await reopenedTarget.click();
+      const reopenedTargetRegion = await canvasElementPixelRegion(
+        reopenedCanvas,
+        reopenedTarget,
+        reopenedPng,
+        24,
+      );
+      if (styleCase.label === "family") {
+        await expect(page.getByTestId("context-text-font-family")).toHaveValue("Serif");
+      }
+      await page.keyboard.press("Escape");
+      const canvasMetadata = await sharp(originalPng).metadata();
+      expect(
+        await changedPixelRegionRatio(originalPng, reopenedPng, {
+          left: 0,
+          top: 0,
+          width: canvasMetadata.width ?? 1,
+          height: canvasMetadata.height ?? 1,
+        }),
+        `${styleCase.label} full canvas`,
+      ).toBeGreaterThan(0.00001);
+      expect(
+        await changedPixelRegionRatio(
+          originalPng,
+          reopenedPng,
+          unionPixelRegions(targetRegion, reopenedTargetRegion),
+        ),
+        styleCase.label,
+      ).toBeGreaterThan(0.0001);
+      expect(
+        await changedPixelRegionRatio(originalPng, reopenedPng, unrelatedRegion),
+        `${styleCase.label} unrelated region`,
+      ).toBeLessThan(0.0001);
+      await expect(
+        page.locator('[data-testid^="canvas-text-span-"][title*="Unrelated control"]'),
+      ).toBeVisible();
+    }
+  });
+
+  test("multilingual FreeText style-only mutations register fonts after fresh reopen and render", async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    const cases = [
+      { label: "Jawi", contents: "ساي جاوي ڤ ڠ ڽ چ", visual: true },
+      { label: "Arabic", contents: "تقرير عربي", visual: false },
+      { label: "Japanese", contents: "日本語の報告", visual: false },
+      { label: "Chinese", contents: "中文測試報告", visual: true },
+      { label: "Korean", contents: "한국어 보고서", visual: false },
+      { label: "mixed", contents: "Report تقرير 日本 2026", visual: true },
+    ];
+
+    for (const [index, scriptCase] of cases.entries()) {
+      await page.goto("/smartpdf");
+      const fixture = await createMultilingualFreeTextFixture(page, scriptCase.contents);
+      await page.reload();
+      const originalCanvas = await uploadPdfBytes(
+        page,
+        `freetext-${scriptCase.label}-created.pdf`,
+        fixture,
+      );
+      const originalPng = await captureCanvasPng(originalCanvas);
+      const annotation = page
+        .locator(`[data-testid^="canvas-annotation-annot-obj-"][title*="${scriptCase.contents}"]`)
+        .first();
+      await expect(annotation).toBeVisible();
+      const targetRegion = await canvasElementPixelRegion(
+        originalCanvas,
+        annotation,
+        originalPng,
+        16,
+      );
+      const unrelatedText = page.locator(
+        '[data-testid^="canvas-text-span-"][title*="Unrelated control"]',
+      );
+      const unrelatedRegion = await canvasElementPixelRegion(
+        originalCanvas,
+        unrelatedText,
+        originalPng,
+        12,
+      );
+      const stableId = await annotation.getAttribute("data-testid");
+      expect(stableId).toMatch(/^canvas-annotation-annot-obj-\d+-\d+$/);
+      await annotation.click();
+      await page.getByTestId("context-freetext-font-size").fill(String(22 + index));
+      await page.getByTestId("context-freetext-color").fill("#315aa8");
+      await runAndWaitForCanvasRenderCycle(originalCanvas, () =>
+        page.getByTestId("context-annotation-apply-btn").click(),
+      );
+      await expect(page.getByTestId("document-modified-dot")).toBeVisible();
+
+      if (index === 0) {
+        await page.getByTestId("toolbar-undo-btn").click();
+        await expect(page.locator(`[data-testid="${stableId}"]`)).toBeVisible();
+        await runAndWaitForCanvasRenderCycle(originalCanvas, () =>
+          page.getByTestId("toolbar-redo-btn").click(),
+        );
+      }
+
+      const firstOutput = await exportEditableBytes(page);
+      await page.reload();
+      const reopenedCanvas = await uploadPdfBytes(
+        page,
+        `freetext-${scriptCase.label}-styled.pdf`,
+        firstOutput,
+      );
+      const reopenedPng = await captureCanvasPng(reopenedCanvas);
+      expect(reopenedPng.byteLength, scriptCase.label).toBeGreaterThan(1_000);
+      const reopenedAnnotation = page.locator(`[data-testid="${stableId}"]`);
+      await expect(reopenedAnnotation).toHaveAttribute("title", new RegExp(scriptCase.contents));
+      if (scriptCase.visual) {
+        expect(
+          await changedPixelRegionRatio(originalPng, reopenedPng, targetRegion),
+          scriptCase.label,
+        ).toBeGreaterThan(0.0001);
+        expect(
+          await changedPixelRegionRatio(originalPng, reopenedPng, unrelatedRegion),
+          `${scriptCase.label} unrelated region`,
+        ).toBeLessThan(0.0001);
+      }
+
+      await reopenedAnnotation.click();
+      await expect(page.getByTestId("context-annotation-input")).toHaveValue(
+        scriptCase.contents,
+      );
+      await expect(page.getByTestId("context-freetext-font-size")).toHaveValue(
+        String(22 + index),
+      );
+      await page.getByTestId("context-freetext-font-size").fill(String(30 + index));
+      await runAndWaitForCanvasRenderCycle(reopenedCanvas, () =>
+        page.getByTestId("context-annotation-apply-btn").click(),
+      );
+      await expect(page.getByTestId("document-modified-dot")).toBeVisible();
+      const secondOutput = await exportEditableBytes(page);
+      await page.reload();
+      await uploadPdfBytes(page, `freetext-${scriptCase.label}-second-style.pdf`, secondOutput);
+      const secondReopen = page.locator(`[data-testid="${stableId}"]`);
+      await expect(secondReopen).toHaveAttribute("title", new RegExp(scriptCase.contents));
+      await secondReopen.click();
+      await expect(page.getByTestId("context-freetext-font-size")).toHaveValue(
+        String(30 + index),
+      );
+    }
+  });
+
   test("native formatting drafts until Apply and roundtrips through undo/redo and export", async ({
     page,
   }) => {

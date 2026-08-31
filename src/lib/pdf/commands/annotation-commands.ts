@@ -447,9 +447,25 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
       inspectionResult,
     );
 
-    await starPdfDoc.updateAnnotation(targetNum, targetGen, this.properties);
-    const updatedBytes = await starPdfDoc.exportIncremental();
     const currentSelection = context.selection;
+    const hasTextStyleUpdate =
+      this.properties.font_family !== undefined ||
+      this.properties.font_size !== undefined ||
+      this.properties.bold !== undefined ||
+      this.properties.italic !== undefined ||
+      this.properties.text_color !== undefined;
+    const selectedContents =
+      currentSelection?.type === "annotation" && currentSelection.id === this.annotId
+        ? currentSelection.data.contents
+        : inspectionResult?.annotations.find((annotation) => annotation.id === this.annotId)
+            ?.contents;
+    await starPdfDoc.updateAnnotation(
+      targetNum,
+      targetGen,
+      this.properties,
+      hasTextStyleUpdate ? selectedContents : undefined,
+    );
+    const updatedBytes = await starPdfDoc.exportIncremental();
     return {
       bytes: updatedBytes,
       nextSelection:
