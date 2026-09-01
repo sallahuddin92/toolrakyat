@@ -5262,4 +5262,161 @@ test.describe("SmartPDF text formatting and decorations", () => {
     await expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute("aria-pressed", "true");
   });
+
+  test("FreeText formatting visibly changes PDF.js output and roundtrips authoritative toolbar state", async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    const fixture = await createClassicViewerFixture();
+    const cases = [
+      {
+        label: "family",
+        apply: () => page.getByTestId("context-freetext-font-family").selectOption("Serif"),
+        restore: () => page.getByTestId("context-freetext-font-family").selectOption("SansSerif"),
+        assertStyled: () => expect(page.getByTestId("context-freetext-font-family")).toHaveValue("Serif"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-font-family")).toHaveValue("SansSerif"),
+      },
+      {
+        label: "size",
+        apply: () => page.getByTestId("context-freetext-font-size").fill("24"),
+        restore: () => page.getByTestId("context-freetext-font-size").fill("12"),
+        assertStyled: () => expect(page.getByTestId("context-freetext-font-size")).toHaveValue("24"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-font-size")).toHaveValue("12"),
+      },
+      {
+        label: "bold",
+        apply: () => page.getByTestId("context-freetext-bold").click(),
+        restore: () => page.getByTestId("context-freetext-bold").click(),
+        assertStyled: () => expect(page.getByTestId("context-freetext-bold")).toHaveAttribute("aria-pressed", "true"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-bold")).toHaveAttribute("aria-pressed", "false"),
+      },
+      {
+        label: "italic",
+        apply: () => page.getByTestId("context-freetext-italic").click(),
+        restore: () => page.getByTestId("context-freetext-italic").click(),
+        assertStyled: () => expect(page.getByTestId("context-freetext-italic")).toHaveAttribute("aria-pressed", "true"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-italic")).toHaveAttribute("aria-pressed", "false"),
+      },
+      {
+        label: "color",
+        apply: () => page.getByTestId("context-freetext-color").fill("#cc2233"),
+        restore: () => page.getByTestId("context-freetext-color").fill("#000000"),
+        assertStyled: () => expect(page.getByTestId("context-freetext-color")).toHaveValue("#cc2233"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-color")).toHaveValue("#000000"),
+      },
+      {
+        label: "underline",
+        apply: () => page.getByTestId("context-freetext-underline").click(),
+        restore: () => page.getByTestId("context-freetext-underline").click(),
+        assertStyled: () => expect(page.getByTestId("context-freetext-underline")).toHaveAttribute("aria-pressed", "true"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-underline")).toHaveAttribute("aria-pressed", "false"),
+      },
+      {
+        label: "strikethrough",
+        apply: () => page.getByTestId("context-freetext-strikethrough").click(),
+        restore: () => page.getByTestId("context-freetext-strikethrough").click(),
+        assertStyled: () => expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute("aria-pressed", "true"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute("aria-pressed", "false"),
+      },
+      {
+        label: "highlight",
+        apply: () => page.getByTestId("context-freetext-highlight").click(),
+        restore: () => page.getByTestId("context-freetext-highlight").click(),
+        assertStyled: () => expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute("aria-pressed", "true"),
+        assertDefault: () => expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute("aria-pressed", "false"),
+      },
+    ];
+
+    for (const styleCase of cases) {
+      await page.goto("/smartpdf");
+      let canvas = await uploadPdfBytes(page, `freetext-${styleCase.label}.pdf`, fixture);
+      await page.getByTestId("toolbar-mode-fill-sign-btn").click();
+      await page.getByTestId("fill-sign-tool-text-btn").click();
+      await page.getByTestId("pdf-interactive-overlay").click({ position: { x: 190, y: 190 } });
+      await page.getByTestId("inline-text-placement-input").fill("din");
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.getByTestId("inline-text-placement-commit-btn").click(),
+      );
+      const created = page
+        .locator('[data-testid^="canvas-annotation-annot-obj-"][title*="din"]')
+        .first();
+      await expect(created).toBeVisible();
+      const stableId = await created.getAttribute("data-testid");
+      expect(stableId).not.toBeNull();
+      const regular = await captureCanvasPng(canvas);
+      const targetRegion = await canvasElementPixelRegion(canvas, created, regular, 6);
+
+      await styleCase.apply();
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.getByTestId("context-annotation-apply-btn").click(),
+      );
+      const styled = await captureCanvasPng(canvas);
+      expect(await changedPixelRegionRatio(regular, styled, targetRegion)).toBeGreaterThan(0.0001);
+      expect(await changedPixelOutsideRegionRatio(regular, styled, targetRegion)).toBeLessThan(0.0001);
+
+      if (styleCase.label === "italic") {
+        await runAndWaitForCanvasRenderCycle(canvas, () => page.getByTestId("toolbar-undo-btn").click());
+        const undone = await captureCanvasPng(canvas);
+        expect(await changedPixelRegionRatio(regular, undone, targetRegion)).toBeLessThan(0.0001);
+        await runAndWaitForCanvasRenderCycle(canvas, () => page.getByTestId("toolbar-redo-btn").click());
+        const redone = await captureCanvasPng(canvas);
+        expect(await changedPixelRegionRatio(regular, redone, targetRegion)).toBeGreaterThan(0.0001);
+      }
+
+      const firstExport = await exportEditableBytes(page);
+      await page.goto("/smartpdf");
+      canvas = await uploadPdfBytes(page, `freetext-${styleCase.label}-reopened.pdf`, firstExport);
+      const reopened = page.locator(`[data-testid="${stableId}"]`);
+      await expect(reopened).toBeVisible();
+      await reopened.click();
+      await styleCase.assertStyled();
+
+      await styleCase.restore();
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.getByTestId("context-annotation-apply-btn").click(),
+      );
+      const secondExport = await exportEditableBytes(page);
+      await page.goto("/smartpdf");
+      await uploadPdfBytes(page, `freetext-${styleCase.label}-restored.pdf`, secondExport);
+      const restored = page.locator(`[data-testid="${stableId}"]`);
+      await expect(restored).toBeVisible();
+      await restored.click();
+      await styleCase.assertDefault();
+    }
+
+    await page.goto("/smartpdf");
+    const combinedCanvas = await uploadPdfBytes(page, "freetext-combined.pdf", fixture);
+    await page.getByTestId("toolbar-mode-fill-sign-btn").click();
+    await page.getByTestId("fill-sign-tool-text-btn").click();
+    await page.getByTestId("pdf-interactive-overlay").click({ position: { x: 190, y: 190 } });
+    await page.getByTestId("inline-text-placement-input").fill("din");
+    await runAndWaitForCanvasRenderCycle(combinedCanvas, () =>
+      page.getByTestId("inline-text-placement-commit-btn").click(),
+    );
+    const combined = page.locator('[data-testid^="canvas-annotation-annot-obj-"][title*="din"]').first();
+    const combinedId = await combined.getAttribute("data-testid");
+    await page.getByTestId("context-freetext-font-family").selectOption("Serif");
+    await page.getByTestId("context-freetext-font-size").fill("24");
+    await page.getByTestId("context-freetext-bold").click();
+    await page.getByTestId("context-freetext-italic").click();
+    await page.getByTestId("context-freetext-color").fill("#ff0000");
+    await page.getByTestId("context-freetext-underline").click();
+    await page.getByTestId("context-freetext-strikethrough").click();
+    await page.getByTestId("context-freetext-highlight").click();
+    await runAndWaitForCanvasRenderCycle(combinedCanvas, () =>
+      page.getByTestId("context-annotation-apply-btn").click(),
+    );
+    const combinedExport = await exportEditableBytes(page);
+    await page.goto("/smartpdf");
+    await uploadPdfBytes(page, "freetext-combined-reopened.pdf", combinedExport);
+    await page.locator(`[data-testid="${combinedId}"]`).click();
+    await expect(page.getByTestId("context-freetext-font-family")).toHaveValue("Serif");
+    await expect(page.getByTestId("context-freetext-font-size")).toHaveValue("24");
+    await expect(page.getByTestId("context-freetext-bold")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-italic")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-color")).toHaveValue("#ff0000");
+    await expect(page.getByTestId("context-freetext-underline")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-strikethrough")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("context-freetext-highlight")).toHaveAttribute("aria-pressed", "true");
+  });
 });

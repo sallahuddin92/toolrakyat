@@ -12,10 +12,15 @@ impl FontMetricsHelper {
             "Helv" | "Helvetica" | "Arial" => "Helvetica",
             "HeBo" | "Helvetica-Bold" | "Arial-Bold" => "Helvetica-Bold",
             "HeOb" | "Helvetica-Oblique" | "Arial-Italic" => "Helvetica-Oblique",
+            "HeBI" | "Helvetica-BoldOblique" | "Arial-BoldItalic" => "Helvetica-BoldOblique",
             "TiRo" | "Times-Roman" | "Times" | "TimesNewRoman" => "Times-Roman",
             "TiBo" | "Times-Bold" | "TimesNewRoman-Bold" => "Times-Bold",
+            "TiIt" | "Times-Italic" | "TimesNewRoman-Italic" => "Times-Italic",
+            "TiBI" | "Times-BoldItalic" | "TimesNewRoman-BoldItalic" => "Times-BoldItalic",
             "Cour" | "Courier" | "CourierNew" => "Courier",
             "CoBo" | "Courier-Bold" | "CourierNew-Bold" => "Courier-Bold",
+            "CoOb" | "Courier-Oblique" | "CourierNew-Italic" => "Courier-Oblique",
+            "CoBI" | "Courier-BoldOblique" | "CourierNew-BoldItalic" => "Courier-BoldOblique",
             "ZaDb" | "ZapfDingbats" => "ZapfDingbats",
             "Symb" | "Symbol" => "Symbol",
             _ => "Helvetica", // Safe standard fallback
@@ -26,8 +31,8 @@ impl FontMetricsHelper {
     pub fn estimate_text_width(text: &str, font_name: &str, font_size: f64) -> f64 {
         let normalized = Self::normalize_font_name(font_name);
         let char_factor = match normalized {
-            "Courier" | "Courier-Bold" => 0.60,
-            "Times-Roman" | "Times-Bold" => 0.50,
+            "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => 0.60,
+            "Times-Roman" | "Times-Bold" | "Times-Italic" | "Times-BoldItalic" => 0.50,
             _ => 0.53, // Helvetica standard average
         };
 

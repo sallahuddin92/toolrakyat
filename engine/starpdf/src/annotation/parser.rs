@@ -8,6 +8,18 @@ use crate::syntax::object::{ObjectRef, PdfObject};
 const MAX_PAGE_ANNOTATIONS: usize = 2000;
 const MAX_ANNOTATION_URI_BYTES: usize = 8192;
 
+#[derive(Default)]
+struct FreeTextAnnotationStyle {
+    font_family: Option<String>,
+    font_size: Option<f64>,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    text_color: Option<[f64; 3]>,
+    underline: Option<bool>,
+    strikethrough: Option<bool>,
+    highlight_color: Option<[f64; 3]>,
+}
+
 pub struct AnnotationParser<'a, 'b> {
     store: &'a mut ObjectStore<'b>,
 }
@@ -154,6 +166,7 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
         }
         let ink_list = self.parse_ink_list(dict.get("InkList"))?;
         let uri = self.parse_link_uri(&subtype, dict)?;
+        let free_text_style = self.parse_freetext_style(&subtype, dict)?;
         let (has_normal_appearance, has_rollover_appearance, has_down_appearance) =
             self.parse_appearance_presence(dict.get("AP"))?;
 
@@ -178,6 +191,14 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
             quad_points,
             ink_list,
             uri,
+            font_family: free_text_style.font_family,
+            font_size: free_text_style.font_size,
+            bold: free_text_style.bold,
+            italic: free_text_style.italic,
+            text_color: free_text_style.text_color,
+            underline: free_text_style.underline,
+            strikethrough: free_text_style.strikethrough,
+            highlight_color: free_text_style.highlight_color,
             has_normal_appearance,
             has_rollover_appearance,
             has_down_appearance,
@@ -185,6 +206,114 @@ impl<'a, 'b> AnnotationParser<'a, 'b> {
             is_invisible,
             is_print,
         })
+    }
+
+    fn parse_freetext_style(
+        &mut self,
+        subtype: &AnnotationSubtype,
+        dict: &BTreeMap<String, PdfObject>,
+    ) -> PdfResult<FreeTextAnnotationStyle> {
+        if *subtype != AnnotationSubtype::FreeText {
+            return Ok(FreeTextAnnotationStyle::default());
+        }
+        let da = dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .and_then(|value| crate::appearance::DefaultAppearance::parse(&value).ok())
+            .unwrap_or_default();
+        let base_font = self
+            .resolve_freetext_base_font(dict, &da.font_name)?
+            .unwrap_or_else(|| da.font_name.clone());
+        let font = crate::font::style_from_da_font_name(&base_font);
+        let text_color = match da.color {
+            crate::appearance::PdfColor::Grayscale(gray) => [gray, gray, gray],
+            crate::appearance::PdfColor::Rgb(red, green, blue) => [red, green, blue],
+            crate::appearance::PdfColor::Cmyk(cyan, magenta, yellow, black) => [
+                (1.0 - cyan) * (1.0 - black),
+                (1.0 - magenta) * (1.0 - black),
+                (1.0 - yellow) * (1.0 - black),
+            ],
+        };
+        let underline = dict
+            .get("StarPDFUnderline")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let strikethrough = dict
+            .get("StarPDFStrikeOut")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let highlight_color = if dict
+            .get("StarPDFHighlight")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false)
+        {
+            let color = self.parse_number_array(dict.get("StarPDFHighlightColor"), 3)?;
+            Some(if color.len() == 3 {
+                [color[0], color[1], color[2]]
+            } else {
+                [1.0, 0.92, 0.23]
+            })
+        } else {
+            None
+        };
+        Ok(FreeTextAnnotationStyle {
+            font_family: Some(crate::font::font_family_name(font.family).to_string()),
+            font_size: Some(da.font_size),
+            bold: Some(font.is_bold),
+            italic: Some(font.is_italic),
+            text_color: Some(text_color),
+            underline: Some(underline),
+            strikethrough: Some(strikethrough),
+            highlight_color,
+        })
+    }
+
+    fn resolve_freetext_base_font(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+        resource_name: &str,
+    ) -> PdfResult<Option<String>> {
+        let Some(appearance) = dict.get("AP").cloned() else {
+            return Ok(None);
+        };
+        let appearance = self.store.resolve_object(&appearance)?.clone();
+        let Some(normal) = appearance
+            .as_dict()
+            .and_then(|value| value.get("N"))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let normal = self.store.resolve_object(&normal)?.clone();
+        let Some(resources) = normal
+            .as_stream()
+            .and_then(|stream| stream.dict.get("Resources"))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let resources = self.store.resolve_object(&resources)?.clone();
+        let Some(fonts) = resources
+            .as_dict()
+            .and_then(|value| value.get("Font"))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let fonts = self.store.resolve_object(&fonts)?.clone();
+        let Some(font) = fonts
+            .as_dict()
+            .and_then(|value| value.get(resource_name))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let font = self.store.resolve_object(&font)?.clone();
+        Ok(font
+            .as_dict()
+            .and_then(|value| value.get("BaseFont"))
+            .and_then(PdfObject::as_name)
+            .map(ToOwned::to_owned))
     }
 
     fn parse_appearance_presence(

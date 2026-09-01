@@ -5,7 +5,8 @@ use starpdf::annotation::{AnnotationSpec, AnnotationUpdateSpec};
 use starpdf::font::{get_font_registry, TextStylePatch, TextWeight};
 use starpdf::mutation::{PdfChange, TextEditTarget};
 use starpdf::syntax::object::PdfObject;
-use starpdf::{MinimalWriter, PdfDocument};
+use starpdf::syntax::{ObjectRef, StreamObject};
+use starpdf::{DefaultAppearance, MinimalWriter, PdfDocument};
 
 fn register_font(font_id: &str, filename: &str) {
     let candidates = [
@@ -46,6 +47,46 @@ fn apply_native_style(patch: TextStylePatch) -> starpdf::TextSpan {
         .unwrap()
         .spans
         .remove(0)
+}
+
+fn freetext_normal_appearance(
+    document: &mut PdfDocument<'_>,
+    annotation_ref: ObjectRef,
+) -> StreamObject {
+    let annotation = document
+        .store_mut()
+        .resolve(annotation_ref)
+        .unwrap()
+        .clone();
+    let appearance = annotation.as_dict().unwrap().get("AP").unwrap().clone();
+    let appearance = document
+        .store_mut()
+        .resolve_object(&appearance)
+        .unwrap()
+        .clone();
+    let normal = appearance.as_dict().unwrap().get("N").unwrap().clone();
+    document
+        .store_mut()
+        .resolve_object(&normal)
+        .unwrap()
+        .as_stream()
+        .unwrap()
+        .clone()
+}
+
+fn standard_appearance_base_font(stream: &StreamObject, resource_name: &str) -> String {
+    stream
+        .dict
+        .get("Resources")
+        .and_then(PdfObject::as_dict)
+        .and_then(|resources| resources.get("Font"))
+        .and_then(PdfObject::as_dict)
+        .and_then(|fonts| fonts.get(resource_name))
+        .and_then(PdfObject::as_dict)
+        .and_then(|font| font.get("BaseFont"))
+        .and_then(PdfObject::as_name)
+        .unwrap()
+        .to_string()
 }
 
 #[test]
@@ -437,10 +478,14 @@ fn freetext_style_updates_da_ap_and_preserves_rect() {
             annot_ref: annotation.object_ref,
             update: AnnotationUpdateSpec {
                 font_family: Some("Serif".into()),
-                font_size: Some(20.0),
+                font_size: Some(24.0),
                 bold: Some(true),
                 italic: Some(true),
-                text_color: Some([0.8, 0.1, 0.2]),
+                text_color: Some([1.0, 0.0, 0.0]),
+                underline: Some(true),
+                strikethrough: Some(true),
+                highlight_enabled: Some(true),
+                highlight_color: Some([1.0, 0.9, 0.2]),
                 ..Default::default()
             },
         }])
@@ -456,9 +501,209 @@ fn freetext_style_updates_da_ap_and_preserves_rect() {
         .as_dict()
         .unwrap();
     let da = dict.get("DA").and_then(PdfObject::as_string_lossy).unwrap();
-    assert!(da.contains("/TimesBoldItalic 20.00 Tf"));
-    assert!(da.contains("0.800 0.100 0.200 rg"));
-    assert!(dict.contains_key("AP"));
+    assert!(da.contains("/Times-BoldItalic 24.00 Tf"));
+    assert!(da.contains("1.000 0.000 0.000 rg"));
+    let parsed_da = DefaultAppearance::parse(&da).unwrap();
+    assert_eq!(parsed_da.font_name, "Times-BoldItalic");
+    let appearance = freetext_normal_appearance(&mut verified, after.object_ref);
+    let appearance_text = String::from_utf8(appearance.data.clone()).unwrap();
+    assert!(appearance_text.contains("/Times-BoldItalic 24.00 Tf"));
+    assert!(appearance_text.contains("1.000 0.000 0.000 rg"));
+    assert!(appearance_text.contains("1.0000 0.9000 0.2000 rg"));
+    assert!(appearance_text.matches(" l S").count() >= 2);
+    assert_eq!(
+        standard_appearance_base_font(&appearance, "Times-BoldItalic"),
+        "Times-BoldItalic"
+    );
+    assert_eq!(after.font_family.as_deref(), Some("Serif"));
+    assert_eq!(after.font_size, Some(24.0));
+    assert_eq!(after.bold, Some(true));
+    assert_eq!(after.italic, Some(true));
+    assert_eq!(after.text_color, Some([1.0, 0.0, 0.0]));
+    assert_eq!(after.underline, Some(true));
+    assert_eq!(after.strikethrough, Some(true));
+    assert_eq!(after.highlight_color, Some([1.0, 0.9, 0.2]));
+}
+
+#[test]
+fn freetext_standard14_style_variants_change_authoritative_appearance() {
+    let cases = [
+        (
+            "family",
+            AnnotationUpdateSpec {
+                font_family: Some("Serif".into()),
+                ..Default::default()
+            },
+            "Times-Roman",
+            12.0,
+        ),
+        (
+            "size",
+            AnnotationUpdateSpec {
+                font_size: Some(24.0),
+                ..Default::default()
+            },
+            "Helvetica",
+            24.0,
+        ),
+        (
+            "bold",
+            AnnotationUpdateSpec {
+                bold: Some(true),
+                ..Default::default()
+            },
+            "Helvetica-Bold",
+            12.0,
+        ),
+        (
+            "italic",
+            AnnotationUpdateSpec {
+                italic: Some(true),
+                ..Default::default()
+            },
+            "Helvetica-Oblique",
+            12.0,
+        ),
+        (
+            "monospace-bold",
+            AnnotationUpdateSpec {
+                font_family: Some("Monospace".into()),
+                bold: Some(true),
+                ..Default::default()
+            },
+            "Courier-Bold",
+            12.0,
+        ),
+    ];
+
+    for (label, update, expected_base_font, expected_size) in cases {
+        let source = MinimalWriter::create_minimal_pdf(label).unwrap();
+        let mut document = PdfDocument::from_bytes(&source).unwrap();
+        let created = document
+            .mutate_and_export(&[PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::FreeText {
+                    rect: [40.0, 50.0, 240.0, 100.0],
+                    text: "din".into(),
+                    font_size: Some(12.0),
+                    color: Some(vec![0.0, 0.0, 0.0]),
+                },
+            }])
+            .unwrap();
+        let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+        let annotation = reopened.page_annotations(0).unwrap().remove(0);
+        let before = freetext_normal_appearance(&mut reopened, annotation.object_ref);
+        let styled = reopened
+            .mutate_and_export(&[PdfChange::UpdateAnnotation {
+                annot_ref: annotation.object_ref,
+                update,
+            }])
+            .unwrap();
+        let mut verified = PdfDocument::from_bytes(&styled).unwrap();
+        let after = verified.page_annotations(0).unwrap().remove(0);
+        assert_eq!(after.object_ref, annotation.object_ref, "{label}");
+        let appearance = freetext_normal_appearance(&mut verified, annotation.object_ref);
+        assert_ne!(appearance.data, before.data, "{label}");
+        let annotation_dict = verified
+            .store_mut()
+            .resolve(annotation.object_ref)
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        let da = annotation_dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .unwrap();
+        let da = DefaultAppearance::parse(&da).unwrap();
+        assert_eq!(da.font_name, expected_base_font, "{label}");
+        assert!((da.font_size - expected_size).abs() < 0.001, "{label}");
+        assert_eq!(
+            standard_appearance_base_font(&appearance, &da.font_name),
+            expected_base_font,
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn freetext_style_noop_is_typed_refusal() {
+    let source = MinimalWriter::create_minimal_pdf("FreeText no-op").unwrap();
+    let mut document = PdfDocument::from_bytes(&source).unwrap();
+    let created = document
+        .mutate_and_export(&[PdfChange::AddAnnotation {
+            page_index: 0,
+            spec: AnnotationSpec::FreeText {
+                rect: [40.0, 50.0, 240.0, 100.0],
+                text: "din".into(),
+                font_size: Some(12.0),
+                color: Some(vec![0.0, 0.0, 0.0]),
+            },
+        }])
+        .unwrap();
+    let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+    let annotation = reopened.page_annotations(0).unwrap().remove(0);
+    let error = reopened
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: annotation.object_ref,
+            update: AnnotationUpdateSpec {
+                font_size: Some(12.0),
+                ..Default::default()
+            },
+        }])
+        .unwrap_err();
+    assert!(error.to_string().contains("TEXT_STYLE_NO_VISUAL_CHANGE"));
+}
+
+#[test]
+fn freetext_style_targets_exact_indirect_object_identity() {
+    let source = MinimalWriter::create_minimal_pdf("FreeText identity").unwrap();
+    let mut document = PdfDocument::from_bytes(&source).unwrap();
+    let created = document
+        .mutate_and_export(&[
+            PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::FreeText {
+                    rect: [40.0, 50.0, 240.0, 90.0],
+                    text: "din".into(),
+                    font_size: Some(12.0),
+                    color: Some(vec![0.0, 0.0, 0.0]),
+                },
+            },
+            PdfChange::AddAnnotation {
+                page_index: 0,
+                spec: AnnotationSpec::FreeText {
+                    rect: [40.0, 100.0, 240.0, 140.0],
+                    text: "din".into(),
+                    font_size: Some(12.0),
+                    color: Some(vec![0.0, 0.0, 0.0]),
+                },
+            },
+        ])
+        .unwrap();
+    let mut reopened = PdfDocument::from_bytes(&created).unwrap();
+    let annotations = reopened.page_annotations(0).unwrap();
+    let untouched = annotations[0].object_ref;
+    let target = annotations[1].object_ref;
+    let untouched_before = freetext_normal_appearance(&mut reopened, untouched);
+    let styled = reopened
+        .mutate_and_export(&[PdfChange::UpdateAnnotation {
+            annot_ref: target,
+            update: AnnotationUpdateSpec {
+                italic: Some(true),
+                ..Default::default()
+            },
+        }])
+        .unwrap();
+    let mut verified = PdfDocument::from_bytes(&styled).unwrap();
+    let annotations = verified.page_annotations(0).unwrap();
+    assert_eq!(annotations[0].object_ref, untouched);
+    assert_eq!(annotations[0].italic, Some(false));
+    assert_eq!(annotations[1].object_ref, target);
+    assert_eq!(annotations[1].italic, Some(true));
+    assert_eq!(
+        freetext_normal_appearance(&mut verified, untouched),
+        untouched_before
+    );
 }
 
 #[test]

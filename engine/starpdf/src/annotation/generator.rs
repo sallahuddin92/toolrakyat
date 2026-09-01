@@ -568,20 +568,16 @@ impl AnnotationGenerator {
         let border_width = Self::dict_border_width(dict);
         let contents = dict.get("Contents").and_then(PdfObject::as_string_lossy);
 
+        if subtype == "FreeText" {
+            return Ok(
+                match Self::generate_standard_freetext_appearance(dict, rect)? {
+                    Some(stream) => AnnotationAppearance::Regenerated(stream),
+                    None => AnnotationAppearance::Unsupported,
+                },
+            );
+        }
+
         let spec = match subtype {
-            "FreeText" => {
-                let font_size = dict
-                    .get("DA")
-                    .and_then(PdfObject::as_string_lossy)
-                    .and_then(|value| crate::appearance::DefaultAppearance::parse(&value).ok())
-                    .map(|da| da.font_size);
-                AnnotationSpec::FreeText {
-                    rect,
-                    text: contents.unwrap_or_default(),
-                    font_size,
-                    color,
-                }
-            }
             "Square" => AnnotationSpec::Square {
                 rect,
                 stroke_color: color,
@@ -649,18 +645,103 @@ impl AnnotationGenerator {
             _ => return Ok(AnnotationAppearance::Unsupported),
         };
 
-        let (_, mut stream) = Self::generate_annotation_objects(&spec)?;
-        if subtype == "FreeText" {
-            if let Some(value) = stream.take() {
-                stream = Some(Self::decorate_freetext_appearance(
-                    value, dict, rect, &spec,
-                )?);
-            }
-        }
+        let (_, stream) = Self::generate_annotation_objects(&spec)?;
         match stream {
             Some(stream) => Ok(AnnotationAppearance::Regenerated(stream)),
             None => Ok(AnnotationAppearance::Unsupported),
         }
+    }
+
+    fn generate_standard_freetext_appearance(
+        dict: &BTreeMap<String, PdfObject>,
+        rect: [f64; 4],
+    ) -> PdfResult<Option<StreamObject>> {
+        let text = dict
+            .get("Contents")
+            .and_then(PdfObject::as_string_lossy)
+            .unwrap_or_default();
+        Self::validate_contents(&text)?;
+        let da = dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .and_then(|value| crate::appearance::DefaultAppearance::parse(&value).ok())
+            .unwrap_or_default();
+        validate_text_font_size(da.font_size)?;
+
+        let width = rect[2] - rect[0];
+        let height = rect[3] - rect[1];
+        let mut content = String::from("q\n");
+        content.push_str(&da.color.to_fill_ops());
+        content.push('\n');
+        let baseline = ((height - da.font_size) / 2.0).max(2.0);
+
+        match text.as_str() {
+            "✓" => {
+                use std::fmt::Write as _;
+                write!(
+                    &mut content,
+                    "{:.2} w\n2.0 {:.2} m\n{:.2} 2.0 l\n{:.2} {:.2} l\nS\nQ\n",
+                    (da.font_size / 8.0).clamp(1.0, 3.0),
+                    height * 0.48,
+                    width * 0.38,
+                    width - 2.0,
+                    height - 2.0,
+                )
+                .map_err(|_| {
+                    PdfError::InvalidOperation("Appearance serialization failed".into())
+                })?;
+            }
+            "✕" => {
+                use std::fmt::Write as _;
+                write!(
+                    &mut content,
+                    "{:.2} w\n2.0 2.0 m\n{:.2} {:.2} l\nS\n2.0 {:.2} m\n{:.2} 2.0 l\nS\nQ\n",
+                    (da.font_size / 8.0).clamp(1.0, 3.0),
+                    width - 2.0,
+                    height - 2.0,
+                    height - 2.0,
+                    width - 2.0,
+                )
+                .map_err(|_| {
+                    PdfError::InvalidOperation("Appearance serialization failed".into())
+                })?;
+            }
+            _ => {
+                let Ok(operand) = Self::win_ansi_text_operand(&text) else {
+                    return Ok(None);
+                };
+                use std::fmt::Write as _;
+                write!(
+                    &mut content,
+                    "BT\n/{} {:.2} Tf\n2.0 {:.2} Td\n{} Tj\nET\nQ\n",
+                    da.font_name, da.font_size, baseline, operand
+                )
+                .map_err(|_| {
+                    PdfError::InvalidOperation("Appearance serialization failed".into())
+                })?;
+            }
+        }
+        Self::validate_appearance_size(content.len())?;
+
+        let mut stream_dict = Self::create_form_dict(width, height, content.len());
+        stream_dict.insert(
+            "Resources".to_string(),
+            PdfObject::Dictionary(FontMetricsHelper::build_font_resource(&da.font_name)),
+        );
+        let content = content.into_bytes();
+        let stream = StreamObject {
+            dict: stream_dict,
+            stream_length: content.len(),
+            data: content,
+            stream_offset: 0,
+        };
+        let spec = AnnotationSpec::FreeText {
+            rect,
+            text,
+            font_size: Some(da.font_size),
+            color: None,
+        };
+        Self::decorate_freetext_appearance(stream, dict, rect, &spec).map(Some)
     }
 
     fn decorate_freetext_appearance(

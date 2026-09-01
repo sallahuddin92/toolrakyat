@@ -29,6 +29,14 @@ function annotationSelection(annotation: StarPdfAnnotation): NonNullable<SmartPd
     pageIndex: annotation.page_index,
     objectNumber: annotation.object_num,
     generationNumber: annotation.object_gen,
+    fontFamily: annotation.font_family,
+    fontSize: annotation.font_size,
+    isBold: annotation.bold,
+    isItalic: annotation.italic,
+    textColor: annotation.text_color,
+    isUnderlined: annotation.underline,
+    isStruckThrough: annotation.strikethrough,
+    highlightColor: annotation.highlight_color,
   };
   return {
     type: "annotation",
@@ -472,49 +480,19 @@ export class UpdateAnnotationPropertiesCommand implements SmartPdfCommand {
       hasTextAppearanceUpdate ? selectedContents : undefined,
     );
     const updatedBytes = await starPdfDoc.exportIncremental();
+    const refreshedAnnotation = (await starPdfDoc.getAnnotations(this.pageIndex ?? 0)).find(
+      (annotation) => annotation.object_num === targetNum && annotation.object_gen === targetGen,
+    );
+    if (!refreshedAnnotation) {
+      throw new Error(
+        "ANNOTATION_STYLE_READBACK_FAILED: styled annotation identity was not returned by StarPDF",
+      );
+    }
     return {
       bytes: updatedBytes,
       nextSelection:
         currentSelection?.type === "annotation" && currentSelection.id === this.annotId
-          ? {
-              ...currentSelection,
-              data: {
-                ...currentSelection.data,
-                ...(this.properties.contents !== undefined
-                  ? { contents: this.properties.contents }
-                  : {}),
-                ...(this.properties.font_family !== undefined
-                  ? { fontFamily: this.properties.font_family }
-                  : {}),
-                ...(this.properties.font_size !== undefined
-                  ? { fontSize: this.properties.font_size }
-                  : {}),
-                ...(this.properties.bold !== undefined ? { isBold: this.properties.bold } : {}),
-                ...(this.properties.italic !== undefined
-                  ? { isItalic: this.properties.italic }
-                  : {}),
-                ...(this.properties.text_color !== undefined
-                  ? { textColor: this.properties.text_color }
-                  : {}),
-                ...(this.properties.underline !== undefined
-                  ? { isUnderlined: this.properties.underline }
-                  : {}),
-                ...(this.properties.strikethrough !== undefined
-                  ? { isStruckThrough: this.properties.strikethrough }
-                  : {}),
-                ...(this.properties.highlight_enabled === false
-                  ? { highlightColor: undefined }
-                  : this.properties.highlight_enabled === true ||
-                      this.properties.highlight_color !== undefined
-                    ? {
-                        highlightColor:
-                          this.properties.highlight_color ??
-                          currentSelection.data.highlightColor ??
-                          ([1, 0.92, 0.23] as [number, number, number]),
-                      }
-                    : {}),
-              },
-            }
+          ? annotationSelection(refreshedAnnotation)
           : undefined,
       message: "Annotation styled.",
     };

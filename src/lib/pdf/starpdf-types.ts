@@ -244,6 +244,14 @@ export interface StarPdfAnnotation {
   quad_points: number[];
   ink_list: [number, number][][];
   uri?: string;
+  font_family?: "SansSerif" | "Serif" | "Monospace";
+  font_size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  text_color?: [number, number, number];
+  underline?: boolean;
+  strikethrough?: boolean;
+  highlight_color?: [number, number, number];
   has_normal_appearance: boolean;
   has_rollover_appearance: boolean;
   has_down_appearance: boolean;

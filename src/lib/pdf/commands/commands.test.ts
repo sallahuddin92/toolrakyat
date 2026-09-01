@@ -217,7 +217,22 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         selection,
         starPdfDoc: {
           getAnnotations: vi.fn().mockResolvedValue([
-            { object_num: 27, object_gen: 0, page_index: 0, contents: selection.data.contents },
+            {
+              object_num: 27,
+              object_gen: 0,
+              page_index: 0,
+              subtype: "FreeText",
+              rect: [40, 50, 260, 90],
+              contents: selection.data.contents,
+              font_family: "Serif",
+              font_size: 20,
+              bold: true,
+              italic: true,
+              text_color: [0.2, 0.3, 0.6],
+              underline: true,
+              strikethrough: true,
+              highlight_color: [1, 0.9, 0.2],
+            },
           ]),
           updateAnnotation,
           exportIncremental,
@@ -228,7 +243,10 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       const result = await new UpdateAnnotationPropertiesCommand(
         selection.id,
         {
-          font_size: 18,
+          font_family: "Serif",
+          font_size: 20,
+          bold: true,
+          italic: true,
           text_color: [0.2, 0.3, 0.6],
           underline: true,
           strikethrough: true,
@@ -242,7 +260,10 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         27,
         0,
         {
-          font_size: 18,
+          font_family: "Serif",
+          font_size: 20,
+          bold: true,
+          italic: true,
           text_color: [0.2, 0.3, 0.6],
           underline: true,
           strikethrough: true,
@@ -253,6 +274,11 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       );
       expect(exportIncremental).toHaveBeenCalledTimes(1);
       expect(result.nextSelection?.data).toMatchObject({
+        fontFamily: "Serif",
+        fontSize: 20,
+        isBold: true,
+        isItalic: true,
+        textColor: [0.2, 0.3, 0.6],
         isUnderlined: true,
         isStruckThrough: true,
         highlightColor: [1, 0.9, 0.2],

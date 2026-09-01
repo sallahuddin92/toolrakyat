@@ -37,6 +37,18 @@ const MAX_FIELD_PROPERTY_ANCESTORS: usize = 32;
 type DecorationMetrics = (f64, f64, f64, f64, f64, f64);
 type FreeTextRunLayout = (f64, f64, DecorationMetrics);
 
+#[derive(Debug, Clone, PartialEq)]
+struct FreeTextVisualStyle {
+    family: FontFamily,
+    bold: bool,
+    italic: bool,
+    font_size: f64,
+    color: crate::appearance::PdfColor,
+    underline: bool,
+    strikethrough: bool,
+    highlight_color: Option<[f64; 3]>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct SubsetCacheKey {
     source_ref: Option<ObjectRef>,
@@ -2136,11 +2148,26 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
     ) -> PdfResult<AppearanceStatus> {
         let mut dict = self.get_dict_for_modification(annot_ref, modified)?;
         Self::validate_annotation_dictionary(&dict)?;
+        let original_dict = dict.clone();
         let subtype = dict
             .get("Subtype")
             .and_then(PdfObject::as_name)
             .unwrap_or("")
             .to_string();
+        let has_text_style_update = update.font_family.is_some()
+            || update.font_size.is_some()
+            || update.bold.is_some()
+            || update.italic.is_some()
+            || update.text_color.is_some();
+        let has_text_decoration_update = update.underline.is_some()
+            || update.strikethrough.is_some()
+            || update.highlight_enabled.is_some()
+            || update.highlight_color.is_some();
+        let existing_normal_appearance = if has_text_style_update || has_text_decoration_update {
+            self.resolve_normal_appearance_stream(original_dict.get("AP"))?
+        } else {
+            None
+        };
 
         if let Some(rect) = update.rect {
             Self::validate_rect(rect, "Annotation update rectangle")?;
@@ -2272,15 +2299,6 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             dict.insert("InkList".to_string(), PdfObject::Array(paths));
         }
 
-        let has_text_style_update = update.font_family.is_some()
-            || update.font_size.is_some()
-            || update.bold.is_some()
-            || update.italic.is_some()
-            || update.text_color.is_some();
-        let has_text_decoration_update = update.underline.is_some()
-            || update.strikethrough.is_some()
-            || update.highlight_enabled.is_some()
-            || update.highlight_color.is_some();
         if has_text_decoration_update {
             if subtype != "FreeText" {
                 return Err(PdfError::InvalidOperation(
@@ -2344,8 +2362,17 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             if let Some(color) = update.text_color {
                 da.color = crate::appearance::PdfColor::rgb(color[0], color[1], color[2])?;
             }
-            da.font_name = style.standard_base_font_name().replace('-', "");
+            da.font_name = style.standard_base_font_name().to_string();
             dict.insert("DA".to_string(), PdfObject::text_string(&da.to_da_string()));
+        }
+
+        if (has_text_style_update || has_text_decoration_update)
+            && Self::freetext_visual_style(&original_dict)? == Self::freetext_visual_style(&dict)?
+        {
+            return Err(PdfError::InvalidOperation(
+                "TEXT_STYLE_NO_VISUAL_CHANGE: requested FreeText style already matches the authoritative PDF appearance"
+                    .into(),
+            ));
         }
 
         let visual_change = update.rect.is_some()
@@ -2363,6 +2390,11 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         let status = if visual_change {
             match AnnotationGenerator::regenerate_from_dictionary(&dict)? {
                 AnnotationAppearance::Regenerated(stream) => {
+                    Self::ensure_freetext_appearance_changed(
+                        has_text_style_update || has_text_decoration_update,
+                        existing_normal_appearance.as_ref(),
+                        &stream,
+                    )?;
                     let stream_ref = self.allocate_object_ref()?;
                     modified.insert(stream_ref, PdfObject::Stream(stream));
                     let generated = PdfObject::Dictionary(BTreeMap::from([(
@@ -2377,6 +2409,11 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 AnnotationAppearance::Unsupported => {
                     if subtype == "FreeText" {
                         let stream = self.generate_adaptive_freetext_appearance(&dict, modified)?;
+                        Self::ensure_freetext_appearance_changed(
+                            has_text_style_update || has_text_decoration_update,
+                            existing_normal_appearance.as_ref(),
+                            &stream,
+                        )?;
                         let stream_ref = self.allocate_object_ref()?;
                         modified.insert(stream_ref, PdfObject::Stream(stream));
                         let generated = PdfObject::Dictionary(BTreeMap::from([(
@@ -3159,6 +3196,93 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             )));
         }
         Ok(!states.is_empty())
+    }
+
+    fn resolve_normal_appearance_stream(
+        &mut self,
+        appearance: Option<&PdfObject>,
+    ) -> PdfResult<Option<StreamObject>> {
+        let Some(appearance) = appearance else {
+            return Ok(None);
+        };
+        let resolved_appearance = self.store.resolve_object(appearance)?.clone();
+        let Some(normal) = resolved_appearance
+            .as_dict()
+            .and_then(|dict| dict.get("N"))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        Ok(self.store.resolve_object(&normal)?.as_stream().cloned())
+    }
+
+    fn freetext_visual_style(dict: &BTreeMap<String, PdfObject>) -> PdfResult<FreeTextVisualStyle> {
+        let da = dict
+            .get("DA")
+            .and_then(PdfObject::as_string_lossy)
+            .and_then(|value| DefaultAppearance::parse(&value).ok())
+            .unwrap_or_default();
+        validate_text_font_size(da.font_size)?;
+        let font = crate::font::style_from_da_font_name(&da.font_name);
+        let underline = dict
+            .get("StarPDFUnderline")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let strikethrough = dict
+            .get("StarPDFStrikeOut")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false);
+        let highlight_color = if dict
+            .get("StarPDFHighlight")
+            .and_then(PdfObject::as_bool)
+            .unwrap_or(false)
+        {
+            let values = dict
+                .get("StarPDFHighlightColor")
+                .and_then(PdfObject::as_array);
+            Some(
+                values
+                    .filter(|values| values.len() == 3)
+                    .map_or([1.0, 0.92, 0.23], |values| {
+                        [
+                            values[0].as_real().unwrap_or(1.0),
+                            values[1].as_real().unwrap_or(0.92),
+                            values[2].as_real().unwrap_or(0.23),
+                        ]
+                    }),
+            )
+        } else {
+            None
+        };
+        Ok(FreeTextVisualStyle {
+            family: font.family,
+            bold: font.is_bold,
+            italic: font.is_italic,
+            font_size: da.font_size,
+            color: da.color,
+            underline,
+            strikethrough,
+            highlight_color,
+        })
+    }
+
+    fn ensure_freetext_appearance_changed(
+        requested_style_change: bool,
+        previous: Option<&StreamObject>,
+        generated: &StreamObject,
+    ) -> PdfResult<()> {
+        if requested_style_change
+            && previous.is_some_and(|previous| {
+                previous.data == generated.data
+                    && previous.dict.get("Resources") == generated.dict.get("Resources")
+            })
+        {
+            return Err(PdfError::InvalidOperation(
+                "TEXT_STYLE_NO_VISUAL_CHANGE: FreeText appearance generation produced no structural visual change"
+                    .into(),
+            ));
+        }
+        Ok(())
     }
 
     fn merge_generated_appearance(
