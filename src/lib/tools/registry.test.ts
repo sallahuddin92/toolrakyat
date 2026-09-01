@@ -6,6 +6,7 @@ import {
   getPopularTools,
   getCategoryLabel,
 } from "./registry";
+import { getImplementationKey, hasPrimaryAction } from "./implementation-registry";
 
 describe("Tool Registry", () => {
   it("contains valid tool definitions", () => {
@@ -47,5 +48,27 @@ describe("Tool Registry", () => {
     expect(getCategoryLabel("pdf")).toBe("PDF");
     expect(getCategoryLabel("text")).toBe("Text");
     expect(getCategoryLabel("akaunkemas")).toBe("AkaunKemas");
+  });
+
+  it("maps every implemented tool to a real implementation and primary action", () => {
+    for (const tool of tools.filter((candidate) => candidate.isImplemented)) {
+      expect(getImplementationKey(tool), `${tool.id} implementation`).toBeDefined();
+      expect(hasPrimaryAction(tool), `${tool.id} primary action`).toBe(true);
+    }
+  });
+
+  it("uses canonical, unique routes that resolve back to every registered tool", () => {
+    expect(new Set(tools.map((tool) => tool.route)).size).toBe(tools.length);
+    for (const tool of tools) {
+      expect(tool.route).toBe(`/tools/${tool.categoryId}/${tool.slug}`);
+      expect(getToolByCategoryAndSlug(tool.categoryId, tool.slug)?.id).toBe(tool.id);
+    }
+  });
+
+  it("has no implemented placeholder fallback", () => {
+    const implementedWithoutUi = tools.filter(
+      (tool) => tool.isImplemented && getImplementationKey(tool) === undefined,
+    );
+    expect(implementedWithoutUi).toEqual([]);
   });
 });

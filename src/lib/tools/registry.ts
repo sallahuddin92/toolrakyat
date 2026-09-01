@@ -2,7 +2,7 @@ import type { ToolCategoryId, ToolDefinition } from "@/lib/tools/types";
 import { TOOL_CATEGORIES } from "@/lib/tools/types";
 
 const DEFAULT_PRIVACY_NOTE =
-  "Files are processed temporarily and auto-deleted after processing. We do not permanently store uploads by default.";
+  "Processing runs locally in your browser. Your files are not uploaded to our server.";
 
 export const tools: ToolDefinition[] = [
   // PDF
@@ -189,7 +189,7 @@ export const tools: ToolDefinition[] = [
     isImplemented: true,
     isPopular: false,
     route: "/tools/pdf/sign",
-    acceptedFileTypes: ["application/pdf"],
+    acceptedFileTypes: ["application/pdf", "image/png", "image/jpeg"],
     maxFileSizeMB: 50,
     privacyNote: DEFAULT_PRIVACY_NOTE,
     seoTitle: "Sign PDF Online Free",

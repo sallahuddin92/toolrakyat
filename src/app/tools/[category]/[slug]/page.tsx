@@ -5,8 +5,10 @@ import { notFound } from "next/navigation";
 import { RecentlyUsedTracker } from "@/components/tools/RecentlyUsedTracker";
 import { ToolPageShell } from "@/components/tools/ToolPageShell";
 import { ToolPlaceholder } from "@/components/tools/ToolPlaceholder";
+import { GenericUtilityTool } from "@/components/tools/implementations/GenericUtilityTool";
 import { WordCounterTool } from "@/components/tools/implementations/text/WordCounterTool";
 import { SmartPdfLaunchCard } from "@/components/tools/implementations/pdf/SmartPdfLaunchCard";
+import { getImplementationKey } from "@/lib/tools/implementation-registry";
 import { getToolByCategoryAndSlug } from "@/lib/tools/registry";
 import { TOOL_CATEGORIES, type ToolCategoryId } from "@/lib/tools/types";
 
@@ -43,11 +45,14 @@ export default async function ToolDetailPage({
   const tool = getToolByCategoryAndSlug(category, slug);
   if (!tool) notFound();
 
-  let content: React.ReactNode = null;
-  if (tool.id === "text-word-counter") {
+  const implementation = getImplementationKey(tool);
+  let content: React.ReactNode;
+  if (implementation === "word-counter") {
     content = <WordCounterTool />;
-  } else if (tool.id === "pdf-editor") {
+  } else if (implementation === "smartpdf-launcher") {
     content = <SmartPdfLaunchCard />;
+  } else if (implementation === "generic-utility") {
+    content = <GenericUtilityTool tool={tool} />;
   } else if (!tool.isImplemented) {
     content = (
       <ToolPlaceholder
@@ -55,14 +60,7 @@ export default async function ToolDetailPage({
         note="We ship tool UIs early, then wire up safe local/server-side processing. Check back soon."
       />
     );
-  } else {
-    content = (
-      <ToolPlaceholder
-        title="Tool wiring pending"
-        note="This tool is marked implemented, but its UI wiring isn't added yet."
-      />
-    );
-  }
+  } else notFound();
 
   return (
     <ToolPageShell
