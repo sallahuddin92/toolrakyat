@@ -1,16 +1,18 @@
 use std::collections::BTreeMap;
 
 use crate::appearance::AppearanceStatus;
-use crate::content::operand::ContentOperand;
-use crate::content::operator::{ContentInstruction, ContentOperator};
-use crate::content::parser::ContentParser;
+use crate::content::operator::ContentOperator;
+use crate::content::source::{
+    decode_content_stream, scan_instruction_sources, write_uncompressed_content,
+    ContentInstructionSource,
+};
 use crate::document::ObjectStore;
 use crate::error::{PdfError, PdfResult};
-use crate::filter::flate::FlateDecoder;
-use crate::filter::limits::DecompressLimits;
 use crate::image::extractor::ImageExtractor;
 use crate::image::jpeg::parse_jpeg_info;
-use crate::image::types::{AddImageSpec, ImageFormat, RemoveImageSpec, ReplaceImageSpec};
+use crate::image::types::{
+    AddImageSpec, ImageFormat, ImageXObjectInfo, RemoveImageSpec, ReplaceImageSpec,
+};
 use crate::mutation::MutationPlan;
 use crate::syntax::object::{ObjectRef, PdfObject, StreamObject};
 
@@ -60,6 +62,13 @@ impl ImageEditor {
 
         let mut modified_objects = BTreeMap::new();
 
+        if is_shared && !spec.clone_if_shared {
+            return Err(PdfError::InvalidOperation(
+                "SHARED_IMAGE_REPLACEMENT_REFUSED: occurrence isolation requires cloning"
+                    .to_string(),
+            ));
+        }
+
         if is_shared && spec.clone_if_shared {
             let new_img_num = *next_alloc_obj_num;
             *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
@@ -100,7 +109,8 @@ impl ImageEditor {
             };
             modified_objects.insert(new_img_ref, PdfObject::Stream(new_stream));
 
-            // Update page's /Resources /XObject to point to new_img_ref
+            // Register a unique resource name and rewrite only the selected invocation. Rebinding
+            // the existing name would replace every occurrence on this page.
             let page_ref = page_refs[spec.page_index];
             let page_obj = store.resolve(page_ref)?.clone();
             let mut page_dict =
@@ -128,12 +138,38 @@ impl ImageEditor {
                 _ => BTreeMap::new(),
             };
 
-            xo_dict.insert(
-                target_image.resource_name.clone(),
-                PdfObject::Reference(new_img_ref),
-            );
+            let new_resource_name = format!("Im_star_{new_img_num}");
+            xo_dict.insert(new_resource_name.clone(), PdfObject::Reference(new_img_ref));
             res_dict.insert("XObject".to_string(), PdfObject::Dictionary(xo_dict));
             page_dict.insert("Resources".to_string(), PdfObject::Dictionary(res_dict));
+
+            let contents_ref =
+                Self::get_page_content_stream_ref(&page_dict, target_image.stream_index)?;
+            let mut contents_stream = store
+                .resolve(contents_ref)?
+                .as_stream()
+                .cloned()
+                .ok_or_else(|| {
+                    PdfError::InvalidObject("Resolved object is not a stream".to_string())
+                })?;
+            let decoded = decode_content_stream(&contents_stream)?;
+            let source = Self::locate_image_invocation(&decoded, &target_image)?;
+            let replacement = format!("/{new_resource_name} Do");
+            let mut updated = Vec::with_capacity(decoded.len() + replacement.len());
+            updated.extend_from_slice(&decoded[..source.byte_start]);
+            updated.extend_from_slice(replacement.as_bytes());
+            updated.extend_from_slice(&decoded[source.byte_end..]);
+            write_uncompressed_content(&mut contents_stream, updated);
+            let (content_changes, _) = Self::place_content_stream_mutation(
+                store,
+                page_refs,
+                next_alloc_obj_num,
+                &mut page_dict,
+                contents_ref,
+                target_image.stream_index,
+                contents_stream,
+            )?;
+            modified_objects.extend(content_changes);
             modified_objects.insert(page_ref, PdfObject::Dictionary(page_dict));
         } else {
             let mut existing_stream = store
@@ -274,74 +310,35 @@ impl ImageEditor {
             spec.width, spec.height, spec.x, spec.y, res_name
         );
 
-        let contents_obj = page_dict.get("Contents").cloned();
-        match contents_obj {
-            Some(PdfObject::Reference(contents_ref)) => {
-                let mut stream_obj = store
-                    .resolve(contents_ref)?
-                    .as_stream()
-                    .cloned()
-                    .ok_or_else(|| {
-                        PdfError::InvalidObject("Contents object is not a stream".to_string())
-                    })?;
-
-                let decoded = FlateDecoder::decode(&stream_obj.data, &DecompressLimits::default())
-                    .unwrap_or_else(|_| stream_obj.data.clone());
-
-                let mut updated_data = decoded;
-                updated_data.extend_from_slice(draw_cmd.as_bytes());
-
-                stream_obj.data = updated_data;
-                stream_obj.stream_length = stream_obj.data.len();
-                stream_obj.dict.remove("Filter");
-                stream_obj.dict.insert(
-                    "Length".to_string(),
-                    PdfObject::Integer(stream_obj.data.len() as i64),
-                );
-
-                modified_objects.insert(contents_ref, PdfObject::Stream(stream_obj));
+        let add_stream_ref = ObjectRef::new(*next_alloc_obj_num, 0);
+        *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
+        let mut stream_dict = BTreeMap::new();
+        stream_dict.insert(
+            "Length".to_string(),
+            PdfObject::Integer(draw_cmd.len() as i64),
+        );
+        modified_objects.insert(
+            add_stream_ref,
+            PdfObject::Stream(StreamObject {
+                dict: stream_dict,
+                data: draw_cmd.into_bytes(),
+                stream_offset: 0,
+                stream_length: 0,
+            }),
+        );
+        let mut contents = match page_dict.get("Contents").cloned() {
+            Some(PdfObject::Reference(reference)) => vec![PdfObject::Reference(reference)],
+            Some(PdfObject::Array(items)) => items,
+            Some(_) => {
+                return Err(PdfError::InvalidOperation(
+                    "IMAGE_CONTENT_STREAM_REFUSED: page contents are not indirect streams"
+                        .to_string(),
+                ));
             }
-            Some(PdfObject::Array(mut arr)) => {
-                let add_stream_num = *next_alloc_obj_num;
-                *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
-                let add_stream_ref = ObjectRef::new(add_stream_num, 0);
-
-                let mut s_dict = BTreeMap::new();
-                s_dict.insert(
-                    "Length".to_string(),
-                    PdfObject::Integer(draw_cmd.len() as i64),
-                );
-                let add_stream = StreamObject {
-                    dict: s_dict,
-                    data: draw_cmd.into_bytes(),
-                    stream_offset: 0,
-                    stream_length: 0,
-                };
-                modified_objects.insert(add_stream_ref, PdfObject::Stream(add_stream));
-
-                arr.push(PdfObject::Reference(add_stream_ref));
-                page_dict.insert("Contents".to_string(), PdfObject::Array(arr));
-            }
-            _ => {
-                let add_stream_num = *next_alloc_obj_num;
-                *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
-                let add_stream_ref = ObjectRef::new(add_stream_num, 0);
-
-                let mut s_dict = BTreeMap::new();
-                s_dict.insert(
-                    "Length".to_string(),
-                    PdfObject::Integer(draw_cmd.len() as i64),
-                );
-                let add_stream = StreamObject {
-                    dict: s_dict,
-                    data: draw_cmd.into_bytes(),
-                    stream_offset: 0,
-                    stream_length: 0,
-                };
-                modified_objects.insert(add_stream_ref, PdfObject::Stream(add_stream));
-                page_dict.insert("Contents".to_string(), PdfObject::Reference(add_stream_ref));
-            }
-        }
+            None => Vec::new(),
+        };
+        contents.push(PdfObject::Reference(add_stream_ref));
+        page_dict.insert("Contents".to_string(), PdfObject::Array(contents));
 
         modified_objects.insert(page_ref, PdfObject::Dictionary(page_dict));
 
@@ -357,6 +354,7 @@ impl ImageEditor {
     pub fn remove_image(
         store: &mut ObjectStore,
         page_refs: &[ObjectRef],
+        next_alloc_obj_num: &mut u64,
         spec: &RemoveImageSpec,
     ) -> PdfResult<MutationPlan> {
         let target_image = {
@@ -383,7 +381,7 @@ impl ImageEditor {
 
         let page_ref = page_refs[spec.page_index];
         let page_obj = store.resolve(page_ref)?.clone();
-        let page_dict = page_obj
+        let mut page_dict = page_obj
             .as_dict()
             .cloned()
             .ok_or_else(|| PdfError::TypeMismatch {
@@ -402,52 +400,25 @@ impl ImageEditor {
                 PdfError::InvalidObject("Resolved object is not a stream".to_string())
             })?;
 
-        let decoded = FlateDecoder::decode(&stream_obj.data, &DecompressLimits::default())
-            .unwrap_or_else(|_| stream_obj.data.clone());
+        let decoded = decode_content_stream(&stream_obj)?;
+        let target = Self::locate_image_invocation(&decoded, &target_image)?;
+        let mut updated = Vec::with_capacity(decoded.len() - (target.byte_end - target.byte_start));
+        updated.extend_from_slice(&decoded[..target.byte_start]);
+        updated.extend_from_slice(&decoded[target.byte_end..]);
+        write_uncompressed_content(&mut stream_obj, updated);
 
-        let mut parser = ContentParser::from_bytes(&decoded);
-        let instructions = parser.parse_instructions()?;
-
-        let mut filtered_instructions = Vec::new();
-        let target_idx = target_image.instruction_index;
-
-        let is_isolated_block = target_idx >= 2
-            && target_idx + 1 < instructions.len()
-            && instructions[target_idx - 2].operator == ContentOperator::Q
-            && instructions[target_idx - 1].operator == ContentOperator::Cm
-            && instructions[target_idx].operator == ContentOperator::Do
-            && instructions[target_idx + 1].operator == ContentOperator::QEnd;
-
-        for (idx, instr) in instructions.into_iter().enumerate() {
-            if is_isolated_block
-                && (idx == target_idx - 2
-                    || idx == target_idx - 1
-                    || idx == target_idx
-                    || idx == target_idx + 1)
-            {
-                continue;
-            }
-            if !is_isolated_block && idx == target_idx {
-                continue;
-            }
-            filtered_instructions.push(instr);
+        let (mut modified_objects, cloned_stream) = Self::place_content_stream_mutation(
+            store,
+            page_refs,
+            next_alloc_obj_num,
+            &mut page_dict,
+            contents_ref,
+            target_image.stream_index,
+            stream_obj,
+        )?;
+        if cloned_stream {
+            modified_objects.insert(page_ref, PdfObject::Dictionary(page_dict));
         }
-
-        let mut new_stream_bytes = Vec::new();
-        for instr in filtered_instructions {
-            Self::serialize_instruction(&mut new_stream_bytes, &instr)?;
-        }
-
-        stream_obj.data = new_stream_bytes;
-        stream_obj.stream_length = stream_obj.data.len();
-        stream_obj.dict.remove("Filter");
-        stream_obj.dict.insert(
-            "Length".to_string(),
-            PdfObject::Integer(stream_obj.data.len() as i64),
-        );
-
-        let mut modified_objects = BTreeMap::new();
-        modified_objects.insert(contents_ref, PdfObject::Stream(stream_obj));
 
         Ok(MutationPlan {
             modified_objects,
@@ -507,126 +478,55 @@ impl ImageEditor {
                 PdfError::InvalidObject("Resolved object is not a stream".to_string())
             })?;
 
-        let decoded = FlateDecoder::decode(&stream_obj.data, &DecompressLimits::default())
-            .unwrap_or_else(|_| stream_obj.data.clone());
-
-        let mut parser = ContentParser::from_bytes(&decoded);
-        let instructions = parser.parse_instructions()?;
-
-        let mut updated_instructions = Vec::with_capacity(instructions.len() + 4);
+        let decoded = decode_content_stream(&stream_obj)?;
+        let instructions = scan_instruction_sources(&decoded)?;
         let target_idx = target_image.instruction_index;
-
+        let target = instructions.get(target_idx).ok_or_else(|| {
+            PdfError::ImageNotFound(format!(
+                "Image occurrence '{}' no longer resolves to its source instruction",
+                target_image.image_id
+            ))
+        })?;
+        if target.resource_name() != Some(target_image.resource_name.as_str()) {
+            return Err(PdfError::ImageNotFound(format!(
+                "Image occurrence '{}' source identity changed",
+                target_image.image_id
+            )));
+        }
         let is_isolated_block = target_idx >= 2
             && target_idx + 1 < instructions.len()
-            && instructions[target_idx - 2].operator == ContentOperator::Q
-            && instructions[target_idx - 1].operator == ContentOperator::Cm
-            && instructions[target_idx].operator == ContentOperator::Do
-            && instructions[target_idx + 1].operator == ContentOperator::QEnd;
-
-        for (idx, instr) in instructions.into_iter().enumerate() {
-            if is_isolated_block {
-                if idx == target_idx - 2 {
-                    updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::Q));
-                } else if idx == target_idx - 1 {
-                    updated_instructions.push(ContentInstruction::new(
-                        vec![
-                            ContentOperand::Real(spec.new_width),
-                            ContentOperand::Real(0.0),
-                            ContentOperand::Real(0.0),
-                            ContentOperand::Real(spec.new_height),
-                            ContentOperand::Real(spec.new_x),
-                            ContentOperand::Real(spec.new_y),
-                        ],
-                        ContentOperator::Cm,
-                    ));
-                } else if idx == target_idx {
-                    updated_instructions.push(instr);
-                } else if idx == target_idx + 1 {
-                    updated_instructions
-                        .push(ContentInstruction::new(vec![], ContentOperator::QEnd));
-                } else {
-                    updated_instructions.push(instr);
-                }
-            } else if idx == target_idx {
-                updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::Q));
-                updated_instructions.push(ContentInstruction::new(
-                    vec![
-                        ContentOperand::Real(spec.new_width),
-                        ContentOperand::Real(0.0),
-                        ContentOperand::Real(0.0),
-                        ContentOperand::Real(spec.new_height),
-                        ContentOperand::Real(spec.new_x),
-                        ContentOperand::Real(spec.new_y),
-                    ],
-                    ContentOperator::Cm,
-                ));
-                updated_instructions.push(instr);
-                updated_instructions.push(ContentInstruction::new(vec![], ContentOperator::QEnd));
-            } else {
-                updated_instructions.push(instr);
-            }
+            && instructions[target_idx - 2].instruction.operator == ContentOperator::Q
+            && instructions[target_idx - 1].instruction.operator == ContentOperator::Cm
+            && target.instruction.operator == ContentOperator::Do
+            && instructions[target_idx + 1].instruction.operator == ContentOperator::QEnd;
+        if !is_isolated_block {
+            return Err(PdfError::InvalidOperation(format!(
+                "IMAGE_TRANSFORM_SOURCE_REFUSED: image '{}' is not controlled by an isolated q/cm/Do/Q block",
+                target_image.image_id
+            )));
         }
-
-        let mut new_stream_bytes = Vec::new();
-        for instr in updated_instructions {
-            Self::serialize_instruction(&mut new_stream_bytes, &instr)?;
-        }
-
-        stream_obj.data = new_stream_bytes;
-        stream_obj.stream_length = stream_obj.data.len();
-        stream_obj.dict.remove("Filter");
-        stream_obj.dict.insert(
-            "Length".to_string(),
-            PdfObject::Integer(stream_obj.data.len() as i64),
+        let cm = &instructions[target_idx - 1];
+        let replacement = format!(
+            "{:.4} 0 0 {:.4} {:.4} {:.4} cm",
+            spec.new_width, spec.new_height, spec.new_x, spec.new_y
         );
+        let mut updated = Vec::with_capacity(decoded.len() + replacement.len());
+        updated.extend_from_slice(&decoded[..cm.byte_start]);
+        updated.extend_from_slice(replacement.as_bytes());
+        updated.extend_from_slice(&decoded[cm.byte_end..]);
+        write_uncompressed_content(&mut stream_obj, updated);
 
-        let mut modified_objects = BTreeMap::new();
-
-        // Check if stream is shared with other pages
-        let mut count_referencing_pages = 0;
-        for &other_page_ref in page_refs {
-            if let Ok(other_obj) = store.resolve(other_page_ref) {
-                if let Some(other_dict) = other_obj.as_dict() {
-                    if let Some(c) = other_dict.get("Contents") {
-                        if let Some(cr) = c.as_reference() {
-                            if cr == contents_ref {
-                                count_referencing_pages += 1;
-                            }
-                        } else if let Some(arr) = c.as_array() {
-                            for item in arr {
-                                if item.as_reference() == Some(contents_ref) {
-                                    count_referencing_pages += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if count_referencing_pages > 1 {
-            let new_stream_num = *next_alloc_obj_num;
-            *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
-            let new_stream_ref = ObjectRef::new(new_stream_num, 0);
-
-            modified_objects.insert(new_stream_ref, PdfObject::Stream(stream_obj));
-
-            if let Some(contents_entry) = page_dict.get_mut("Contents") {
-                match contents_entry {
-                    PdfObject::Reference(_) => {
-                        *contents_entry = PdfObject::Reference(new_stream_ref);
-                    }
-                    PdfObject::Array(arr) => {
-                        if target_image.stream_index < arr.len() {
-                            arr[target_image.stream_index] = PdfObject::Reference(new_stream_ref);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+        let (mut modified_objects, cloned_stream) = Self::place_content_stream_mutation(
+            store,
+            page_refs,
+            next_alloc_obj_num,
+            &mut page_dict,
+            contents_ref,
+            target_image.stream_index,
+            stream_obj,
+        )?;
+        if cloned_stream {
             modified_objects.insert(page_ref, PdfObject::Dictionary(page_dict));
-        } else {
-            modified_objects.insert(contents_ref, PdfObject::Stream(stream_obj));
         }
 
         Ok(MutationPlan {
@@ -635,6 +535,92 @@ impl ImageEditor {
             glyph_mapping_quality: None,
             layout_policy_result: None,
         })
+    }
+
+    fn locate_image_invocation(
+        decoded: &[u8],
+        target: &ImageXObjectInfo,
+    ) -> PdfResult<ContentInstructionSource> {
+        let source = scan_instruction_sources(decoded)?
+            .into_iter()
+            .find(|source| source.instruction_index == target.instruction_index)
+            .ok_or_else(|| {
+                PdfError::ImageNotFound(format!(
+                    "Image occurrence '{}' has no matching source instruction",
+                    target.image_id
+                ))
+            })?;
+        if source.instruction.operator != ContentOperator::Do
+            || source.resource_name() != Some(target.resource_name.as_str())
+        {
+            return Err(PdfError::ImageNotFound(format!(
+                "Image occurrence '{}' no longer matches /{} Do",
+                target.image_id, target.resource_name
+            )));
+        }
+        Ok(source)
+    }
+
+    fn place_content_stream_mutation(
+        store: &mut ObjectStore,
+        page_refs: &[ObjectRef],
+        next_alloc_obj_num: &mut u64,
+        page_dict: &mut BTreeMap<String, PdfObject>,
+        contents_ref: ObjectRef,
+        stream_index: usize,
+        stream_obj: StreamObject,
+    ) -> PdfResult<(BTreeMap<ObjectRef, PdfObject>, bool)> {
+        let mut reference_count = 0usize;
+        for &other_page_ref in page_refs {
+            let other_obj = store.resolve(other_page_ref)?;
+            if let Some(other_dict) = other_obj.as_dict() {
+                if let Some(contents) = other_dict.get("Contents") {
+                    if contents.as_reference() == Some(contents_ref) {
+                        reference_count += 1;
+                    } else if let Some(items) = contents.as_array() {
+                        reference_count += items
+                            .iter()
+                            .filter(|item| item.as_reference() == Some(contents_ref))
+                            .count();
+                    }
+                }
+            }
+        }
+
+        let mut modified = BTreeMap::new();
+        if reference_count <= 1 {
+            modified.insert(contents_ref, PdfObject::Stream(stream_obj));
+            return Ok((modified, false));
+        }
+
+        let new_stream_ref = ObjectRef::new(*next_alloc_obj_num, 0);
+        *next_alloc_obj_num = next_alloc_obj_num.saturating_add(1);
+        modified.insert(new_stream_ref, PdfObject::Stream(stream_obj));
+        match page_dict.get_mut("Contents") {
+            Some(PdfObject::Reference(reference)) if *reference == contents_ref => {
+                *reference = new_stream_ref;
+            }
+            Some(PdfObject::Array(items)) => {
+                let item = items.get_mut(stream_index).ok_or_else(|| {
+                    PdfError::InvalidOperation(format!(
+                        "IMAGE_CONTENT_STREAM_REFUSED: stream index {stream_index} disappeared"
+                    ))
+                })?;
+                if item.as_reference() != Some(contents_ref) {
+                    return Err(PdfError::InvalidOperation(
+                        "IMAGE_CONTENT_STREAM_REFUSED: target stream identity changed".to_string(),
+                    ));
+                }
+                *item = PdfObject::Reference(new_stream_ref);
+            }
+            _ => {
+                return Err(PdfError::InvalidOperation(
+                    "IMAGE_CONTENT_STREAM_REFUSED: page contents are not an indirect stream"
+                        .to_string(),
+                ));
+            }
+        }
+        Ok((modified, true))
     }
 
     /// Resolves the specific content stream reference for a given stream index on a page.
@@ -663,77 +649,6 @@ impl ImageEditor {
         Err(PdfError::TargetTextNotFound(format!(
             "Content stream at index {stream_index} not found on page"
         )))
-    }
-
-    /// Serializes a ContentInstruction to bytes.
-    fn serialize_instruction<W: std::io::Write>(
-        writer: &mut W,
-        instr: &ContentInstruction,
-    ) -> PdfResult<()> {
-        for (i, op) in instr.operands.iter().enumerate() {
-            if i > 0 {
-                write!(writer, " ").map_err(|e| PdfError::Serialization(e.to_string()))?;
-            }
-            match op {
-                ContentOperand::Integer(n) => {
-                    write!(writer, "{n}").map_err(|e| PdfError::Serialization(e.to_string()))?;
-                }
-                ContentOperand::Real(r) => {
-                    if r.fract() == 0.0 {
-                        write!(writer, "{:.1}", r)
-                            .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                    } else {
-                        write!(writer, "{:.4}", r)
-                            .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                    }
-                }
-                ContentOperand::Name(n) => {
-                    write!(writer, "/{n}").map_err(|e| PdfError::Serialization(e.to_string()))?;
-                }
-                ContentOperand::String(s) => {
-                    let s_str = String::from_utf8_lossy(s);
-                    write!(writer, "({s_str})")
-                        .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                }
-                ContentOperand::Array(arr) => {
-                    write!(writer, "[").map_err(|e| PdfError::Serialization(e.to_string()))?;
-                    for (j, item) in arr.iter().enumerate() {
-                        if j > 0 {
-                            write!(writer, " ")
-                                .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                        }
-                        match item {
-                            ContentOperand::Integer(n) => {
-                                write!(writer, "{n}")
-                                    .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                            }
-                            ContentOperand::Real(r) => {
-                                write!(writer, "{:.4}", r)
-                                    .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                            }
-                            ContentOperand::String(s) => {
-                                let s_str = String::from_utf8_lossy(s);
-                                write!(writer, "({s_str})")
-                                    .map_err(|e| PdfError::Serialization(e.to_string()))?;
-                            }
-                            _ => {}
-                        }
-                    }
-                    write!(writer, "]").map_err(|e| PdfError::Serialization(e.to_string()))?;
-                }
-                ContentOperand::Dict(_) => {
-                    write!(writer, "<< >>").map_err(|e| PdfError::Serialization(e.to_string()))?;
-                }
-            }
-        }
-
-        if !instr.operands.is_empty() {
-            write!(writer, " ").map_err(|e| PdfError::Serialization(e.to_string()))?;
-        }
-
-        let op_str = instr.operator.as_str();
-        writeln!(writer, "{op_str}").map_err(|e| PdfError::Serialization(e.to_string()))?;
-        Ok(())
     }
 
     /// Prepares raw image bytes into PDF stream parameters.

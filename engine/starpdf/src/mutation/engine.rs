@@ -305,8 +305,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     overall_status = overall_status.combine(plan.appearance_status);
                 }
                 PdfChange::RemoveImage { spec } => {
-                    let plan =
-                        crate::image::ImageEditor::remove_image(self.store, &self.page_refs, spec)?;
+                    let plan = crate::image::ImageEditor::remove_image(
+                        self.store,
+                        &self.page_refs,
+                        &mut self.next_alloc_obj_num,
+                        spec,
+                    )?;
                     modified_objects.extend(plan.modified_objects);
                     overall_status = overall_status.combine(plan.appearance_status);
                 }

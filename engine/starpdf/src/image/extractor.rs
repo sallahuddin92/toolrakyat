@@ -2,11 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::content::operand::ContentOperand;
 use crate::content::operator::ContentOperator;
-use crate::content::parser::ContentParser;
+use crate::content::source::{decode_content_stream, scan_instruction_sources};
 use crate::document::{ObjectStore, PdfDocument};
 use crate::error::PdfResult;
-use crate::filter::flate::FlateDecoder;
-use crate::filter::limits::DecompressLimits;
 use crate::image::types::ImageXObjectInfo;
 use crate::syntax::object::{ObjectRef, PdfObject};
 
@@ -157,8 +155,7 @@ impl<'a, 'b> ImageExtractor<'a, 'b> {
         let mut discovered = Vec::new();
 
         for (stream_index, stream_bytes) in content_streams.into_iter().enumerate() {
-            let mut parser = ContentParser::from_bytes(&stream_bytes);
-            let instructions = match parser.parse_instructions() {
+            let instructions = match scan_instruction_sources(&stream_bytes) {
                 Ok(instrs) => instrs,
                 Err(_) => continue,
             };
@@ -166,7 +163,9 @@ impl<'a, 'b> ImageExtractor<'a, 'b> {
             let mut ctm = Matrix2D::identity();
             let mut ctm_stack: Vec<Matrix2D> = Vec::new();
 
-            for (instruction_index, instr) in instructions.into_iter().enumerate() {
+            for source in instructions {
+                let instruction_index = source.instruction_index;
+                let instr = source.instruction;
                 match instr.operator {
                     ContentOperator::Q => {
                         ctm_stack.push(ctm);
@@ -310,15 +309,14 @@ impl<'a, 'b> ImageExtractor<'a, 'b> {
             }
         }
 
-        let form_bytes = FlateDecoder::decode(&form_stream.data, &DecompressLimits::default())
-            .unwrap_or_else(|_| form_stream.data.clone());
-
-        let mut parser = ContentParser::from_bytes(&form_bytes);
-        let instructions = parser.parse_instructions().unwrap_or_default();
+        let form_bytes = decode_content_stream(form_stream)?;
+        let instructions = scan_instruction_sources(&form_bytes)?;
         let mut form_ctm = *parent_ctm;
         let mut stack: Vec<Matrix2D> = Vec::new();
 
-        for (inner_idx, instr) in instructions.into_iter().enumerate() {
+        for source in instructions {
+            let inner_idx = source.instruction_index;
+            let instr = source.instruction;
             match instr.operator {
                 ContentOperator::Q => stack.push(form_ctm),
                 ContentOperator::QEnd => {
@@ -426,26 +424,16 @@ impl<'a, 'b> ImageExtractor<'a, 'b> {
                 PdfObject::Reference(r) => {
                     let resolved = self.store.resolve(*r)?.clone();
                     if let Some(stream_obj) = resolved.as_stream() {
-                        let decoded =
-                            FlateDecoder::decode(&stream_obj.data, &DecompressLimits::default())
-                                .unwrap_or_else(|_| stream_obj.data.clone());
-                        results.push(decoded);
+                        results.push(decode_content_stream(stream_obj)?);
                     }
                 }
                 PdfObject::Array(arr) => {
                     let arr_refs: Vec<ObjectRef> =
                         arr.iter().filter_map(PdfObject::as_reference).collect();
                     for r in arr_refs {
-                        if let Ok(resolved) = self.store.resolve(r) {
-                            let resolved_obj = resolved.clone();
-                            if let Some(stream_obj) = resolved_obj.as_stream() {
-                                let decoded = FlateDecoder::decode(
-                                    &stream_obj.data,
-                                    &DecompressLimits::default(),
-                                )
-                                .unwrap_or_else(|_| stream_obj.data.clone());
-                                results.push(decoded);
-                            }
+                        let resolved_obj = self.store.resolve(r)?.clone();
+                        if let Some(stream_obj) = resolved_obj.as_stream() {
+                            results.push(decode_content_stream(stream_obj)?);
                         }
                     }
                 }

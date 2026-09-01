@@ -1,5 +1,9 @@
+use starpdf::content::source::scan_instruction_sources;
 use starpdf::document::PdfDocument;
-use starpdf::image::{AddImageSpec, ImageFormat, RemoveImageSpec, ReplaceImageSpec};
+use starpdf::image::{
+    AddImageSpec, ImageFormat, RemoveImageSpec, ReplaceImageSpec, UpdateImageSpec,
+};
+use starpdf::syntax::object::{ObjectRef, PdfObject};
 
 /// Generates a minimal 2x2 RGB JPEG JFIF binary.
 fn make_minimal_jpeg(r: u8, g: u8, b: u8) -> Vec<u8> {
@@ -73,6 +77,217 @@ fn make_pdf_with_image(jpeg_bytes: &[u8]) -> Vec<u8> {
         format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
     );
     pdf
+}
+
+fn make_adversarial_shipping_label_pdf(jpeg_bytes: &[u8]) -> (Vec<u8>, Vec<Vec<u8>>) {
+    let stream1 = b"% stream one stays byte-identical\nq 36 0 0 20 20 730 cm /Im1 Do Q\n".to_vec();
+    let mut stream2 = b"% shipping label complex stream\n/Artifact << /Type /Pagination /Attached [/Top] /Flag true /Nil null >> BDC\nq\n80 0 0 24 40 650 cm\n/Im1 Do\nQ\n".to_vec();
+    stream2.extend_from_slice(b"BI /W 1 /H 1 /BPC 8 /CS /RGB ID \x00EI\xff\nEI\n");
+    stream2.extend_from_slice(b"q\n60 0 0 60 180 620 cm\n/Im1 Do\nQ\n");
+    stream2.extend_from_slice(b"q 1 0 0 1 30 560 cm 0 0 250 40 re W n 0.5 w 0 0 m 250 0 l S Q\n");
+    stream2.extend_from_slice(b"q\n120 0 0 30 40 500 cm\n/Im1 Do\nQ\nEMC\n");
+    let stream3 =
+        b"BT /F1 14 Tf 40 440 Td (SHIP TO: RAKYAT) Tj ET\n0 0 0 RG 1 w 35 420 260 100 re S\n"
+            .to_vec();
+    let streams = vec![stream1, stream2, stream3];
+
+    let mut pdf = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    let mut offsets = vec![0usize];
+    {
+        let mut object = |number: usize, body: &[u8]| {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{number} 0 obj\n").as_bytes());
+            pdf.extend_from_slice(body);
+            pdf.extend_from_slice(b"\nendobj\n");
+        };
+        object(1, b"<< /Type /Catalog /Pages 2 0 R /AcroForm 10 0 R >>");
+        object(2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        object(3, b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 780] /Contents [4 0 R 5 0 R 6 0 R] /Resources << /Font << /F1 8 0 R >> /XObject << /Im1 7 0 R >> >> /Annots [9 0 R] >>");
+        for (index, stream) in streams.iter().enumerate() {
+            let mut body = format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes();
+            body.extend_from_slice(stream);
+            body.extend_from_slice(b"\nendstream");
+            object(index + 4, &body);
+        }
+        let mut image_body = format!("<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n", jpeg_bytes.len()).into_bytes();
+        image_body.extend_from_slice(jpeg_bytes);
+        image_body.extend_from_slice(b"\nendstream");
+        object(7, &image_body);
+        object(8, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        object(9, b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (Tracking) /Rect [40 380 200 405] /P 3 0 R >>");
+        object(10, b"<< /Fields [9 0 R] >>");
+    }
+
+    let xref = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 11\n0000000000 65535 f \n");
+    for offset in offsets.iter().skip(1) {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!("trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
+    (pdf, streams)
+}
+
+fn changed_stream(plan: &starpdf::mutation::MutationPlan, reference: ObjectRef) -> Vec<u8> {
+    plan.modified_objects
+        .get(&reference)
+        .and_then(PdfObject::as_stream)
+        .expect("target stream mutation")
+        .data
+        .clone()
+}
+
+#[test]
+fn surgical_remove_preserves_every_unrelated_decoded_byte_in_complex_multi_stream_page() {
+    let jpeg = make_minimal_jpeg(0x10, 0x20, 0x30);
+    let (pdf, streams) = make_adversarial_shipping_label_pdf(&jpeg);
+    let mut doc = PdfDocument::from_bytes(&pdf).expect("adversarial PDF");
+    let images = doc.enumerate_images(0).expect("images");
+    assert_eq!(images.len(), 4);
+    let target = images
+        .iter()
+        .filter(|image| image.stream_index == 1)
+        .nth(1)
+        .expect("middle repeated image")
+        .clone();
+    let sources = scan_instruction_sources(&streams[1]).expect("source scan");
+    let source = &sources[target.instruction_index];
+    assert_eq!(&streams[1][source.byte_start..source.byte_end], b"/Im1 Do");
+    let mut expected = streams[1][..source.byte_start].to_vec();
+    expected.extend_from_slice(&streams[1][source.byte_end..]);
+
+    let plan = doc
+        .remove_image(&RemoveImageSpec {
+            page_index: 0,
+            image_id: target.image_id,
+        })
+        .expect("surgical remove");
+    assert_eq!(changed_stream(&plan, ObjectRef::new(5, 0)), expected);
+    assert!(!plan.modified_objects.contains_key(&ObjectRef::new(4, 0)));
+    assert!(!plan.modified_objects.contains_key(&ObjectRef::new(6, 0)));
+    assert!(!plan.modified_objects.contains_key(&ObjectRef::new(7, 0)));
+    assert!(expected.windows(3).any(|window| window == b"\0EI"));
+    assert!(expected.windows(3).any(|window| window == b"BDC"));
+
+    let exported = doc.export_incremental(&plan).expect("export");
+    let mut reopened = PdfDocument::from_bytes(&exported).expect("reopen");
+    assert_eq!(reopened.enumerate_images(0).expect("images").len(), 3);
+    assert_eq!(reopened.form_fields().expect("form").len(), 1);
+    let reopened_text_stream = reopened
+        .store_mut()
+        .resolve(ObjectRef::new(6, 0))
+        .expect("text stream")
+        .as_stream()
+        .expect("stream")
+        .data
+        .clone();
+    assert_eq!(reopened_text_stream, streams[2]);
+}
+
+#[test]
+fn surgical_update_changes_only_isolated_cm_source_range() {
+    let jpeg = make_minimal_jpeg(0x10, 0x20, 0x30);
+    let (pdf, streams) = make_adversarial_shipping_label_pdf(&jpeg);
+    let mut doc = PdfDocument::from_bytes(&pdf).expect("adversarial PDF");
+    let target = doc
+        .enumerate_images(0)
+        .expect("images")
+        .into_iter()
+        .find(|image| image.stream_index == 1)
+        .expect("image");
+    let sources = scan_instruction_sources(&streams[1]).expect("scan");
+    let cm = &sources[target.instruction_index - 1];
+    let replacement = b"90.0000 0 0 25.0000 45.0000 645.0000 cm";
+    let mut expected = streams[1][..cm.byte_start].to_vec();
+    expected.extend_from_slice(replacement);
+    expected.extend_from_slice(&streams[1][cm.byte_end..]);
+    let plan = doc
+        .update_image(&UpdateImageSpec {
+            page_index: 0,
+            image_id: target.image_id,
+            new_x: 45.0,
+            new_y: 645.0,
+            new_width: 90.0,
+            new_height: 25.0,
+            clone_if_shared: true,
+        })
+        .expect("surgical update");
+    assert_eq!(changed_stream(&plan, ObjectRef::new(5, 0)), expected);
+}
+
+#[test]
+fn shared_same_resource_replacement_changes_only_selected_occurrence() {
+    let jpeg = make_minimal_jpeg(0x10, 0x20, 0x30);
+    let replacement = make_minimal_jpeg(0x90, 0x80, 0x70);
+    let (pdf, _) = make_adversarial_shipping_label_pdf(&jpeg);
+    let mut doc = PdfDocument::from_bytes(&pdf).expect("adversarial PDF");
+    let before = doc.enumerate_images(0).expect("images");
+    let target = before
+        .iter()
+        .filter(|image| image.stream_index == 1)
+        .nth(1)
+        .expect("middle image");
+    let plan = doc
+        .replace_image(&ReplaceImageSpec {
+            page_index: 0,
+            image_id: target.image_id.clone(),
+            new_image_bytes: replacement.clone(),
+            format: ImageFormat::Jpeg,
+            clone_if_shared: true,
+        })
+        .expect("isolated replace");
+    let exported = doc.export_incremental(&plan).expect("export");
+    let mut reopened = PdfDocument::from_bytes(&exported).expect("reopen");
+    let after = reopened.enumerate_images(0).expect("images");
+    assert_eq!(after.len(), 4);
+    let stream_two: Vec<_> = after
+        .iter()
+        .filter(|image| image.stream_index == 1)
+        .collect();
+    assert_eq!(stream_two.len(), 3);
+    assert_eq!(stream_two[0].object_ref, before[1].object_ref);
+    assert_ne!(stream_two[1].object_ref, before[2].object_ref);
+    assert_eq!(stream_two[2].object_ref, before[3].object_ref);
+    let selected_data = reopened
+        .store_mut()
+        .resolve(stream_two[1].object_ref)
+        .expect("replacement")
+        .as_stream()
+        .expect("stream")
+        .data
+        .clone();
+    assert_eq!(selected_data, replacement);
+}
+
+#[test]
+fn removal_clones_a_content_stream_shared_by_two_pages() {
+    let jpeg = make_minimal_jpeg(0x10, 0x20, 0x30);
+    let pdf = make_pdf_with_image(&jpeg);
+    let mut original = PdfDocument::from_bytes(&pdf).expect("PDF");
+    let duplicated = original
+        .apply_page_operations(
+            &starpdf::page_ops::PageOperationPlan {
+                edits: vec![starpdf::page_ops::PageEdit::DuplicatePage {
+                    index: 0,
+                    insert_at: 1,
+                }],
+            },
+            &starpdf::page_ops::PageOperationLimits::default(),
+        )
+        .expect("duplicate");
+    let mut doc = PdfDocument::from_bytes(&duplicated).expect("reopen");
+    let page_zero = doc.enumerate_images(0).expect("page zero");
+    let plan = doc
+        .remove_image(&RemoveImageSpec {
+            page_index: 0,
+            image_id: page_zero[0].image_id.clone(),
+        })
+        .expect("remove one occurrence");
+    let exported = doc.export_incremental(&plan).expect("export");
+    let mut reopened = PdfDocument::from_bytes(&exported).expect("reopen");
+    assert!(reopened.enumerate_images(0).expect("page zero").is_empty());
+    assert_eq!(reopened.enumerate_images(1).expect("page one").len(), 1);
 }
 
 #[test]

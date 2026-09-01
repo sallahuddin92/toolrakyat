@@ -86,6 +86,156 @@ async function createTextFormattingVisualFixture(): Promise<Buffer> {
   return Buffer.from(await document.save({ useObjectStreams: false }));
 }
 
+async function createShippingLabelImageFixture(): Promise<Buffer> {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const boldFont = await document.embedFont(StandardFonts.HelveticaBold);
+  const page = document.addPage([612, 792]);
+
+  const createRaster = async (
+    width: number,
+    height: number,
+    pixel: (x: number, y: number) => [number, number, number, number],
+  ) => {
+    const pixels = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const color = pixel(x, y);
+        pixels[offset] = color[0];
+        pixels[offset + 1] = color[1];
+        pixels[offset + 2] = color[2];
+        pixels[offset + 3] = color[3];
+      }
+    }
+    return sharp(pixels, { raw: { width, height, channels: 4 } })
+      .png()
+      .toBuffer();
+  };
+
+  const logo = await createRaster(180, 80, (x, y) => {
+    const inMark = x < 52 && y > 12 && y < 68;
+    const inWordmark = x >= 66 && x < 168 && y > 25 && y < 56;
+    return inMark
+      ? [20, 92, 170, 255]
+      : inWordmark
+        ? [230, 72, 54, 255]
+        : [255, 255, 255, 255];
+  });
+  const barcode = await createRaster(240, 64, (x, y) => {
+    const quietZone = x < 12 || x >= 228 || y < 8 || y >= 56;
+    const bar = (x * 17 + Math.floor(x / 5) * 11) % 23 < 10;
+    return quietZone || !bar ? [255, 255, 255, 255] : [0, 0, 0, 255];
+  });
+  const qr = await createRaster(84, 84, (x, y) => {
+    const moduleX = Math.floor(x / 4);
+    const moduleY = Math.floor(y / 4);
+    const finder = (originX: number, originY: number) => {
+      const dx = moduleX - originX;
+      const dy = moduleY - originY;
+      if (dx < 0 || dy < 0 || dx > 6 || dy > 6) return false;
+      return (
+        dx === 0 ||
+        dy === 0 ||
+        dx === 6 ||
+        dy === 6 ||
+        (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4)
+      );
+    };
+    const dark =
+      finder(1, 1) ||
+      finder(13, 1) ||
+      finder(1, 13) ||
+      (moduleX * 7 + moduleY * 11 + moduleX * moduleY) % 5 < 2;
+    return dark ? [0, 0, 0, 255] : [255, 255, 255, 255];
+  });
+
+  const [logoImage, barcodeImage, qrImage] = await Promise.all([
+    document.embedPng(logo),
+    document.embedPng(barcode),
+    document.embedPng(qr),
+  ]);
+
+  page.drawRectangle({ x: 24, y: 24, width: 564, height: 744, borderWidth: 2 });
+  page.drawLine({
+    start: { x: 24, y: 640 },
+    end: { x: 588, y: 640 },
+    thickness: 1,
+  });
+  page.drawLine({
+    start: { x: 24, y: 360 },
+    end: { x: 588, y: 360 },
+    thickness: 1,
+  });
+  page.drawLine({
+    start: { x: 400, y: 360 },
+    end: { x: 400, y: 640 },
+    thickness: 1,
+  });
+  page.drawText("TOOLRAKYAT EXPRESS", {
+    x: 42,
+    y: 730,
+    size: 19,
+    font: boldFont,
+  });
+  page.drawText("SHIP TO", { x: 42, y: 610, size: 10, font: boldFont });
+  page.drawText("Nadia Rahman", { x: 42, y: 584, size: 17, font: boldFont });
+  page.drawText("18 Jalan Harmoni, Kuala Lumpur", {
+    x: 42,
+    y: 562,
+    size: 12,
+    font,
+  });
+  page.drawText("TRACKING: TRK-2048-0917", {
+    x: 42,
+    y: 516,
+    size: 13,
+    font: boldFont,
+  });
+  page.drawText("Pieces: 1    Weight: 2.4 kg", {
+    x: 42,
+    y: 386,
+    size: 11,
+    font,
+  });
+  page.drawText("Routing: KUL / HUB-07", {
+    x: 420,
+    y: 610,
+    size: 11,
+    font: boldFont,
+  });
+  page.drawText("FRAGILE", {
+    x: 430,
+    y: 540,
+    size: 24,
+    font: boldFont,
+    color: rgb(0.75, 0.05, 0.05),
+  });
+  page.drawImage(logoImage, { x: 392, y: 682, width: 162, height: 72 });
+  page.drawImage(barcodeImage, { x: 52, y: 424, width: 300, height: 72 });
+  page.drawImage(qrImage, { x: 446, y: 398, width: 112, height: 112 });
+  page.drawText("Keep dry • Scan at every checkpoint", {
+    x: 42,
+    y: 330,
+    size: 12,
+    font,
+  });
+  page.drawRectangle({ x: 42, y: 76, width: 516, height: 220, borderWidth: 1 });
+  for (let row = 1; row < 4; row += 1) {
+    page.drawLine({
+      start: { x: 42, y: 76 + row * 44 },
+      end: { x: 558, y: 76 + row * 44 },
+      thickness: 0.75,
+    });
+  }
+  page.drawText("Service", { x: 54, y: 266, size: 10, font: boldFont });
+  page.drawText("Priority Overnight", { x: 180, y: 266, size: 10, font });
+  page.drawText("Reference", { x: 54, y: 222, size: 10, font: boldFont });
+  page.drawText("ORDER-77821", { x: 180, y: 222, size: 10, font });
+
+  return Buffer.from(await document.save({ useObjectStreams: false }));
+}
+
 async function createMultilingualFreeTextFixture(
   page: import("@playwright/test").Page,
   contents: string,
@@ -575,6 +725,43 @@ async function changedPixelRegionRatio(
     if (Math.abs(beforePixels[index] - afterPixels[index]) > 8) changedChannels += 1;
   }
   return changedChannels / beforePixels.length;
+}
+
+async function changedPixelOutsideRegionRatio(
+  before: Buffer,
+  after: Buffer,
+  excluded: { left: number; top: number; width: number; height: number },
+) {
+  const [beforeImage, afterImage] = await Promise.all([
+    sharp(before).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    sharp(after).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+  ]);
+  expect(afterImage.info.width).toBe(beforeImage.info.width);
+  expect(afterImage.info.height).toBe(beforeImage.info.height);
+  const right = excluded.left + excluded.width;
+  const bottom = excluded.top + excluded.height;
+  let comparedChannels = 0;
+  let changedChannels = 0;
+  for (let y = 0; y < beforeImage.info.height; y += 1) {
+    for (let x = 0; x < beforeImage.info.width; x += 1) {
+      if (x >= excluded.left && x < right && y >= excluded.top && y < bottom)
+        continue;
+      const offset =
+        (y * beforeImage.info.width + x) * beforeImage.info.channels;
+      for (let channel = 0; channel < beforeImage.info.channels; channel += 1) {
+        comparedChannels += 1;
+        if (
+          Math.abs(
+            beforeImage.data[offset + channel] -
+              afterImage.data[offset + channel],
+          ) > 8
+        ) {
+          changedChannels += 1;
+        }
+      }
+    }
+  }
+  return changedChannels / comparedChannels;
 }
 
 function unionPixelRegions(
@@ -3763,6 +3950,95 @@ test.describe("SmartPDF — Advanced PDF Editor", () => {
     await page.mouse.up();
 
     await expect(page.locator('[data-testid="smartpdf-status-bar"]')).toContainText("Unsaved changes");
+  });
+
+  test("image deletion is visually surgical for shipping-label barcode, QR, and logo", async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    const fixture = await createShippingLabelImageFixture();
+    const targets = [
+      { name: "logo", index: 0 },
+      { name: "barcode", index: 1 },
+      { name: "QR", index: 2 },
+    ];
+
+    for (const target of targets) {
+      await page.goto("/smartpdf");
+      let canvas = await uploadPdfBytes(
+        page,
+        `shipping-label-${target.name}.pdf`,
+        fixture,
+      );
+      let images = page.locator('[data-testid^="canvas-image-"]');
+      await expect(images).toHaveCount(3, { timeout: 10_000 });
+
+      const original = await captureCanvasPng(canvas);
+      const targetRegion = await canvasElementPixelRegion(
+        canvas,
+        images.nth(target.index),
+        original,
+        3,
+      );
+
+      await images.nth(target.index).click();
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.keyboard.press("Delete"),
+      );
+      await expect(images).toHaveCount(2, { timeout: 10_000 });
+      const deleted = await captureCanvasPng(canvas);
+      expect(
+        await changedPixelRegionRatio(original, deleted, targetRegion),
+      ).toBeGreaterThan(0.01);
+      expect(
+        await changedPixelOutsideRegionRatio(original, deleted, targetRegion),
+      ).toBeLessThan(0.0001);
+
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.getByTestId("toolbar-undo-btn").click(),
+      );
+      images = page.locator('[data-testid^="canvas-image-"]');
+      await expect(images).toHaveCount(3, { timeout: 10_000 });
+      const undone = await captureCanvasPng(canvas);
+      expect(
+        await changedPixelRegionRatio(original, undone, targetRegion),
+      ).toBeLessThan(0.0001);
+      expect(
+        await changedPixelOutsideRegionRatio(original, undone, targetRegion),
+      ).toBeLessThan(0.0001);
+
+      await runAndWaitForCanvasRenderCycle(canvas, () =>
+        page.getByTestId("toolbar-redo-btn").click(),
+      );
+      await expect(page.locator('[data-testid^="canvas-image-"]')).toHaveCount(
+        2,
+        {
+          timeout: 10_000,
+        },
+      );
+
+      const exported = await exportEditableBytes(page);
+      expect(exported.length).toBeGreaterThan(fixture.length);
+      await page.goto("/smartpdf");
+      canvas = await uploadPdfBytes(
+        page,
+        `shipping-label-${target.name}-reopened.pdf`,
+        exported,
+      );
+      await expect(page.locator('[data-testid^="canvas-image-"]')).toHaveCount(
+        2,
+        {
+          timeout: 10_000,
+        },
+      );
+      const reopened = await captureCanvasPng(canvas);
+      expect(
+        await changedPixelRegionRatio(original, reopened, targetRegion),
+      ).toBeGreaterThan(0.01);
+      expect(
+        await changedPixelOutsideRegionRatio(original, reopened, targetRegion),
+      ).toBeLessThan(0.0001);
+    }
   });
 
   test("v0.21 Phase 4: Direct Vector Manipulation (Rectangle Resize, Color Styling & Line Endpoint Edit)", async ({
