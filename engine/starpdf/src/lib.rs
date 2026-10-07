@@ -41,6 +41,7 @@ pub mod appearance;
 pub mod content;
 pub mod document;
 pub mod error;
+pub mod execution;
 pub mod filter;
 pub mod font;
 pub mod forms;
