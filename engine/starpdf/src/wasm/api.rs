@@ -16,11 +16,13 @@ use crate::validate::StructuralValidator;
 #[cfg(feature = "wasm")]
 use crate::wasm::dto::{
     WasmAddAnnotationInput, WasmAddLineInput, WasmAddRectangleInput, WasmAnnotation,
-    WasmChoiceOption, WasmDeleteVectorGraphicInput, WasmDocumentInfo, WasmFormField, WasmImageInfo,
-    WasmImageMutationResult, WasmMoveTextResult, WasmPageText, WasmReplaceTextResult,
-    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmTextReplacementPlan,
-    WasmTextSpan, WasmTextStylePlan, WasmUpdateAnnotationInput, WasmUpdateVectorGraphicInput,
-    WasmVectorGraphicInfo, WasmVectorMutationResult, WasmWidget,
+    WasmCapabilityDecision, WasmChoiceOption, WasmDeleteVectorGraphicInput,
+    WasmDocumentCapabilities, WasmDocumentInfo, WasmEmbeddedFile, WasmFormField, WasmImageInfo,
+    WasmImageMutationResult, WasmMoveTextResult, WasmOptionalContentGroup,
+    WasmOptionalContentMembership, WasmOutlineItem, WasmPageText, WasmReplaceTextResult,
+    WasmSearchBoundingBox, WasmSearchResult, WasmSecurityInfo, WasmSignedExportAssessment,
+    WasmTextReplacementPlan, WasmTextSpan, WasmTextStylePlan, WasmUpdateAnnotationInput,
+    WasmUpdateVectorGraphicInput, WasmVectorGraphicInfo, WasmVectorMutationResult, WasmWidget,
 };
 #[cfg(feature = "wasm")]
 use crate::wasm::registry::REGISTRY;
@@ -50,6 +52,12 @@ pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
     REGISTRY
         .with_doc(handle, |doc| {
             let info = doc.security_info()?;
+            let evidence_verified = doc.xref_status() == crate::xref::table::XrefStatus::Valid;
+            let capabilities = info.capabilities(evidence_verified);
+            let decision = |value: crate::security::CapabilityDecision| WasmCapabilityDecision {
+                allowed: value.allowed,
+                reason: value.reason.to_string(),
+            };
             let dto = WasmSecurityInfo {
                 xref_status: doc.xref_status().as_str().to_string(),
                 signature_state: info.signature_state.as_str().to_string(),
@@ -58,6 +66,11 @@ pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
                 encryption_state: info.encryption_state.as_str().to_string(),
                 encryption_filter: info.encryption_filter,
                 encryption_subfilter: info.encryption_subfilter,
+                encryption_revision: info.encryption_revision,
+                standard_revision: info
+                    .standard_revision
+                    .map(|revision| revision.as_str().to_string()),
+                encryption_dictionary_valid: info.encryption_dictionary_valid,
                 permission_raw: info.permissions.raw,
                 permission_printing: info.permissions.printing,
                 permission_modification: info.permissions.modification,
@@ -68,6 +81,199 @@ pub fn starpdf_get_security_info(handle: u32) -> Result<JsValue, JsValue> {
                 signed_mutation_state: info.signed_mutation_state.as_str().to_string(),
                 cryptographic_verification: "NOT_PERFORMED".to_string(),
                 document_id_valid: info.document_id_valid,
+                signed_revision_end: info.signed_revision_end.map(|offset| offset.to_string()),
+                later_revision_present: info.later_revision_present,
+                capabilities: WasmDocumentCapabilities {
+                    can_view: decision(capabilities.can_view),
+                    can_edit: decision(capabilities.can_edit),
+                    can_extract: decision(capabilities.can_extract),
+                    can_annotate: decision(capabilities.can_annotate),
+                    can_modify_pages: decision(capabilities.can_modify_pages),
+                },
+            };
+            serde_wasm_bindgen::to_value(&dto)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_authorize_credential(
+    handle: u32,
+    kind: &str,
+    password: &[u8],
+) -> Result<String, JsValue> {
+    let kind = match kind {
+        "USER_PASSWORD" => crate::security::CredentialKind::UserPassword,
+        "OWNER_PASSWORD" => crate::security::CredentialKind::OwnerPassword,
+        _ => return Err(JsValue::from_str("INVALID_CREDENTIAL_KIND")),
+    };
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let info = doc.security_info()?;
+            Ok(info
+                .authorize_credential(kind, password)
+                .err()
+                .map_or("AUTHORIZED", |refusal| refusal.as_str())
+                .to_string())
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+fn outline_dto(item: crate::compatibility::OutlineItem, pages: &[ObjectRef]) -> WasmOutlineItem {
+    use crate::syntax::object::PdfObject;
+    let destination = item.destination.or_else(|| {
+        item.action
+            .as_ref()
+            .and_then(PdfObject::as_dict)
+            .and_then(|dict| dict.get("D"))
+            .cloned()
+    });
+    let destination = destination.as_ref();
+    let page_index = destination
+        .and_then(PdfObject::as_array)
+        .and_then(|array| array.first())
+        .and_then(PdfObject::as_reference)
+        .and_then(|reference| pages.iter().position(|page| *page == reference));
+    let named_destination = destination.and_then(PdfObject::as_string_lossy);
+    let action_type = item
+        .action
+        .as_ref()
+        .and_then(PdfObject::as_dict)
+        .and_then(|dict| dict.get("S"))
+        .and_then(PdfObject::as_name)
+        .map(str::to_string);
+    WasmOutlineItem {
+        title: item.title,
+        page_index,
+        named_destination,
+        action_type,
+        children: item
+            .children
+            .into_iter()
+            .map(|child| outline_dto(child, pages))
+            .collect(),
+    }
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_outlines(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let pages = doc.page_refs()?;
+            let items: Vec<_> = doc
+                .outlines()?
+                .into_iter()
+                .map(|item| outline_dto(item, &pages))
+                .collect();
+            serde_wasm_bindgen::to_value(&items)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_list_embedded_files(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let files: Vec<_> = doc
+                .embedded_files()?
+                .into_iter()
+                .map(|entry| WasmEmbeddedFile {
+                    name: entry.name,
+                    file_spec_number: entry.file_spec.number.to_string(),
+                    file_spec_generation: entry.file_spec.generation,
+                    stream_number: entry.stream_ref.number.to_string(),
+                    stream_generation: entry.stream_ref.generation,
+                    size: entry.size,
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&files)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_extract_embedded_file(handle: u32, index: usize) -> Result<Vec<u8>, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let files = doc.embedded_files()?;
+            let entry = files.get(index).ok_or_else(|| {
+                crate::error::PdfError::InvalidOperation("Embedded file index out of range".into())
+            })?;
+            doc.extract_embedded_file(entry)
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_optional_content_groups(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let groups: Vec<_> = doc
+                .optional_content_groups()?
+                .into_iter()
+                .map(|group| WasmOptionalContentGroup {
+                    object_number: group.reference.number.to_string(),
+                    object_generation: group.reference.generation,
+                    name: group.name,
+                    default_visible: group.default_visible,
+                    toggle_supported: false,
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&groups)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_get_optional_content_memberships(handle: u32) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let memberships: Vec<_> = doc
+                .optional_content_memberships()?
+                .into_iter()
+                .map(|item| WasmOptionalContentMembership {
+                    object_number: item.reference.number.to_string(),
+                    object_generation: item.reference.generation,
+                    group_numbers: item
+                        .groups
+                        .into_iter()
+                        .map(|group| group.number.to_string())
+                        .collect(),
+                    policy: item.policy,
+                    default_visible: item.default_visible,
+                    toggle_supported: false,
+                })
+                .collect();
+            serde_wasm_bindgen::to_value(&memberships)
+                .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))
+        })
+        .map_err(to_js_error)
+}
+
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn starpdf_assess_signed_export(handle: u32, exported: &[u8]) -> Result<JsValue, JsValue> {
+    REGISTRY
+        .with_doc(handle, |doc| {
+            let info = doc.security_info()?;
+            let assessment =
+                crate::security::assess_signed_export(doc.source().as_bytes(), exported, &info);
+            let dto = WasmSignedExportAssessment {
+                signed_document: assessment.signed_document,
+                signed_bytes_preserved: assessment.signed_bytes_preserved,
+                mutation_appends_after_signed_range: assessment.mutation_appends_after_signed_range,
+                cryptographic_verification: assessment.cryptographic_verification.to_string(),
             };
             serde_wasm_bindgen::to_value(&dto)
                 .map_err(|error| crate::error::PdfError::InvalidOperation(error.to_string()))

@@ -22,6 +22,9 @@ pub struct WasmSecurityInfo {
     pub encryption_state: String,
     pub encryption_filter: Option<String>,
     pub encryption_subfilter: Option<String>,
+    pub encryption_revision: Option<i64>,
+    pub standard_revision: Option<String>,
+    pub encryption_dictionary_valid: bool,
     pub permission_raw: Option<i32>,
     pub permission_printing: Option<bool>,
     pub permission_modification: Option<bool>,
@@ -32,6 +35,77 @@ pub struct WasmSecurityInfo {
     pub signed_mutation_state: String,
     pub cryptographic_verification: String,
     pub document_id_valid: bool,
+    pub signed_revision_end: Option<String>,
+    pub later_revision_present: bool,
+    pub capabilities: WasmDocumentCapabilities,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmCapabilityDecision {
+    pub allowed: bool,
+    pub reason: String,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmDocumentCapabilities {
+    pub can_view: WasmCapabilityDecision,
+    pub can_edit: WasmCapabilityDecision,
+    pub can_extract: WasmCapabilityDecision,
+    pub can_annotate: WasmCapabilityDecision,
+    pub can_modify_pages: WasmCapabilityDecision,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmOutlineItem {
+    pub title: String,
+    pub page_index: Option<usize>,
+    pub named_destination: Option<String>,
+    pub action_type: Option<String>,
+    pub children: Vec<WasmOutlineItem>,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmEmbeddedFile {
+    pub name: String,
+    pub file_spec_number: String,
+    pub file_spec_generation: u16,
+    pub stream_number: String,
+    pub stream_generation: u16,
+    pub size: usize,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmOptionalContentGroup {
+    pub object_number: String,
+    pub object_generation: u16,
+    pub name: Option<String>,
+    pub default_visible: Option<bool>,
+    pub toggle_supported: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmOptionalContentMembership {
+    pub object_number: String,
+    pub object_generation: u16,
+    pub group_numbers: Vec<String>,
+    pub policy: Option<String>,
+    pub default_visible: Option<bool>,
+    pub toggle_supported: bool,
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmSignedExportAssessment {
+    pub signed_document: bool,
+    pub signed_bytes_preserved: bool,
+    pub mutation_appends_after_signed_range: bool,
+    pub cryptographic_verification: String,
 }
 
 #[cfg(feature = "wasm")]

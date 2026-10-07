@@ -1,6 +1,31 @@
 /* @ts-self-types="./starpdf.d.ts" */
 
 /**
+ * @param {any} value
+ * @returns {any}
+ */
+export function contract_round_trip_render_node_id(value) {
+    const ret = wasm.contract_round_trip_render_node_id(value);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * Isolated WASM contract seam; does not open or mutate a production document.
+ * @param {any} value
+ * @returns {any}
+ */
+export function contract_round_trip_star_node_id(value) {
+    const ret = wasm.contract_round_trip_star_node_id(value);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {number} handle
  * @param {number} page_index
  * @param {any} annotation_val
@@ -75,6 +100,50 @@ export function starpdf_apply_text_style(handle, page_index, span_id, patch_valu
         throw takeFromExternrefTable0(ret[1]);
     }
     return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {Uint8Array} exported
+ * @returns {any}
+ */
+export function starpdf_assess_signed_export(handle, exported) {
+    const ptr0 = passArray8ToWasm0(exported, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.starpdf_assess_signed_export(handle, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @param {string} kind
+ * @param {Uint8Array} password
+ * @returns {string}
+ */
+export function starpdf_authorize_credential(handle, kind, password) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.starpdf_authorize_credential(handle, ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
 }
 
 /**
@@ -215,6 +284,21 @@ export function starpdf_extract_all_text(handle) {
 
 /**
  * @param {number} handle
+ * @param {number} index
+ * @returns {Uint8Array}
+ */
+export function starpdf_extract_embedded_file(handle, index) {
+    const ret = wasm.starpdf_extract_embedded_file(handle, index);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * @param {number} handle
  * @param {number} page_index
  * @returns {any}
  */
@@ -326,6 +410,42 @@ export function starpdf_get_info(handle) {
 
 /**
  * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_get_optional_content_groups(handle) {
+    const ret = wasm.starpdf_get_optional_content_groups(handle);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_get_optional_content_memberships(handle) {
+    const ret = wasm.starpdf_get_optional_content_memberships(handle);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_get_outlines(handle) {
+    const ret = wasm.starpdf_get_outlines(handle);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
  * @returns {number}
  */
 export function starpdf_get_page_count(handle) {
@@ -411,6 +531,18 @@ export function starpdf_inspect_text_style(handle, page_index, span_id) {
     const ptr0 = passStringToWasm0(span_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.starpdf_inspect_text_style(handle, page_index, ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * @param {number} handle
+ * @returns {any}
+ */
+export function starpdf_list_embedded_files(handle) {
+    const ret = wasm.starpdf_list_embedded_files(handle);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }
@@ -1025,12 +1157,17 @@ function __wbg_get_imports() {
             const ret = arg0;
             return ret;
         },
-        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000002: function(arg0) {
+            // Cast intrinsic for `I64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_cast_0000000000000003: function(arg0) {
+        __wbindgen_cast_0000000000000004: function(arg0) {
             // Cast intrinsic for `U64 -> Externref`.
             const ret = BigInt.asUintN(64, arg0);
             return ret;

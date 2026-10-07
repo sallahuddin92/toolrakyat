@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 miniz_oxide = "0.9.1"
 sha2 = "0.10.9"
-wasm-bindgen = { version = "0.2.100", optional = true }
+wasm-bindgen = { version = "=0.2.127", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 unicode-bidi = "0.3.18"

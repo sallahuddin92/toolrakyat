@@ -38,6 +38,7 @@
 
 pub mod annotation;
 pub mod appearance;
+pub mod compatibility;
 pub mod content;
 pub mod document;
 pub mod error;

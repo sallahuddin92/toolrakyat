@@ -105,6 +105,15 @@ export interface StarExecutionState {
   readonly pending_delta: DocumentDelta | null;
   readonly evidence_records: Entries<StarNodeId, EvidenceRecord>;
 }
+/** Effective decisions require both structural evidence and document permissions. */
+export interface DocumentCapabilityDecision { readonly allowed: boolean; readonly reason: string }
+export interface DocumentCapabilities {
+  readonly can_view: DocumentCapabilityDecision;
+  readonly can_edit: DocumentCapabilityDecision;
+  readonly can_extract: DocumentCapabilityDecision;
+  readonly can_annotate: DocumentCapabilityDecision;
+  readonly can_modify_pages: DocumentCapabilityDecision;
+}
 export interface RendererDocumentState { readonly document_id: string; readonly revision: Revision }
 export interface CoordinateConfig {
   readonly media_box: PdfBox;

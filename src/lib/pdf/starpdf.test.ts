@@ -32,6 +32,8 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(security.signature_count).toBe(1);
     expect(security.cryptographic_verification).toBe("NOT_PERFORMED");
     expect(security.mutation_allowed).toBe(true);
+    expect(security.capabilities.can_modify_pages.allowed).toBe(false);
+    expect(security.signed_revision_end).toBeTruthy();
     await doc.close();
   });
 
@@ -40,6 +42,10 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     const security = await doc.getSecurityInfo();
     expect(security.encryption_state).toBe("STANDARD_SECURITY_DETECTED");
     expect(security.mutation_allowed).toBe(false);
+    expect(security.standard_revision).toBe("R4");
+    expect(security.encryption_dictionary_valid).toBe(false);
+    expect(security.capabilities.can_view.allowed).toBe(false);
+    expect(await doc.authorizeCredential("USER_PASSWORD", new TextEncoder().encode("wrong"))).toBe("MALFORMED_ENCRYPTION");
     await doc.addAnnotation(0, {
       subtype: "Square",
       rect: [10, 10, 20, 20],
@@ -56,6 +62,11 @@ describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {
     expect(security.signature_state).toBe("UNSIGNED");
     expect(security.encryption_state).toBe("NOT_ENCRYPTED");
     expect(security.mutation_allowed).toBe(true);
+    expect(security.capabilities.can_view.allowed).toBe(true);
+    expect(await doc.getOutlines()).toEqual([]);
+    expect(await doc.listEmbeddedFiles()).toEqual([]);
+    expect(await doc.getOptionalContentGroups()).toEqual([]);
+    expect(await doc.getOptionalContentMemberships()).toEqual([]);
     await doc.close();
   });
 

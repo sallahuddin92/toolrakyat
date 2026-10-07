@@ -42,6 +42,9 @@ export interface StarPdfSecurityInfo {
     | "MALFORMED_ENCRYPTION_DICTIONARY";
   encryption_filter?: string;
   encryption_subfilter?: string;
+  encryption_revision?: number;
+  standard_revision?: "R2" | "R3" | "R4" | "R5" | "R6" | "UNSUPPORTED";
+  encryption_dictionary_valid: boolean;
   permission_raw?: number;
   permission_printing?: boolean;
   permission_modification?: boolean;
@@ -57,6 +60,59 @@ export interface StarPdfSecurityInfo {
     | "MUTATION_REFUSED";
   cryptographic_verification: "NOT_PERFORMED";
   document_id_valid: boolean;
+  signed_revision_end?: string;
+  later_revision_present: boolean;
+  capabilities: StarPdfDocumentCapabilities;
+}
+
+export interface StarPdfCapabilityDecision { allowed: boolean; reason: string }
+export interface StarPdfDocumentCapabilities {
+  can_view: StarPdfCapabilityDecision;
+  can_edit: StarPdfCapabilityDecision;
+  can_extract: StarPdfCapabilityDecision;
+  can_annotate: StarPdfCapabilityDecision;
+  can_modify_pages: StarPdfCapabilityDecision;
+}
+
+export interface StarPdfOutlineItem {
+  title: string;
+  page_index: number | null;
+  named_destination: string | null;
+  action_type: string | null;
+  children: StarPdfOutlineItem[];
+}
+
+export interface StarPdfEmbeddedFile {
+  name: string;
+  file_spec_number: string;
+  file_spec_generation: number;
+  stream_number: string;
+  stream_generation: number;
+  size: number;
+}
+
+export interface StarPdfOptionalContentGroup {
+  object_number: string;
+  object_generation: number;
+  name: string | null;
+  default_visible: boolean | null;
+  toggle_supported: false;
+}
+
+export interface StarPdfOptionalContentMembership {
+  object_number: string;
+  object_generation: number;
+  group_numbers: string[];
+  policy: string | null;
+  default_visible: boolean | null;
+  toggle_supported: false;
+}
+
+export interface StarPdfSignedExportAssessment {
+  signed_document: boolean;
+  signed_bytes_preserved: boolean;
+  mutation_appends_after_signed_range: boolean;
+  cryptographic_verification: "NOT_PERFORMED";
 }
 
 export interface StarPdfTextSpan {

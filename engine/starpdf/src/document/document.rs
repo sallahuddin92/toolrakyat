@@ -205,6 +205,7 @@ impl<'a> PdfDocument<'a> {
         &mut self,
         page_index: usize,
     ) -> PdfResult<crate::text::span::PageText> {
+        self.require_unencrypted_inspection()?;
         let page_dict = self.page_dict(page_index)?;
         let resources =
             crate::font::resource::PageResources::resolve_for_page(&page_dict, &mut self.store)?;
@@ -276,6 +277,7 @@ impl<'a> PdfDocument<'a> {
 
     /// Parses and returns the document's AcroForm structure, if present.
     pub fn acroform(&mut self) -> PdfResult<Option<crate::forms::AcroForm>> {
+        self.require_unencrypted_inspection()?;
         let catalog_obj = self.store.resolve(self.catalog_ref)?.clone();
         let catalog_dict = catalog_obj
             .as_dict()
@@ -292,6 +294,7 @@ impl<'a> PdfDocument<'a> {
 
     /// Returns all interactive form fields detected in the AcroForm hierarchy.
     pub fn form_fields(&mut self) -> PdfResult<Vec<crate::forms::FormField>> {
+        self.require_unencrypted_inspection()?;
         match self.acroform()? {
             Some(af) => Ok(af.fields),
             None => Ok(Vec::new()),
@@ -303,6 +306,7 @@ impl<'a> PdfDocument<'a> {
         &mut self,
         page_index: usize,
     ) -> PdfResult<Vec<crate::annotation::Annotation>> {
+        self.require_unencrypted_inspection()?;
         let page_dict = self.page_dict(page_index)?;
         let mut parser = crate::annotation::AnnotationParser::new(&mut self.store);
         parser.parse_page_annotations(&page_dict, page_index)
@@ -371,16 +375,99 @@ impl<'a> PdfDocument<'a> {
         crate::security::DocumentSecurityInfo::inspect(&mut self.store, self.source.len())
     }
 
+    fn catalog_dict(&mut self) -> PdfResult<BTreeMap<String, PdfObject>> {
+        self.store
+            .resolve(self.catalog_ref)?
+            .as_dict()
+            .cloned()
+            .ok_or_else(|| PdfError::InvalidSyntax("Catalog is not a dictionary".into()))
+    }
+
+    pub fn outlines(&mut self) -> PdfResult<Vec<crate::compatibility::OutlineItem>> {
+        self.require_unencrypted_inspection()?;
+        let catalog = self.catalog_dict()?;
+        crate::compatibility::outlines(&mut self.store, &catalog)
+    }
+
+    pub fn embedded_files(&mut self) -> PdfResult<Vec<crate::compatibility::EmbeddedFile>> {
+        self.require_unencrypted_inspection()?;
+        let catalog = self.catalog_dict()?;
+        crate::compatibility::embedded_files(&mut self.store, &catalog)
+    }
+
+    pub fn extract_embedded_file(
+        &mut self,
+        entry: &crate::compatibility::EmbeddedFile,
+    ) -> PdfResult<Vec<u8>> {
+        let entries = self.embedded_files()?;
+        if !entries.contains(entry) {
+            return Err(PdfError::InvalidOperation(
+                "Embedded file entry is not in this document".into(),
+            ));
+        }
+        crate::compatibility::extract_embedded_file(&mut self.store, entry)
+    }
+
+    pub fn optional_content_groups(
+        &mut self,
+    ) -> PdfResult<Vec<crate::compatibility::OptionalContentGroup>> {
+        self.require_unencrypted_inspection()?;
+        let catalog = self.catalog_dict()?;
+        crate::compatibility::optional_content_groups(&mut self.store, &catalog)
+    }
+
+    pub fn optional_content_memberships(
+        &mut self,
+    ) -> PdfResult<Vec<crate::compatibility::OptionalContentMembership>> {
+        let groups = self.optional_content_groups()?;
+        crate::compatibility::optional_content_memberships(&mut self.store, &groups)
+    }
+
+    fn require_unencrypted_inspection(&mut self) -> PdfResult<()> {
+        let security = self.security_info()?;
+        if security.encryption_state != crate::security::EncryptionState::NotEncrypted {
+            return Err(PdfError::EncryptedDocumentUnsupported(
+                "Compatibility inspection requires authorized decryption".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_mutation_allowed(&mut self) -> PdfResult<()> {
+        let security = self.security_info()?;
+        if security.encryption_state != crate::security::EncryptionState::NotEncrypted {
+            return Err(PdfError::EncryptedDocumentUnsupported(
+                security.encryption_state.as_str().to_string(),
+            ));
+        }
+        if !security.mutation_allowed {
+            return Err(PdfError::SignatureMutationUnsupported(
+                security
+                    .mutation_reason_code
+                    .unwrap_or_else(|| "Security mutation refused".into()),
+            ));
+        }
+        Ok(())
+    }
+
     /// Writes an incremental update based on a prepared MutationPlan.
     pub fn export_incremental(
         &mut self,
         plan: &crate::mutation::MutationPlan,
     ) -> PdfResult<Vec<u8>> {
+        let security = self.security_info()?;
+        if !security.mutation_allowed {
+            return Err(PdfError::InvalidOperation(
+                security
+                    .mutation_reason_code
+                    .unwrap_or_else(|| "SECURITY_MUTATION_REFUSED".into()),
+            ));
+        }
         let prev_startxref = self.store.xref().startxref_offset as usize;
         let trailer_dict = self.store.trailer().clone();
         let source_bytes = self.source.as_bytes();
 
-        if self.xref_status() == XrefStatus::RecoveredMalformedPrev {
+        let output = if self.xref_status() == XrefStatus::RecoveredMalformedPrev {
             self.validate_recovered_compressed_entries(&plan.modified_objects)?;
             crate::writer::incremental::IncrementalWriter::write_recovered_update(
                 source_bytes,
@@ -395,7 +482,15 @@ impl<'a> PdfDocument<'a> {
                 prev_startxref,
                 &trailer_dict,
             )
+        }?;
+        if security.signature_state != crate::security::SignatureState::Unsigned
+            && (!output.starts_with(source_bytes) || output.len() <= source_bytes.len())
+        {
+            return Err(PdfError::SignatureMutationUnsupported(
+                "Existing signed byte range was not preserved by incremental export".into(),
+            ));
         }
+        Ok(output)
     }
 
     fn validate_recovered_compressed_entries(
@@ -472,6 +567,7 @@ impl<'a> PdfDocument<'a> {
         target: &crate::mutation::text_edit::TextEditTarget,
         replacement: &str,
     ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.require_mutation_allowed()?;
         let plan = self.plan_text_replacement(page_index, target, replacement, None)?;
         crate::font::planner::TextPlanner::apply(self, &plan)
     }
@@ -500,6 +596,7 @@ impl<'a> PdfDocument<'a> {
         &mut self,
         plan: &crate::font::TextStylePlan,
     ) -> PdfResult<crate::mutation::MutationPlan> {
+        self.require_mutation_allowed()?;
         crate::font::TextStylePlanner::apply_native(self, plan)
     }
 

@@ -1,6 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export function contract_round_trip_render_node_id(value: any): any;
+
+/**
+ * Isolated WASM contract seam; does not open or mutate a production document.
+ */
+export function contract_round_trip_star_node_id(value: any): any;
+
 export function starpdf_add_annotation(handle: number, page_index: number, annotation_val: any): boolean;
 
 export function starpdf_add_image(handle: number, page_index: number, image_bytes: Uint8Array, x: number, y: number, width: number, height: number): any;
@@ -10,6 +17,10 @@ export function starpdf_add_line(handle: number, input_val: any): any;
 export function starpdf_add_rectangle(handle: number, input_val: any): any;
 
 export function starpdf_apply_text_style(handle: number, page_index: number, span_id: string, patch_value: any): any;
+
+export function starpdf_assess_signed_export(handle: number, exported: Uint8Array): any;
+
+export function starpdf_authorize_credential(handle: number, kind: string, password: Uint8Array): string;
 
 export function starpdf_close(handle: number): boolean;
 
@@ -31,6 +42,8 @@ export function starpdf_export_incremental(handle: number): Uint8Array;
 
 export function starpdf_extract_all_text(handle: number): any;
 
+export function starpdf_extract_embedded_file(handle: number, index: number): Uint8Array;
+
 export function starpdf_extract_page_text(handle: number, page_index: number): any;
 
 export function starpdf_extract_pages(handle: number, page_indices: any): Uint8Array;
@@ -45,6 +58,12 @@ export function starpdf_get_glyph_mapping_quality(handle: number): string;
 
 export function starpdf_get_info(handle: number): any;
 
+export function starpdf_get_optional_content_groups(handle: number): any;
+
+export function starpdf_get_optional_content_memberships(handle: number): any;
+
+export function starpdf_get_outlines(handle: number): any;
+
 export function starpdf_get_page_count(handle: number): number;
 
 export function starpdf_get_security_info(handle: number): any;
@@ -56,6 +75,8 @@ export function starpdf_insert_blank_page(handle: number, page_index: number, wi
 export function starpdf_insert_imported_page(handle: number, imported_bytes: Uint8Array, imported_page_index: number, insert_at: number): Uint8Array;
 
 export function starpdf_inspect_text_style(handle: number, page_index: number, span_id: string): any;
+
+export function starpdf_list_embedded_files(handle: number): any;
 
 export function starpdf_merge_documents(documents: any): Uint8Array;
 
@@ -118,6 +139,8 @@ export interface InitOutput {
     readonly starpdf_add_line: (a: number, b: any) => [number, number, number];
     readonly starpdf_add_rectangle: (a: number, b: any) => [number, number, number];
     readonly starpdf_apply_text_style: (a: number, b: number, c: number, d: number, e: any) => [number, number, number];
+    readonly starpdf_assess_signed_export: (a: number, b: number, c: number) => [number, number, number];
+    readonly starpdf_authorize_credential: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_close: (a: number) => [number, number, number];
     readonly starpdf_create_minimal_pdf: (a: number, b: number) => [number, number, number, number];
     readonly starpdf_delete_graphic: (a: number, b: any) => [number, number, number];
@@ -128,6 +151,7 @@ export interface InitOutput {
     readonly starpdf_enumerate_images: (a: number, b: number) => [number, number, number];
     readonly starpdf_export_incremental: (a: number) => [number, number, number, number];
     readonly starpdf_extract_all_text: (a: number) => [number, number, number];
+    readonly starpdf_extract_embedded_file: (a: number, b: number) => [number, number, number, number];
     readonly starpdf_extract_page_text: (a: number, b: number) => [number, number, number];
     readonly starpdf_extract_pages: (a: number, b: any) => [number, number, number, number];
     readonly starpdf_get_annotations: (a: number, b: number) => [number, number, number];
@@ -135,12 +159,16 @@ export interface InitOutput {
     readonly starpdf_get_form_fields: (a: number) => [number, number, number];
     readonly starpdf_get_glyph_mapping_quality: (a: number) => [number, number, number, number];
     readonly starpdf_get_info: (a: number) => [number, number, number];
+    readonly starpdf_get_optional_content_groups: (a: number) => [number, number, number];
+    readonly starpdf_get_optional_content_memberships: (a: number) => [number, number, number];
+    readonly starpdf_get_outlines: (a: number) => [number, number, number];
     readonly starpdf_get_page_count: (a: number) => [number, number, number];
     readonly starpdf_get_security_info: (a: number) => [number, number, number];
     readonly starpdf_get_text_editability: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly starpdf_insert_blank_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_insert_imported_page: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly starpdf_inspect_text_style: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly starpdf_list_embedded_files: (a: number) => [number, number, number];
     readonly starpdf_merge_documents: (a: any) => [number, number, number, number];
     readonly starpdf_merge_selected: (a: any, b: any) => [number, number, number, number];
     readonly starpdf_move_page: (a: number, b: number, c: number) => [number, number, number, number];
@@ -167,6 +195,8 @@ export interface InitOutput {
     readonly starpdf_update_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly starpdf_validate: (a: number) => [number, number, number];
     readonly starpdf_version: () => [number, number];
+    readonly contract_round_trip_render_node_id: (a: any) => [number, number, number];
+    readonly contract_round_trip_star_node_id: (a: any) => [number, number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

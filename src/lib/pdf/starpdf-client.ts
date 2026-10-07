@@ -18,6 +18,11 @@ import type {
   StarPdfSearchOptions,
   StarPdfSearchResult,
   StarPdfSecurityInfo,
+  StarPdfOutlineItem,
+  StarPdfEmbeddedFile,
+  StarPdfOptionalContentGroup,
+  StarPdfOptionalContentMembership,
+  StarPdfSignedExportAssessment,
   StarPdfTextSpan,
   StarPdfComputedTextStyle,
   StarPdfTextStylePatch,
@@ -47,6 +52,13 @@ import initWasm, {
   starpdf_get_info,
   starpdf_get_page_count,
   starpdf_get_security_info,
+  starpdf_authorize_credential,
+  starpdf_get_outlines,
+  starpdf_list_embedded_files,
+  starpdf_extract_embedded_file,
+  starpdf_get_optional_content_groups,
+  starpdf_get_optional_content_memberships,
+  starpdf_assess_signed_export,
   starpdf_open,
   starpdf_register_font_asset,
   starpdf_insert_blank_page,
@@ -237,6 +249,48 @@ export class StarPdfDocumentHandle {
     this.assertOpen();
     await ensureWasmInitialized();
     return starpdf_get_security_info(this._handle) as StarPdfSecurityInfo;
+  }
+
+  async authorizeCredential(kind: "USER_PASSWORD" | "OWNER_PASSWORD", password: Uint8Array): Promise<string> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_authorize_credential(this._handle, kind, password);
+  }
+
+  async getOutlines(): Promise<StarPdfOutlineItem[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_outlines(this._handle) as StarPdfOutlineItem[];
+  }
+
+  async listEmbeddedFiles(): Promise<StarPdfEmbeddedFile[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_list_embedded_files(this._handle) as StarPdfEmbeddedFile[];
+  }
+
+  async extractEmbeddedFile(index: number): Promise<Uint8Array> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_extract_embedded_file(this._handle, index);
+  }
+
+  async getOptionalContentGroups(): Promise<StarPdfOptionalContentGroup[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_optional_content_groups(this._handle) as StarPdfOptionalContentGroup[];
+  }
+
+  async getOptionalContentMemberships(): Promise<StarPdfOptionalContentMembership[]> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_get_optional_content_memberships(this._handle) as StarPdfOptionalContentMembership[];
+  }
+
+  async assessSignedExport(exported: Uint8Array): Promise<StarPdfSignedExportAssessment> {
+    this.assertOpen();
+    await ensureWasmInitialized();
+    return starpdf_assess_signed_export(this._handle, exported) as StarPdfSignedExportAssessment;
   }
 
   async extractPageText(pageIndex: number): Promise<StarPdfPageText> {

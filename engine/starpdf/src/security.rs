@@ -38,6 +38,58 @@ pub enum EncryptionState {
     MalformedEncryptionDictionary,
 }
 
+/// Structural recognition is distinct from a qualified decryptor. No revision is
+/// currently authorized for opening by this engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StandardRevision {
+    R2,
+    R3,
+    R4,
+    R5,
+    R6,
+    Unsupported,
+}
+
+impl StandardRevision {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::R2 => "R2",
+            Self::R3 => "R3",
+            Self::R4 => "R4",
+            Self::R5 => "R5",
+            Self::R6 => "R6",
+            Self::Unsupported => "UNSUPPORTED",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialKind {
+    UserPassword,
+    OwnerPassword,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialRefusal {
+    NoEncryption,
+    MalformedEncryption,
+    UnsupportedHandler,
+    UnsupportedRevision,
+    DecryptionUnavailable,
+}
+
+impl CredentialRefusal {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NoEncryption => "NO_ENCRYPTION",
+            Self::MalformedEncryption => "MALFORMED_ENCRYPTION",
+            Self::UnsupportedHandler => "UNSUPPORTED_HANDLER",
+            Self::UnsupportedRevision => "UNSUPPORTED_REVISION",
+            Self::DecryptionUnavailable => "DECRYPTION_UNAVAILABLE",
+        }
+    }
+}
+
 impl EncryptionState {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -96,12 +148,140 @@ pub struct DocumentSecurityInfo {
     pub encryption_subfilter: Option<String>,
     pub encryption_version: Option<i64>,
     pub encryption_revision: Option<i64>,
+    pub standard_revision: Option<StandardRevision>,
+    pub encryption_dictionary_valid: bool,
     pub encryption_length: Option<i64>,
     pub permissions: EncryptionPermissions,
     pub mutation_allowed: bool,
     pub mutation_reason_code: Option<String>,
     pub signed_mutation_state: SignedMutationState,
     pub document_id_valid: bool,
+    /// Greatest end offset among signed ByteRange segments.
+    pub signed_revision_end: Option<u64>,
+    /// True when a known cross-reference revision begins beyond the signed range.
+    pub later_revision_present: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityDecision {
+    pub allowed: bool,
+    pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentCapabilities {
+    pub can_view: CapabilityDecision,
+    pub can_edit: CapabilityDecision,
+    pub can_extract: CapabilityDecision,
+    pub can_annotate: CapabilityDecision,
+    pub can_modify_pages: CapabilityDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedExportAssessment {
+    pub signed_document: bool,
+    pub signed_bytes_preserved: bool,
+    pub mutation_appends_after_signed_range: bool,
+    pub cryptographic_verification: &'static str,
+}
+
+pub fn assess_signed_export(
+    original: &[u8],
+    exported: &[u8],
+    info: &DocumentSecurityInfo,
+) -> SignedExportAssessment {
+    let signed_document = info.signature_state != SignatureState::Unsigned;
+    let ranges_valid =
+        info.signature_state == SignatureState::SignedWithByteRange && !info.byte_ranges.is_empty();
+    let signed_bytes_preserved = ranges_valid
+        && info.byte_ranges.iter().flatten().all(|segment| {
+            let Ok(start) = usize::try_from(segment.offset) else {
+                return false;
+            };
+            let Ok(length) = usize::try_from(segment.length) else {
+                return false;
+            };
+            let Some(end) = start.checked_add(length) else {
+                return false;
+            };
+            original
+                .get(start..end)
+                .is_some_and(|bytes| exported.get(start..end) == Some(bytes))
+        });
+    let mutation_appends_after_signed_range = signed_bytes_preserved
+        && exported.len() > original.len()
+        && exported.starts_with(original)
+        && info
+            .signed_revision_end
+            .is_some_and(|end| end <= original.len() as u64);
+    SignedExportAssessment {
+        signed_document,
+        signed_bytes_preserved,
+        mutation_appends_after_signed_range,
+        cryptographic_verification: "NOT_PERFORMED",
+    }
+}
+
+impl DocumentSecurityInfo {
+    pub fn capabilities(&self, evidence_verified: bool) -> DocumentCapabilities {
+        let allowed = |reason| CapabilityDecision {
+            allowed: true,
+            reason,
+        };
+        let denied = |reason| CapabilityDecision {
+            allowed: false,
+            reason,
+        };
+        if !evidence_verified {
+            let decision = denied("INSUFFICIENT_EVIDENCE");
+            return DocumentCapabilities {
+                can_view: decision.clone(),
+                can_edit: decision.clone(),
+                can_extract: decision.clone(),
+                can_annotate: decision.clone(),
+                can_modify_pages: decision,
+            };
+        }
+        let decrypted = self.encryption_state == EncryptionState::NotEncrypted;
+        let view = if decrypted {
+            allowed("UNENCRYPTED_VERIFIED")
+        } else {
+            denied("CREDENTIAL_REQUIRED_OR_DECRYPTION_UNAVAILABLE")
+        };
+        let extract = if self.permissions.copying == Some(false) {
+            denied("COPY_PERMISSION_DENIED")
+        } else if decrypted {
+            allowed("UNENCRYPTED_VERIFIED")
+        } else {
+            denied("CREDENTIAL_REQUIRED_OR_DECRYPTION_UNAVAILABLE")
+        };
+        let mutation = if self.permissions.modification == Some(false) {
+            denied("MODIFICATION_PERMISSION_DENIED")
+        } else if !decrypted {
+            denied("CREDENTIAL_REQUIRED_OR_DECRYPTION_UNAVAILABLE")
+        } else if self.mutation_allowed {
+            allowed("UNENCRYPTED_VERIFIED")
+        } else {
+            denied("MALFORMED_SIGNATURE_STRUCTURE")
+        };
+        let annotation = if self.permissions.annotation_and_forms == Some(false) {
+            denied("ANNOTATION_PERMISSION_DENIED")
+        } else {
+            mutation.clone()
+        };
+        let pages = if self.signature_state != SignatureState::Unsigned {
+            denied("SIGNED_PAGE_MUTATION_UNSUPPORTED")
+        } else {
+            mutation.clone()
+        };
+        DocumentCapabilities {
+            can_view: view,
+            can_edit: mutation.clone(),
+            can_extract: extract,
+            can_annotate: annotation,
+            can_modify_pages: pages,
+        }
+    }
 }
 
 impl DocumentSecurityInfo {
@@ -117,6 +297,90 @@ impl DocumentSecurityInfo {
         ) = inspect_encryption(store)?;
         let (signature_state, signature_count, byte_ranges) = inspect_signatures(store, file_len)?;
         let document_id_valid = valid_document_id(store.trailer().get("ID"));
+        let standard_revision = if encryption_state == EncryptionState::StandardSecurityDetected {
+            encryption_revision.map(|revision| match revision {
+                2 => StandardRevision::R2,
+                3 => StandardRevision::R3,
+                4 => StandardRevision::R4,
+                5 => StandardRevision::R5,
+                6 => StandardRevision::R6,
+                _ => StandardRevision::Unsupported,
+            })
+        } else {
+            None
+        };
+        let encryption_dictionary_valid =
+            if encryption_state == EncryptionState::StandardSecurityDetected {
+                let encrypt = store.trailer().get("Encrypt").cloned();
+                encrypt
+                    .and_then(|value| store.resolve_object(&value).ok())
+                    .and_then(|value| value.as_dict().cloned())
+                    .is_some_and(|dict| {
+                        let expected_length = match standard_revision {
+                            Some(StandardRevision::R2) => 40,
+                            Some(StandardRevision::R3 | StandardRevision::R4) => 128,
+                            Some(StandardRevision::R5 | StandardRevision::R6) => 256,
+                            _ => return false,
+                        };
+                        let key_length = encryption_length.unwrap_or(expected_length);
+                        let owner_len = dict
+                            .get("O")
+                            .and_then(PdfObject::as_bytes)
+                            .map_or(0, <[u8]>::len);
+                        let user_len = dict
+                            .get("U")
+                            .and_then(PdfObject::as_bytes)
+                            .map_or(0, <[u8]>::len);
+                        let version_matches = matches!(
+                            (standard_revision, encryption_version),
+                            (Some(StandardRevision::R2), Some(1))
+                                | (Some(StandardRevision::R3), Some(2))
+                                | (Some(StandardRevision::R4), Some(4))
+                                | (Some(StandardRevision::R5 | StandardRevision::R6), Some(5))
+                        );
+                        let modern_entries = if matches!(
+                            standard_revision,
+                            Some(StandardRevision::R5 | StandardRevision::R6)
+                        ) {
+                            owner_len >= 48
+                                && user_len >= 48
+                                && dict
+                                    .get("OE")
+                                    .and_then(PdfObject::as_bytes)
+                                    .is_some_and(|value| value.len() == 32)
+                                && dict
+                                    .get("UE")
+                                    .and_then(PdfObject::as_bytes)
+                                    .is_some_and(|value| value.len() == 32)
+                                && dict
+                                    .get("Perms")
+                                    .and_then(PdfObject::as_bytes)
+                                    .is_some_and(|value| value.len() == 16)
+                        } else {
+                            owner_len >= 32 && user_len >= 32
+                        };
+                        permissions.raw.is_some()
+                            && document_id_valid
+                            && store.trailer().contains_key("ID")
+                            && version_matches
+                            && key_length == expected_length
+                            && modern_entries
+                    })
+            } else {
+                encryption_state == EncryptionState::NotEncrypted
+            };
+        let signed_revision_end = byte_ranges
+            .iter()
+            .flat_map(|range| range.iter())
+            .filter_map(|segment| segment.offset.checked_add(segment.length))
+            .max();
+        let later_revision_present = signed_revision_end.is_some_and(|end| {
+            store
+                .xref()
+                .revisions
+                .iter()
+                .any(|revision| revision.xref_offset >= end)
+        });
         let (mutation_allowed, mutation_reason_code, signed_mutation_state) =
             if encryption_state != EncryptionState::NotEncrypted {
                 (
@@ -148,12 +412,41 @@ impl DocumentSecurityInfo {
             encryption_subfilter,
             encryption_version,
             encryption_revision,
+            standard_revision,
+            encryption_dictionary_valid,
             encryption_length,
             permissions,
             mutation_allowed,
             mutation_reason_code,
             signed_mutation_state,
             document_id_valid,
+            signed_revision_end,
+            later_revision_present,
+        })
+    }
+
+    /// Accepts the credential type without storing or logging the secret. A
+    /// decryptor must be qualified before any password can grant access.
+    pub fn authorize_credential(
+        &self,
+        _kind: CredentialKind,
+        _password: &[u8],
+    ) -> Result<(), CredentialRefusal> {
+        Err(match self.encryption_state {
+            EncryptionState::NotEncrypted => CredentialRefusal::NoEncryption,
+            EncryptionState::MalformedEncryptionDictionary => {
+                CredentialRefusal::MalformedEncryption
+            }
+            EncryptionState::StandardSecurityDetected if !self.encryption_dictionary_valid => {
+                CredentialRefusal::MalformedEncryption
+            }
+            EncryptionState::StandardSecurityDetected
+                if self.standard_revision == Some(StandardRevision::Unsupported) =>
+            {
+                CredentialRefusal::UnsupportedRevision
+            }
+            EncryptionState::StandardSecurityDetected => CredentialRefusal::DecryptionUnavailable,
+            _ => CredentialRefusal::UnsupportedHandler,
         })
     }
 }
