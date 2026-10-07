@@ -1,0 +1,657 @@
+{
+  "schema_version": 1,
+  "base": "2438ef940d5f5ba31aa9f3669318cebd6967f733",
+  "categories": [
+    "parser",
+    "xref",
+    "xref-stream",
+    "object-stream",
+    "recovery",
+    "text",
+    "fonts",
+    "multilingual",
+    "images",
+    "annotations",
+    "forms",
+    "signatures",
+    "encryption",
+    "render",
+    "mutation",
+    "roundtrip",
+    "malformed"
+  ],
+  "fixtures": [
+    {
+      "id": "pdfkit-choice-radio",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-choice-radio.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "c1ea2ad0e0020ef2d3bed1703f6d7c8727387c4826890b5583c6693e5acd3f11",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "pdfkit-markup-freetext",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-markup-freetext.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "3be9bcf9067170c0189effaf2823a3294229a085fa636d1b632b725fa19b6e99",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "pdfkit-rotated-widget",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-rotated-widget.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "4425b6cbb16bcdc797efbc8b9b9cf4bc94b095dbdb4dea9f24cd442ed1e0bc04",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "pdfkit-shapes-ink-link",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-shapes-ink-link.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "e3fe694ca1148dd499bc27dd30e10ac583d4b93432668fd9069e7b2d26a4807e",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "pdfkit-text-checkbox",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "986bbaa5070a0e43fe9189e1c1ba4ca198e1544ce94d91a1a143bb95bb3c1185",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": true
+    },
+    {
+      "id": "pdflib-complete-form",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdflib-complete-form.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "8df9f107e98463856083f9d528608c94dedba55399833d4e7eb02a338e92bceb",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": true
+    },
+    {
+      "id": "pdflib-inherited-field",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdflib-inherited-field.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "17bf90f7a31179b203607019e45919d43940117b70518f3b0a0acac3eeaa65ce",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": true
+    },
+    {
+      "id": "pdflib-needappearances-ap-rd",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdflib-needappearances-ap-rd.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "4cc54d8062471a130353ed949b2dfa364c248f444f33d68e249868aba45bed25",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "pdflib-starpdf-two-revisions",
+      "path": "engine/starpdf/tests/fixtures/v0_10_compat/pdflib-starpdf-two-revisions.pdf",
+      "categories": [
+        "annotations",
+        "forms",
+        "object-stream",
+        "roundtrip",
+        "xref-stream"
+      ],
+      "sha256": "a3217fdf935c79ed690de7f1d57f8aadb58094f758e71fe6fa89c24012f42e52",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_10_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-ambiguous-orphan-radio",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-ambiguous-orphan-radio.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "f90c771e60941b48463a31f58d2fb459eb43f1621810545668dc269437cf65db",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-encrypted-malformed",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-malformed.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "daf7e9b9008c5044e71fbed7208cdbb6b1f1f837e2d0a2b62d9a8de3c3dc39ac",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-encrypted-public-key",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-public-key.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "b6a602210de5cfa34dce34104b896720866b4ae64032f93a4ca5ff4ee1884ccb",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-encrypted-standard",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-encrypted-standard.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "0950bc011c9ec3ad9d433b20ee779871878a04565eef6defee35303df6f76012",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-hybrid-multi-revision",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-hybrid-multi-revision.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref",
+        "xref-stream"
+      ],
+      "sha256": "cfaecf642be90158cb59c8e94cd8c968d24b97fa4d45678c9b559e4e4c66f58b",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-hybrid-signed-encrypted",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-hybrid-signed-encrypted.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref",
+        "xref-stream"
+      ],
+      "sha256": "df114a878ad14573894037b02beec9b4e5fc30ea1697f37f2e38d95da3329010",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-malformed-parent-radio",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-malformed-parent-radio.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "c265a043a13c3552c9814468a43e3bf880d65dc36ad3ff1c296610708cfd5c36",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-metadata-rich",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-metadata-rich.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "mutation",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "03efa6da0a6c660a3a5d998004a093a998e26e4cca00ff55a5d705a51cb9be17",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-signature-field-only",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-signature-field-only.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "5fe9c5398447cfe0cb47d9cfd6d2580600c2b207f48807becfc983ab6c45e906",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-signed-malformed",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-signed-malformed.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "06371115e48b32bd413e02caeb4403439a00b76e410cd92748449b8bad5d02b6",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "synthetic-signed-valid",
+      "path": "engine/starpdf/tests/fixtures/v0_11_complex/synthetic-signed-valid.pdf",
+      "categories": [
+        "encryption",
+        "malformed",
+        "recovery",
+        "signatures",
+        "xref"
+      ],
+      "sha256": "2383dec5577a4f21453a5d827d98d772452c721765ab4db934b869766eeb597d",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_11_complex/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "chrome-landscape",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/chrome-landscape.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "d4af67865400d57553e36e48dbb1a6a47dcb0f9b0dddb49ca08c3ecb3f1c55ab",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "chrome-multipage",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/chrome-multipage.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "7717ede305fc3666247134c1d205b2ebd6fee969fbf3f25cea890a18e41474bc",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "chrome-simple",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/chrome-simple.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "0f1e4fa44026f1584d4a4a3c20c965bf44992612ec5a65b3d669b59d74583c26",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "chrome-unicode",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/chrome-unicode.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "239f0235c1eecf77ecc16136522df0066ffe1047680f3661a00dbf0424007c2c",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "libreoffice-basic",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/libreoffice-basic.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "ae76b978fd993a23c690efe653b3854d8f2d8135e6985add0a152dfeb0e4791d",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "libreoffice-styled",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/libreoffice-styled.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "5d603c3faf9680c7e1f77c023b3393c521eea8d5682c9e4edb88c23bee2867e0",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "libreoffice-table",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/libreoffice-table.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "7dab2d660398e1ecd9ce4976bb70bbddbe3791bd62967fd4c19f48c39a60d2d7",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "libreoffice-unicode",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/libreoffice-unicode.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "50b2d2de24babf25322a074023a182337ca1544a0a3e92bf8ad8e78b5a40a9ab",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "quartz-columns",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/quartz-columns.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "04280bce54d349d51f9b9c6758b3c932364c0be61d55bba9da835faf2967183e",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "quartz-multipage",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/quartz-multipage.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "f68ccbb82f9b34500c9d2993c3d98855ccaae8c151cf41003f3cb43e6e84b197",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "quartz-simple",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/quartz-simple.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "ab2dfe133d35127f145a0a73e899cdc9ba050dcfb70f103f17e6fd0bed44ffdb",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    },
+    {
+      "id": "quartz-unicode",
+      "path": "engine/starpdf/tests/fixtures/v0_9_compat/quartz-unicode.pdf",
+      "categories": [
+        "fonts",
+        "multilingual",
+        "parser",
+        "render",
+        "roundtrip",
+        "text"
+      ],
+      "sha256": "1a887281f64cd5c7e4367666721e35e81626c145ce88965e193d817f65acf025",
+      "provenance": {
+        "source": "engine/starpdf/tests/fixtures/v0_9_compat/MANIFEST.md",
+        "license": "repository fixture; consult source manifest",
+        "distribution": "already committed at base"
+      },
+      "edit": false
+    }
+  ],
+  "coverage_tests": {
+    "FreeText formatting": [
+      "appearance_v0_8_tests",
+      "basic_text_formatting_tests"
+    ],
+    "FreeText reopen": [
+      "appearance_v0_8_tests",
+      "annotation_mutation_tests"
+    ],
+    "multilingual": [
+      "multilingual_font_tests"
+    ],
+    "native text": [
+      "existing_text_editing_v0_13_tests"
+    ],
+    "image surgical delete": [
+      "image_operations_v0_14_tests"
+    ],
+    "image replacement": [
+      "image_operations_v0_14_tests"
+    ],
+    "shared XObjects": [
+      "image_operations_v0_14_tests"
+    ],
+    "forms": [
+      "acroform_tests",
+      "compatibility_v0_10_tests"
+    ],
+    "annotations": [
+      "annotation_mutation_tests"
+    ],
+    "page operations": [
+      "page_operations_v0_12_tests"
+    ],
+    "xref recovery": [
+      "xref_prev_recovery_tests"
+    ],
+    "xref-stream healing export": [
+      "recovered_xref_stream_export_tests"
+    ]
+  }
+}
