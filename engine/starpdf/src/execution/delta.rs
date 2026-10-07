@@ -125,6 +125,16 @@ pub struct MutationCertificate {
     pub refusal: Option<ContractRefusal>,
 }
 
+/// Audit details over the stable v1 certificate contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CertificateReport {
+    pub certificate: MutationCertificate,
+    pub expected_changes: BTreeSet<String>,
+    pub actual_changes: BTreeSet<String>,
+    pub explained_changes: BTreeSet<String>,
+    pub forbidden_dependency_touches: BTreeSet<ObjectRef>,
+}
+
 impl MutationCertificate {
     pub fn require_explained(&self) -> ContractResult<()> {
         match self.classification {
@@ -149,6 +159,75 @@ impl MutationCertificate {
 }
 
 impl MutationEnvelope {
+    pub fn evaluate(
+        &self,
+        delta: &DocumentDelta,
+        structural: &StructuralClosure,
+        visual: &VisualClosure,
+    ) -> CertificateReport {
+        let certificate = self.compare(delta, structural, visual);
+        let mut expected_changes = BTreeSet::new();
+        let mut actual_changes = BTreeSet::new();
+        for object in &self.allowed_pdf_objects {
+            expected_changes.insert(format!("object:{object}"));
+        }
+        for node in self.expected_text.keys() {
+            expected_changes.insert(format!("text:{node}"));
+        }
+        for node in self.expected_font_changes.keys() {
+            expected_changes.insert(format!("font:{node}"));
+        }
+        for node in self.expected_geometry_changes.keys() {
+            expected_changes.insert(format!("geometry:{node}"));
+        }
+        for object in delta.added_objects.union(&delta.modified_objects) {
+            actual_changes.insert(format!("object:{object}"));
+        }
+        for edge in &delta.removed_references {
+            actual_changes.insert(format!("reference:{}->{}", edge.from, edge.to));
+        }
+        for resource in delta.resource_changes.keys() {
+            actual_changes.insert(format!("resource:{resource:?}"));
+        }
+        for range in delta.source_range_edits.keys() {
+            actual_changes.insert(format!("source-range:{range:?}"));
+        }
+        for (node, change) in &delta.semantic_changes {
+            if change.text.is_some() {
+                actual_changes.insert(format!("text:{node}"));
+            }
+            if change.font.is_some() {
+                actual_changes.insert(format!("font:{node}"));
+            }
+            if change.geometry.is_some() {
+                actual_changes.insert(format!("geometry:{node}"));
+            }
+            for kind in &change.other {
+                actual_changes.insert(format!("semantic:{node}:{kind}"));
+            }
+        }
+        let explained_changes =
+            if certificate.classification == CertificateClassification::Explained {
+                actual_changes.clone()
+            } else {
+                actual_changes
+                    .intersection(&expected_changes)
+                    .filter(|item| !certificate.unexplained_changes.contains(*item))
+                    .cloned()
+                    .collect()
+            };
+        CertificateReport {
+            certificate,
+            expected_changes,
+            actual_changes,
+            explained_changes,
+            forbidden_dependency_touches: self
+                .forbidden_dependencies
+                .intersection(&structural.objects)
+                .copied()
+                .collect(),
+        }
+    }
     /// Compares declared facts only. This does not verify actual exported bytes or raster output.
     pub fn compare(
         &self,

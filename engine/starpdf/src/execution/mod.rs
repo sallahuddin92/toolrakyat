@@ -1,18 +1,22 @@
 //! Phase 0 contracts. No production mutation or renderer uses this shadow layer.
+pub mod closure;
 pub mod coordinates;
 pub mod delta;
 pub mod evidence;
 pub mod hash;
 pub mod identity;
 pub mod renderer;
+pub mod shadow;
 pub mod state;
 
+pub use closure::*;
 pub use coordinates::*;
 pub use delta::*;
 pub use evidence::*;
 pub use hash::*;
 pub use identity::*;
 pub use renderer::*;
+pub use shadow::*;
 pub use state::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
