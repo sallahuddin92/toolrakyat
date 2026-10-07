@@ -5,6 +5,8 @@ import type {
 } from "../starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "../pdf-types";
 import type { HumanTextGroup } from "../grouping/types";
+import type { StarNodeId } from "../execution/contracts";
+import { createStarNodeId, parseStarNodeId } from "../execution/identity";
 
 export type SelectionType = "text" | "image" | "vector" | "form" | "annotation";
 
@@ -25,6 +27,7 @@ export interface PixelRect {
 export interface TextSelection {
   type: "text";
   id: string; // span_id
+  nodeId?: StarNodeId;
   pageIndex: number;
   data: StarPdfTextSpan;
   group?: HumanTextGroup;
@@ -36,6 +39,7 @@ export interface TextSelection {
 export interface ImageSelection {
   type: "image";
   id: string; // image_id
+  nodeId?: StarNodeId;
   pageIndex: number;
   data: StarPdfImageInfo;
   pdfRect: PdfRect;
@@ -45,6 +49,7 @@ export interface ImageSelection {
 export interface VectorSelection {
   type: "vector";
   id: string; // graphic_id
+  nodeId?: StarNodeId;
   pageIndex: number;
   data: StarPdfVectorGraphicInfo;
   pdfRect: PdfRect;
@@ -54,6 +59,7 @@ export interface VectorSelection {
 export interface FormSelection {
   type: "form";
   id: string; // field.name
+  nodeId?: StarNodeId;
   pageIndex: number;
   data: AcroFormField;
   pdfRect?: PdfRect;
@@ -63,6 +69,7 @@ export interface FormSelection {
 export interface AnnotationSelection {
   type: "annotation";
   id: string; // annotation.id
+  nodeId?: StarNodeId;
   pageIndex: number;
   data: PdfMarkupAnnotation;
   pdfRect: PdfRect;
@@ -82,12 +89,51 @@ export type SmartPdfSelection =
  * When objects overlap spatially on the canvas, user selection resolves according to this order.
  */
 export const HIT_TEST_PRIORITY: readonly SelectionType[] = [
-  "form",
   "annotation",
+  "form",
   "text",
   "image",
   "vector",
 ] as const;
+
+/** Prefer the native contract identity when it is present. */
+export function selectionNodeId(selection: NonNullable<SmartPdfSelection>, documentKey: string): StarNodeId | null {
+  if (selection.nodeId) return selection.nodeId;
+  const native = (selection.data as { star_node_id?: unknown }).star_node_id;
+  if (typeof native === "string") {
+    try { return parseStarNodeId(native); } catch { return null; }
+  }
+  if (selection.type === "annotation" && selection.data.objectNumber !== undefined &&
+      selection.data.objectNumber > 0 &&
+      selection.data.generationNumber !== undefined) {
+    return createStarNodeId(documentKey, {
+      number: String(selection.data.objectNumber),
+      generation: selection.data.generationNumber,
+    }, `annotation:page:${selection.pageIndex}`);
+  }
+  return null;
+}
+
+export function orderedHitCandidates(
+  candidates: readonly NonNullable<SmartPdfSelection>[],
+  selected: SmartPdfSelection,
+): NonNullable<SmartPdfSelection>[] {
+  const rank = (item: NonNullable<SmartPdfSelection>) =>
+    item.type === "annotation" && selected?.type === "annotation" && selected.id === item.id
+      ? -1 : HIT_TEST_PRIORITY.indexOf(item.type);
+  return [...candidates].sort((a, b) => rank(a) - rank(b) ||
+    a.pageIndex - b.pageIndex || a.id.localeCompare(b.id));
+}
+
+export function cycleHitCandidate(
+  candidates: readonly NonNullable<SmartPdfSelection>[],
+  selected: SmartPdfSelection,
+): NonNullable<SmartPdfSelection> | null {
+  const ordered = orderedHitCandidates(candidates, selected);
+  if (!ordered.length) return null;
+  const current = ordered.findIndex((item) => item.type === selected?.type && item.id === selected.id);
+  return ordered[(current + 1) % ordered.length];
+}
 
 /**
  * Resolves whether a selection remains valid after a mutation or document refresh.
@@ -153,11 +199,16 @@ export function resolveSelectionAfterMutation(
     }
     case "annotation": {
       const match = annotations.find(
-        (a) => a.id === previousSelection.id && a.pageIndex === currentPageIndex,
+        (a) => a.pageIndex === currentPageIndex &&
+          (a.id === previousSelection.id ||
+            (previousSelection.data.objectNumber !== undefined &&
+              a.objectNumber === previousSelection.data.objectNumber &&
+              a.generationNumber === previousSelection.data.generationNumber)),
       );
       if (!match) return null;
       return {
         ...previousSelection,
+        id: match.id,
         data: match,
         pdfRect: { ...match.rect },
       };

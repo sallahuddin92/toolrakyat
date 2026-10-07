@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   HIT_TEST_PRIORITY,
+  orderedHitCandidates,
+  cycleHitCandidate,
+  selectionNodeId,
   resolveSelectionAfterMutation,
   type SmartPdfSelection,
 } from "./types";
@@ -16,12 +19,28 @@ import type { AcroFormField, PdfMarkupAnnotation } from "../pdf-types";
 describe("SmartPDF Selection Model & Geometry", () => {
   it("codifies the strict hit-testing priority order", () => {
     expect(HIT_TEST_PRIORITY).toEqual([
-      "form",
       "annotation",
+      "form",
       "text",
       "image",
       "vector",
     ]);
+  });
+
+  it("selects overlapping objects deterministically and cycles through them", () => {
+    const annotation = { type: "annotation", id: "a", pageIndex: 0,
+      data: { id: "a", subtype: "FreeText", contents: "a", pageIndex: 0,
+        objectNumber: 9, generationNumber: 0, rect: { x: 0, y: 0, width: 10, height: 10 } },
+      pdfRect: { x: 0, y: 0, width: 10, height: 10 } } as NonNullable<SmartPdfSelection>;
+    const form = { type: "form", id: "f", pageIndex: 0, data: {},
+      pdfRect: { x: 0, y: 0, width: 10, height: 10 } } as NonNullable<SmartPdfSelection>;
+    const image = { type: "image", id: "i", pageIndex: 0, data: {},
+      pdfRect: { x: 0, y: 0, width: 10, height: 10 } } as NonNullable<SmartPdfSelection>;
+    expect(orderedHitCandidates([image, form, annotation], null).map((item) => item.id))
+      .toEqual(["a", "f", "i"]);
+    expect(cycleHitCandidate([image, form, annotation], annotation)?.id).toBe("f");
+    expect(cycleHitCandidate([image, form, annotation], image)?.id).toBe("a");
+    expect(selectionNodeId(annotation, "document.pdf")).toMatch(/^sn1\//);
   });
 
   describe("convertPdfRectToPixels", () => {

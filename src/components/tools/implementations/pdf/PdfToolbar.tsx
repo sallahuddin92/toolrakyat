@@ -65,6 +65,7 @@ interface PdfToolbarProps {
   onToggleThumbnails?: () => void;
   isSearchOpen?: boolean;
   onToggleSearch?: (open: boolean) => void;
+  onOpenCommandPalette?: () => void;
   mode?: EditorMode;
   onModeChange?: (mode: EditorMode) => void;
   fillAndSignTool?: FillAndSignTool;
@@ -104,6 +105,7 @@ export function PdfToolbar({
   onToggleThumbnails,
   isSearchOpen,
   onToggleSearch,
+  onOpenCommandPalette,
   mode = "SELECT",
   onModeChange,
   fillAndSignTool = "text",
@@ -200,6 +202,16 @@ export function PdfToolbar({
           </div>
 
           <span className="text-slate-300">|</span>
+
+          {onOpenCommandPalette && (
+            <Button type="button" variant="ghost" size="sm" onClick={onOpenCommandPalette}
+              className="h-8 gap-1.5 rounded-lg text-xs text-slate-600"
+              title="Commands (Ctrl+K / Cmd+K)" aria-label="Commands"
+              data-testid="toolbar-commands-btn">
+              <Search className="size-3.5" />
+              <span className="hidden xl:inline">Commands</span>
+            </Button>
+          )}
 
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-xs font-semibold text-slate-800 truncate max-w-[80px] sm:max-w-[120px] lg:max-w-[160px]" title={filename}>

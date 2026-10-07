@@ -17,6 +17,8 @@ import {
   convertPixelsToPdfPoint,
   convertPixelsToPdfRect,
   convertPdfPointToPixels,
+  orderedHitCandidates,
+  cycleHitCandidate,
 } from "@/lib/pdf/selection";
 import { cn } from "@/lib/utils";
 import type { EditorMode, FillAndSignTool } from "./PdfToolbar";
@@ -130,6 +132,46 @@ export function PdfInteractiveOverlay({
   const pageDims = useMemo(() => ({ width: pageWidth, height: pageHeight, rotation }), [pageWidth, pageHeight, rotation]);
   const pageIdx = pageNumber - 1;
   const humanTextGroups = useMemo(() => groupTextSpans(textSpans), [textSpans]);
+  const hitCandidates = useMemo((): NonNullable<SmartPdfSelection>[] => {
+    const candidate = (item: NonNullable<SmartPdfSelection>) => ({
+      ...item,
+      bounds: item.pdfRect ? convertPdfRectToPixels(item.pdfRect, pageDims, scale, rotation) : undefined,
+    });
+    return [
+      ...annotations.filter((annotation) => annotation.pageIndex === pageIdx).map((annotation) =>
+        candidate({ type: "annotation", id: annotation.id, pageIndex: pageIdx,
+          data: annotation, pdfRect: annotation.rect })),
+      ...fields.filter((field) => field.rect).map((field) =>
+        candidate({ type: "form", id: field.name, pageIndex: pageIdx,
+          data: field, pdfRect: field.rect })),
+      ...humanTextGroups.map((group) => candidate({ type: "text", id: group.primarySpanId,
+        pageIndex: pageIdx, data: group.sourceSpans[0], group,
+        pdfRect: { x: group.x, y: group.y, width: group.width, height: group.height } })),
+      ...images.map((img) => {
+        const [x1, y1, x2, y2] = img.rect || [0, 0, img.width, img.height];
+        return candidate({ type: "image", id: img.image_id, pageIndex: pageIdx, data: img,
+          pdfRect: { x: x1, y: y1, width: x2 - x1, height: y2 - y1 } });
+      }),
+      ...graphics.map((graphic) => {
+        const [x, y, width, height] = graphic.bounds || [0, 0, 100, 100];
+        return candidate({ type: "vector", id: graphic.graphic_id, pageIndex: pageIdx,
+          data: graphic, pdfRect: { x, y, width, height } });
+      }),
+    ];
+  }, [annotations, fields, graphics, humanTextGroups, images, pageDims, pageIdx, rotation, scale]);
+
+  const selectAt = (event: React.MouseEvent, fallback: NonNullable<SmartPdfSelection>) => {
+    if (event.detail === 0) { onSelectItem(fallback); return; }
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (!rect) { onSelectItem(fallback); return; }
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const hits = hitCandidates.filter((item) => item.bounds &&
+      x >= item.bounds.left && x <= item.bounds.left + item.bounds.width &&
+      y >= item.bounds.top && y <= item.bounds.top + item.bounds.height);
+    const ordered = orderedHitCandidates(hits.length ? hits : [fallback], selectedItem);
+    onSelectItem(event.altKey ? cycleHitCandidate(ordered, selectedItem) : ordered[0]);
+  };
 
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const activeHighlightRef = useRef<HTMLDivElement | null>(null);
@@ -532,7 +574,7 @@ export function PdfInteractiveOverlay({
               key={g.graphic_id}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectItem({
+                selectAt(e, {
                   type: "vector",
                   id: g.graphic_id,
                   pageIndex: pageIdx,
@@ -555,6 +597,9 @@ export function PdfInteractiveOverlay({
               )}
               title={`Vector shape (${g.graphic_type || "Path"}) - Click to edit color & width`}
               data-testid={`canvas-graphic-${g.graphic_id}`}
+              tabIndex={0}
+              role="button"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             />
 
           );
@@ -575,7 +620,7 @@ export function PdfInteractiveOverlay({
               key={img.image_id}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectItem({
+                selectAt(e, {
                   type: "image",
                   id: img.image_id,
                   pageIndex: pageIdx,
@@ -598,6 +643,9 @@ export function PdfInteractiveOverlay({
               )}
               title={`Image (${Math.round(img.width)}×${Math.round(img.height)} pt) - Click to replace or remove`}
               data-testid={`canvas-image-${img.image_id}`}
+              tabIndex={0}
+              role="button"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             />
           );
         })}
@@ -619,7 +667,7 @@ export function PdfInteractiveOverlay({
               key={group.id}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectItem({
+                selectAt(e, {
                   type: "text",
                   id: group.primarySpanId,
                   pageIndex: pageIdx,
@@ -648,6 +696,9 @@ export function PdfInteractiveOverlay({
                   : `Read-only text: ${group.refusal_reason || "Cannot edit in place"}`
               }
               data-testid={`canvas-text-span-${group.primarySpanId}`}
+              tabIndex={0}
+              role="button"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
               data-group-id={group.id}
             />
           );
@@ -672,7 +723,7 @@ export function PdfInteractiveOverlay({
               key={annot.id}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectItem({
+                selectAt(e, {
                   type: "annotation",
                   id: annot.id,
                   pageIndex: pageIdx,
@@ -695,7 +746,27 @@ export function PdfInteractiveOverlay({
               )}
               title={`Markup annotation (${annot.subtype}): ${annot.contents || annot.subtype}`}
               data-testid={`canvas-annotation-${annot.id}`}
-            />
+              tabIndex={0}
+              role="button"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
+            >
+              {(annot as PdfMarkupAnnotation & { liveDraft?: boolean }).liveDraft && (
+                <span
+                  data-testid="canvas-freetext-live-preview"
+                  className="block h-full w-full overflow-hidden whitespace-pre-wrap bg-white text-left"
+                  style={{
+                    fontFamily: annot.fontFamily === "Serif" ? "Times New Roman, serif" :
+                      annot.fontFamily === "Monospace" ? "Courier New, monospace" : "Arial, sans-serif",
+                    fontSize: `${(annot.fontSize ?? 12) * scale}px`,
+                    fontWeight: annot.isBold ? 700 : 400,
+                    fontStyle: annot.isItalic ? "italic" : "normal",
+                    textDecoration: [annot.isUnderlined && "underline", annot.isStruckThrough && "line-through"].filter(Boolean).join(" ") || "none",
+                    color: annot.textColor ? `rgb(${annot.textColor.map((value) => Math.round(value * 255)).join(",")})` : "#000",
+                    backgroundColor: annot.highlightColor ? `rgb(${annot.highlightColor.map((value) => Math.round(value * 255)).join(",")})` : "#fff",
+                  }}
+                >{annot.contents}</span>
+              )}
+            </div>
           );
         })}
 
@@ -717,7 +788,7 @@ export function PdfInteractiveOverlay({
               key={`field-${field.name}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectItem({
+                selectAt(e, {
                   type: "form",
                   id: field.name,
                   pageIndex: pageIdx,
@@ -741,6 +812,9 @@ export function PdfInteractiveOverlay({
               )}
               title={`Form field (${field.type}): ${field.name}${field.isReadOnly ? " (Read-only)" : ""}`}
               data-testid={`canvas-field-${field.name}`}
+              tabIndex={0}
+              role="button"
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}
             />
           );
         })}
@@ -1136,5 +1210,3 @@ export function PdfInteractiveOverlay({
     </div>
   );
 }
-
-

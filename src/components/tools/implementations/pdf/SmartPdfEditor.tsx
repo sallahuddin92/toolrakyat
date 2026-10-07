@@ -19,12 +19,26 @@ import type {
   StarPdfVectorGraphicInfo,
 } from "@/lib/pdf/starpdf-types";
 import { formatPdfErrorMessage } from "@/lib/pdf/pdf-friendly-errors";
+import type { EvidenceLevel } from "@/lib/pdf/execution/contracts";
 import { AlertTriangle, ShieldCheck, FolderOpen } from "lucide-react";
 
 import {
   type SmartPdfSelection,
   resolveSelectionAfterMutation,
+  selectionNodeId,
+  searchPdfPalette,
+  type PdfPaletteCommandId,
 } from "@/lib/pdf/selection";
+import {
+  annotationWithFreeTextState,
+  cloneFreeTextState,
+  freeTextSessionNeedsSync,
+  freeTextStateFromAnnotation,
+  freeTextStateToUpdatePatch,
+  freeTextStatesEqual,
+  type FreeTextEditSession,
+  type FreeTextEditState,
+} from "@/lib/pdf/freetext-edit-session";
 import {
   type SmartPdfCommand,
   type SmartPdfCommandContext,
@@ -97,9 +111,14 @@ export function SmartPdfEditor() {
   const [nativeEngineState, setNativeEngineState] = useState<
     "READY" | "RECOVERED_MALFORMED_PREV" | "READ_ONLY"
   >("READY");
+  const [evidenceLevel, setEvidenceLevel] = useState<EvidenceLevel>("UNTRUSTED");
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
+  const [viewRotation, setViewRotation] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteIndex, setPaletteIndex] = useState(0);
   const [fieldValues, setFieldValues] = useState<Record<string, string | boolean | string[]>>({});
   const [annotationValues, setAnnotationValues] = useState<Record<string, string>>({});
   const [pageTextSpans, setPageTextSpans] = useState<StarPdfTextSpan[]>([]);
@@ -116,10 +135,18 @@ export function SmartPdfEditor() {
   const [rasterCandidates, setRasterCandidates] = useState<Record<number, FlatFormCandidate[]>>({});
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const signatureInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
 
   // Unified selection state on canvas
   const [selectedItem, setSelectedItem] = useState<SmartPdfSelection>(null);
+  const [freeTextSession, setFreeTextSession] = useState<FreeTextEditSession | null>(null);
+  const freeTextSessionRef = useRef<FreeTextEditSession | null>(null);
+  const freeTextCommitRef = useRef<Promise<void> | null>(null);
+  const sessionNumberRef = useRef(0);
+  const sourceBytesRef = useRef<Uint8Array | null>(null);
+  const annotationValuesRef = useRef<Record<string, string>>({});
+  const fieldValuesRef = useRef<Record<string, string | boolean | string[]>>({});
 
   // Command Execution State (IDLE vs RUNNING)
   const [commandState, setCommandState] = useState<CommandExecutionState>({ status: "IDLE" });
@@ -205,6 +232,7 @@ export function SmartPdfEditor() {
       setError(null);
       setSecurityInfo(null);
       setNativeEngineState("READY");
+      setEvidenceLevel("UNTRUSTED");
       setSelectedItem(null);
       setLoadingMessage("Parsing PDF structure & inspecting page objects...");
 
@@ -214,7 +242,13 @@ export function SmartPdfEditor() {
         try {
           starDoc = await StarPdfClient.open(bytes);
           const detectedSecurity = await starDoc.getSecurityInfo();
+          const documentInfo = await starDoc.getInfo();
           setSecurityInfo(detectedSecurity);
+          setEvidenceLevel(
+            documentInfo.xref_status === "UNRECOVERABLE" ? "UNTRUSTED" :
+            documentInfo.xref_status === "RECOVERED_MALFORMED_PREV" ? "RECOVERED_VERIFIED" :
+            documentInfo.recovery_status && documentInfo.recovery_status !== "NONE" ? "INFERRED" : "VERIFIED",
+          );
           if (starDoc.xrefStatus === "RECOVERED_MALFORMED_PREV") {
             setNativeEngineState("RECOVERED_MALFORMED_PREV");
           }
@@ -232,6 +266,7 @@ export function SmartPdfEditor() {
             starDoc = null;
           }
           setNativeEngineState("READ_ONLY");
+          setEvidenceLevel("UNTRUSTED");
           setEditorMode("SELECT");
           console.warn("StarPDF native mutation engine unavailable; opening a read-only preview.");
         }
@@ -269,15 +304,19 @@ export function SmartPdfEditor() {
         }
 
         setSourceBytes(bytes);
+        sourceBytesRef.current = bytes;
         setFilename(docFilename);
         setInspectionResult(inspected);
         setStarPdfDoc(starDoc);
+        starPdfDocRef.current = starDoc;
         setPdfProxy(proxy);
         const validPage = Math.max(1, Math.min(initialPage, inspected.metadata.pageCount || 1));
         setCurrentPage(validPage);
-        setScale(1.0);
+        if (!isHistoryRestore) setScale(1.0);
         setFieldValues(initialValues);
+        fieldValuesRef.current = initialValues;
         setAnnotationValues(initialAnnotationValues);
+        annotationValuesRef.current = initialAnnotationValues;
         setSelectedPages(new Set([validPage]));
         setSearchQuery("");
         setSearchResults([]);
@@ -327,7 +366,7 @@ export function SmartPdfEditor() {
 
   const executeCommand = useCallback(
     async (command: SmartPdfCommand): Promise<void> => {
-      if (!starPdfDoc) {
+      if (!starPdfDocRef.current || evidenceLevel === "UNTRUSTED" || evidenceLevel === "INFERRED" || securityInfo?.mutation_allowed === false) {
         toast.error(
           "This document is open as a read-only preview because its structure could not be safely loaded for editing.",
         );
@@ -357,14 +396,14 @@ export function SmartPdfEditor() {
       }
 
       const context: SmartPdfCommandContext = {
-        sourceBytes,
+        sourceBytes: sourceBytesRef.current,
         filename,
         currentPage,
         pageCount: inspectionResult?.metadata.pageCount || 1,
         selection: selectedItem,
-        starPdfDoc,
-        fieldValues,
-        annotationValues,
+        starPdfDoc: starPdfDocRef.current,
+        fieldValues: fieldValuesRef.current,
+        annotationValues: annotationValuesRef.current,
         inspectionResult,
       };
 
@@ -408,6 +447,7 @@ export function SmartPdfEditor() {
           // Non-byte mutating state updates (e.g. form fields, annotations)
           if (result.fieldValues) {
             const updatedFields = result.fieldValues;
+            fieldValuesRef.current = { ...fieldValuesRef.current, ...updatedFields };
             setFieldValues((prev) => ({ ...prev, ...updatedFields }));
             if (command.isMutating) {
               if (sourceBytes) {
@@ -420,6 +460,7 @@ export function SmartPdfEditor() {
           }
           if (result.annotationValues) {
             const updatedAnnots = result.annotationValues;
+            annotationValuesRef.current = { ...annotationValuesRef.current, ...updatedAnnots };
             setAnnotationValues((prev) => ({ ...prev, ...updatedAnnots }));
             if (command.isMutating) {
               if (sourceBytes) {
@@ -509,18 +550,17 @@ export function SmartPdfEditor() {
     },
 
     [
-      annotationValues,
       currentPage,
-      fieldValues,
       filename,
+      evidenceLevel,
       inspectionResult,
       loadDocument,
       pageGraphics,
       pageImages,
       pageTextSpans,
       selectedItem,
+      securityInfo,
       sourceBytes,
-      starPdfDoc,
     ],
 
   );
@@ -989,6 +1029,136 @@ export function SmartPdfEditor() {
     [currentPage, executeCommand],
   );
 
+  // Keep a FreeText interaction in memory until it ends. The draft drives the
+  // on-page preview; StarPDF receives one serialized transaction on commit.
+  useEffect(() => {
+    if (freeTextSessionRef.current || selectedItem?.type !== "annotation" ||
+        selectedItem.data.subtype !== "FreeText" || !sourceBytesRef.current ||
+        selectedItem.data.objectNumber === undefined ||
+        selectedItem.data.generationNumber === undefined) return;
+    const originalState = freeTextStateFromAnnotation(selectedItem.data);
+    const session: FreeTextEditSession = {
+      id: ++sessionNumberRef.current,
+      annotationId: selectedItem.id,
+      pageIndex: selectedItem.pageIndex,
+      objectNumber: selectedItem.data.objectNumber,
+      generationNumber: selectedItem.data.generationNumber,
+      originalState,
+      draftState: cloneFreeTextState(originalState),
+      lastAppliedState: cloneFreeTextState(originalState),
+      originalBytes: sourceBytesRef.current.slice(),
+      latestBytes: sourceBytesRef.current.slice(),
+      originalIsModified: isModified,
+      revision: 0,
+      appliedRevision: 0,
+      refreshedRevision: 0,
+      dirty: false,
+      syncing: false,
+    };
+    freeTextSessionRef.current = session;
+    setFreeTextSession({ ...session });
+  }, [selectedItem, isModified]);
+
+  const updateFreeTextDraft = useCallback((draft: FreeTextEditState) => {
+    const session = freeTextSessionRef.current;
+    if (!session || freeTextStatesEqual(session.draftState, draft)) return;
+    if (!Number.isFinite(draft.fontSize) || draft.fontSize < 6 || draft.fontSize > 144) return;
+    session.draftState = cloneFreeTextState(draft);
+    session.revision += 1;
+    session.dirty = !freeTextStatesEqual(session.originalState, draft);
+    setFreeTextSession({ ...session });
+    setIsModified(session.dirty || session.originalIsModified);
+  }, []);
+
+  const commitFreeTextSession = useCallback(async () => {
+    if (freeTextCommitRef.current) return freeTextCommitRef.current;
+    const session = freeTextSessionRef.current;
+    if (!session) return;
+    const task = (async () => {
+      if (session.dirty) {
+        const doc = starPdfDocRef.current;
+        if (!doc) throw new Error("This text can no longer be edited.");
+        // A draft may advance while an async font registration or export runs.
+        // Only the final revision can replace the document visible to the user.
+        while (freeTextSessionNeedsSync(session)) {
+          const revision = session.revision;
+          const draft = cloneFreeTextState(session.draftState);
+          if (session.appliedRevision < revision) {
+            await doc.updateAnnotation(
+              session.objectNumber,
+              session.generationNumber,
+              freeTextStateToUpdatePatch(session.lastAppliedState, draft),
+              draft.contents,
+            );
+            session.latestBytes = await doc.exportIncremental();
+            session.lastAppliedState = draft;
+            session.appliedRevision = revision;
+          }
+          if (session.revision === revision) session.refreshedRevision = revision;
+        }
+        if (freeTextSessionRef.current !== session) return;
+        // Linearize the session before the document refresh begins. A later UI
+        // event cannot advance a draft that has already been committed.
+        freeTextSessionRef.current = null;
+        setFreeTextSession(null);
+        await loadDocument(session.latestBytes, filename, session.latestBytes.byteLength,
+          session.pageIndex + 1, true);
+        if (session.dirty) {
+          const nextHistory = pushHistorySnapshot(historyStateRef.current, session.latestBytes, "Edit text annotation");
+          historyStateRef.current = nextHistory;
+          setHistoryState(nextHistory);
+          setIsModified(true);
+        } else {
+          setIsModified(session.originalIsModified);
+        }
+      }
+      if (freeTextSessionRef.current === session) {
+        freeTextSessionRef.current = null;
+        setFreeTextSession(null);
+      }
+    })();
+    freeTextCommitRef.current = task;
+    try { await task; }
+    catch (error) { toast.error(formatPdfErrorMessage(error).userMessage); throw error; }
+    finally { if (freeTextCommitRef.current === task) freeTextCommitRef.current = null; }
+  }, [filename, loadDocument]);
+
+  const cancelFreeTextSession = useCallback(async () => {
+    const session = freeTextSessionRef.current;
+    if (!session) { setSelectedItem(null); return; }
+    freeTextSessionRef.current = null;
+    setFreeTextSession(null);
+    await freeTextCommitRef.current?.catch(() => undefined);
+    if (session.appliedRevision > 0) {
+      await loadDocument(session.originalBytes, filename, session.originalBytes.byteLength,
+        session.pageIndex + 1, true);
+    }
+    setIsModified(session.originalIsModified);
+    setSelectedItem(null);
+  }, [filename, loadDocument]);
+
+  const selectPdfItem = useCallback((item: SmartPdfSelection) => {
+    const identified = item ? { ...item, nodeId: selectionNodeId(item, filename) ?? undefined } as SmartPdfSelection : null;
+    const session = freeTextSessionRef.current;
+    if (session && (item?.type !== "annotation" || item.id !== session.annotationId)) {
+      void commitFreeTextSession().then(() => setSelectedItem(identified)).catch(() => undefined);
+    } else {
+      setSelectedItem(identified);
+    }
+  }, [commitFreeTextSession, filename]);
+
+  const navigatePage = useCallback((page: number) => {
+    void commitFreeTextSession().then(() => handlePageNavigation(page)).catch(() => undefined);
+  }, [commitFreeTextSession, handlePageNavigation]);
+
+  const previewAnnotations = useMemo(() => {
+    const annotations = inspectionResult?.annotations ?? [];
+    if (!freeTextSession) return annotations;
+    return annotations.map((annotation) => annotation.id === freeTextSession.annotationId
+      ? Object.assign(annotationWithFreeTextState(annotation, freeTextSession.draftState), { liveDraft: true })
+      : annotation);
+  }, [inspectionResult, freeTextSession]);
+
   // Phase 7 Unified Global Keyboard Shortcuts (with strict typing safety)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1000,10 +1170,23 @@ export function SmartPdfEditor() {
           target.isContentEditable ||
           Boolean(target.closest("[contenteditable='true']")));
 
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+        setPaletteQuery("");
+        setPaletteIndex(0);
+        return;
+      }
+
       // 1. Escape shortcut: cancel active dialogs, mode, search, and selection (works globally and inside inputs)
       if (e.key === "Escape") {
         e.preventDefault();
+        if (paletteOpen) { setPaletteOpen(false); return; }
         target?.blur();
+        if (freeTextSessionRef.current) {
+          void cancelFreeTextSession();
+          return;
+        }
         setShowInfoModal(false);
         setShowImportModal(false);
         setShowSplitModal(false);
@@ -1016,6 +1199,13 @@ export function SmartPdfEditor() {
         if (editorMode !== "SELECT") {
           setEditorMode("SELECT");
         }
+        return;
+      }
+
+      // 3. Export / Save shortcut (Cmd/Ctrl + S)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void commitFreeTextSession().then(() => executeCommand(new ExportDocumentCommand("editable")));
         return;
       }
 
@@ -1040,28 +1230,21 @@ export function SmartPdfEditor() {
         return;
       }
 
-      // 3. Export / Save shortcut (Cmd/Ctrl + S)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        void executeCommand(new ExportDocumentCommand("editable"));
-        return;
-      }
-
       // 4. Undo / Redo shortcuts (Cmd/Ctrl + Z, Cmd/Ctrl + Shift + Z, Ctrl + Y)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         if (e.shiftKey) {
           e.preventDefault();
-          void handleRedo();
+          void commitFreeTextSession().then(handleRedo);
         } else {
           e.preventDefault();
-          void handleUndo();
+          void commitFreeTextSession().then(handleUndo);
         }
         return;
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
-        void handleRedo();
+        void commitFreeTextSession().then(handleRedo);
         return;
       }
 
@@ -1103,13 +1286,13 @@ export function SmartPdfEditor() {
       if (e.key === "ArrowLeft" || e.key === "PageUp") {
         if (currentPage > 1) {
           e.preventDefault();
-          handlePageNavigation(currentPage - 1);
+          navigatePage(currentPage - 1);
         }
       } else if (e.key === "ArrowRight" || e.key === "PageDown") {
         const totalPages = inspectionResult?.metadata.pageCount || 1;
         if (currentPage < totalPages) {
           e.preventDefault();
-          handlePageNavigation(currentPage + 1);
+          navigatePage(currentPage + 1);
         }
       }
     };
@@ -1118,15 +1301,18 @@ export function SmartPdfEditor() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     currentPage,
+    cancelFreeTextSession,
+    commitFreeTextSession,
     editorMode,
     executeCommand,
     handleDeleteAnnotation,
     handleFormFieldChange,
-    handlePageNavigation,
+    navigatePage,
     handleRedo,
     handleUndo,
     inspectionResult,
     isSearchOpen,
+    paletteOpen,
     selectedItem,
     showConfirmOpenModal,
     showImportModal,
@@ -1253,13 +1439,59 @@ export function SmartPdfEditor() {
   }
 
   const isBusy = commandState.status === "RUNNING";
-  const nativeMutationEnabled = starPdfDoc !== null;
+  const nativeMutationEnabled = starPdfDoc !== null &&
+    (evidenceLevel === "VERIFIED" || evidenceLevel === "RECOVERED_VERIFIED") &&
+    securityInfo?.mutation_allowed !== false;
+  const paletteResults = searchPdfPalette(paletteQuery);
+  const runPaletteCommand = (id: PdfPaletteCommandId) => {
+    setPaletteOpen(false);
+    switch (id) {
+      case "add-text": setEditorMode("FILL_AND_SIGN"); setFillAndSignTool("text"); break;
+      case "add-image": imageInputRef.current?.click(); break;
+      case "search": setIsSearchOpen(true); break;
+      case "delete":
+        if (selectedItem?.type === "annotation") void handleDeleteAnnotation(selectedItem.id);
+        else if (selectedItem?.type === "image") void executeCommand(new RemoveImageCommand(selectedItem.id));
+        else if (selectedItem?.type === "vector") void executeCommand(new DeleteVectorCommand(selectedItem.id));
+        else if (selectedItem?.type === "text") void executeCommand(new DeleteTextCommand(selectedItem.id));
+        else void handleDeleteSelected();
+        break;
+      case "duplicate": void handleDuplicateSelected(); break;
+      case "rotate": setViewRotation((rotation) => (rotation + 90) % 360); break;
+      case "extract": void handleExtractSelected(); break;
+      case "properties": setShowInfoModal(true); break;
+      case "bookmarks": toast("Bookmark navigation is not available for this document."); break;
+      case "attachments": toast("Attachment browsing is not available for this document."); break;
+      case "export": void commitFreeTextSession().then(() => executeCommand(new ExportDocumentCommand("editable"))); break;
+    }
+  };
 
   return (
     <div
       className="flex flex-col h-full w-full bg-slate-100 overflow-hidden relative select-none"
       data-testid="smartpdf-editor-workspace"
     >
+      {paletteOpen && (
+        <div className="fixed inset-0 z-[100] flex justify-center bg-slate-950/35 pt-[12vh]" onMouseDown={(event) => { if (event.target === event.currentTarget) setPaletteOpen(false); }}>
+          <div role="dialog" aria-label="Commands" className="h-fit w-[min(92vw,460px)] rounded-xl border border-slate-200 bg-white p-2 shadow-2xl" data-testid="smartpdf-command-palette">
+            <input autoFocus value={paletteQuery} onChange={(event) => { setPaletteQuery(event.target.value); setPaletteIndex(0); }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") { event.preventDefault(); setPaletteIndex((index) => Math.min(index + 1, paletteResults.length - 1)); }
+                if (event.key === "ArrowUp") { event.preventDefault(); setPaletteIndex((index) => Math.max(index - 1, 0)); }
+                if (event.key === "Enter" && paletteResults[paletteIndex]) { event.preventDefault(); runPaletteCommand(paletteResults[paletteIndex].id); }
+              }}
+              placeholder="Search commands…" aria-label="Search commands" data-testid="smartpdf-command-query"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-500" />
+            <div role="listbox" aria-label="Matching commands" className="max-h-80 overflow-auto py-1">
+              {paletteResults.map((command, index) => <button key={command.id} type="button" role="option"
+                aria-selected={index === paletteIndex} data-testid={`smartpdf-command-${command.id}`}
+                onClick={() => runPaletteCommand(command.id)}
+                className={`block w-full rounded-md px-3 py-2 text-left text-sm ${index === paletteIndex ? "bg-sky-50 text-sky-900" : "text-slate-700 hover:bg-slate-50"}`}>{command.label}</button>)}
+              {!paletteResults.length && <p className="px-3 py-3 text-sm text-slate-500">No matching commands</p>}
+            </div>
+          </div>
+        </div>
+      )}
       {securityInfo && securityInfo.signature_state !== "UNSIGNED" ? (
         <div
           className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 flex items-center justify-between shrink-0"
@@ -1298,6 +1530,17 @@ export function SmartPdfEditor() {
           </span>
         </div>
       ) : null}
+
+      {evidenceLevel === "INFERRED" && (
+        <div role="status" data-testid="starpdf-inferred-note" className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950">
+          Some document structure was inferred during recovery. You can view and search this PDF; editing is paused because the affected objects cannot be verified safely.
+        </div>
+      )}
+      {evidenceLevel === "UNTRUSTED" && nativeEngineState !== "READ_ONLY" && (
+        <div role="status" data-testid="starpdf-untrusted-note" className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-950">
+          This document cannot be verified for editing. It is open for viewing only.
+        </div>
+      )}
 
       {/* Flat Form Suggestion Banner */}
       {nativeMutationEnabled && showFlatFormBanner && isFlatForm && (
@@ -1346,8 +1589,8 @@ export function SmartPdfEditor() {
         isModified={isModified}
         canUndo={nativeMutationEnabled && canUndo(historyState)}
         canRedo={nativeMutationEnabled && canRedo(historyState)}
-        onUndo={() => void handleUndo()}
-        onRedo={() => void handleRedo()}
+        onUndo={() => void commitFreeTextSession().then(handleUndo)}
+        onRedo={() => void commitFreeTextSession().then(handleRedo)}
         isSearchOpen={isSearchOpen}
         onToggleSearch={setIsSearchOpen}
         searchQuery={searchQuery}
@@ -1356,12 +1599,13 @@ export function SmartPdfEditor() {
         onSearchChange={(q) => void handleSearchChange(q)}
         onNextSearchResult={handleNextSearchResult}
         onPrevSearchResult={handlePrevSearchResult}
-        onPageChange={handlePageNavigation}
+        onPageChange={navigatePage}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onFitWidth={handleFitWidth}
         onFitPage={handleFitPage}
         onExport={async (mode) => {
+          await commitFreeTextSession();
           await executeCommand(new ExportDocumentCommand(mode));
         }}
         onShowInfo={() => setShowInfoModal(true)}
@@ -1441,6 +1685,16 @@ export function SmartPdfEditor() {
       />
 
       {/* Hidden File Input for Adding/Merging PDFs */}
+      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" aria-label="Add image"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file && inspectionResult) {
+            const page = inspectionResult.pages[currentPage - 1];
+            void executeCommand(new AddImageCommand(currentPage - 1,
+              (page.width - 180) / 2, (page.height - 120) / 2, 180, 120, file));
+          }
+          event.target.value = "";
+        }} />
       <input
         ref={mergeInputRef}
         type="file"
@@ -1485,7 +1739,7 @@ export function SmartPdfEditor() {
             pageCount={inspectionResult.metadata.pageCount}
             currentPage={currentPage}
             selectedPages={selectedPages}
-            onPageSelect={handlePageNavigation}
+            onPageSelect={navigatePage}
             onToggleSelection={handleTogglePageSelection}
             onSelectRange={handleSelectPageRange}
             onSelectAllPages={handleSelectAllPages}
@@ -1530,8 +1784,9 @@ export function SmartPdfEditor() {
             }
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget && editorMode === "SELECT") {
-              setSelectedItem(null);
+            if (editorMode === "SELECT" &&
+                !(e.target as Element).closest('[data-testid="pdf-contextual-toolbar"]')) {
+              selectPdfItem(null);
             }
           }}
         >
@@ -1553,7 +1808,7 @@ export function SmartPdfEditor() {
             <PdfContextualToolbar
               selection={selectedItem}
               containerRef={viewportContainerRef}
-              onDeselect={() => setSelectedItem(null)}
+              onDeselect={() => selectPdfItem(null)}
               onReplaceText={async (spanId, newText) => {
                 await executeCommand(new ReplaceTextCommand(spanId, newText));
               }}
@@ -1585,6 +1840,10 @@ export function SmartPdfEditor() {
                 selectedItem.type === "annotation" ? annotationValues[selectedItem.id] : undefined
               }
               onUpdateAnnotationProperties={handleUpdateAnnotationProperties}
+              freeTextDraft={freeTextSession?.annotationId === selectedItem.id ? freeTextSession.draftState : undefined}
+              onFreeTextDraftChange={updateFreeTextDraft}
+              onFreeTextDone={() => { void commitFreeTextSession().then(() => setSelectedItem(null)); }}
+              onFreeTextCancel={() => { void cancelFreeTextSession(); }}
               onDeleteAnnotation={handleDeleteAnnotation}
               onAddTextInstead={() => {
                 setEditorMode("FILL_AND_SIGN");
@@ -1598,18 +1857,18 @@ export function SmartPdfEditor() {
               pdfDocument={pdfProxy}
               pageNumber={currentPage}
               scale={scale}
-              rotation={inspectionResult.pages[currentPage - 1]?.rotation || 0}
+              rotation={((inspectionResult.pages[currentPage - 1]?.rotation || 0) + viewRotation) % 360}
               pageWidth={inspectionResult.pages[currentPage - 1]?.width || 612}
               pageHeight={inspectionResult.pages[currentPage - 1]?.height || 792}
               textSpans={pageTextSpans}
               images={pageImages}
               graphics={pageGraphics}
               fields={inspectionResult.fields}
-              annotations={inspectionResult.annotations}
+              annotations={previewAnnotations}
               candidates={currentCandidates}
               formAssistEnabled={nativeMutationEnabled && formAssistEnabled}
               selectedItem={selectedItem}
-              onSelectItem={nativeMutationEnabled ? setSelectedItem : undefined}
+              onSelectItem={nativeMutationEnabled ? selectPdfItem : undefined}
               onCanvasRendered={handleCanvasRendered}
               mode={nativeMutationEnabled ? editorMode : "SELECT"}
               fillAndSignTool={fillAndSignTool}

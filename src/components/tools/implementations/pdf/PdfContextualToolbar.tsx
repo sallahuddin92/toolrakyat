@@ -36,6 +36,7 @@ import type {
 } from "@/lib/pdf/starpdf-types";
 import type { AcroFormField, PdfMarkupAnnotation } from "@/lib/pdf/pdf-types";
 import type { SmartPdfSelection, SelectionType } from "@/lib/pdf/selection";
+import { freeTextStateFromAnnotation, type FreeTextEditState } from "@/lib/pdf/freetext-edit-session";
 
 export type { SelectionType };
 export type SelectedItem = NonNullable<SmartPdfSelection>;
@@ -62,6 +63,10 @@ interface PdfContextualToolbarProps {
   onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
   onAddTextInstead?: () => void;
+  freeTextDraft?: FreeTextEditState;
+  onFreeTextDraftChange?: (draft: FreeTextEditState) => void;
+  onFreeTextDone?: () => void;
+  onFreeTextCancel?: () => void;
 }
 
 const hexToRgbTuple = (hex: string): [number, number, number] => {
@@ -629,6 +634,10 @@ function AnnotationControls({
   onUpdateAnnotationProperties,
   onDeleteAnnotation,
   onDeselect,
+  freeTextDraft,
+  onFreeTextDraftChange,
+  onFreeTextDone,
+  onFreeTextCancel,
 }: {
   annot: PdfMarkupAnnotation;
   annotationValue?: string;
@@ -636,6 +645,10 @@ function AnnotationControls({
   onUpdateAnnotationProperties?: (annotId: string, properties: StarPdfUpdateAnnotationInput) => Promise<void>;
   onDeleteAnnotation?: (annotId: string) => Promise<void>;
   onDeselect?: () => void;
+  freeTextDraft?: FreeTextEditState;
+  onFreeTextDraftChange?: (draft: FreeTextEditState) => void;
+  onFreeTextDone?: () => void;
+  onFreeTextCancel?: () => void;
 }) {
   const sourceText = annotationValue ?? annot.contents ?? "";
   const [localText, setLocalText] = useState(sourceText);
@@ -667,6 +680,23 @@ function AnnotationControls({
   const [freeTextHighlightColor, setFreeTextHighlightColor] = useState(
     initialFreeTextHighlightColor,
   );
+
+  useEffect(() => {
+    if (annot.subtype !== "FreeText" || !onFreeTextDraftChange || !freeTextDraft) return;
+    onFreeTextDraftChange({
+      ...freeTextStateFromAnnotation(annot),
+      contents: localText,
+      fontFamily: freeTextFamily,
+      fontSize: freeTextSize,
+      bold: freeTextBold,
+      italic: freeTextItalic,
+      underline: freeTextUnderlined,
+      strikethrough: freeTextStruckThrough,
+      textColor: hexToRgbTuple(freeTextColor),
+      highlightEnabled: freeTextHighlighted,
+      highlightColor: hexToRgbTuple(freeTextHighlightColor),
+    });
+  }, [annot, freeTextDraft, localText, freeTextFamily, freeTextSize, freeTextBold, freeTextItalic, freeTextUnderlined, freeTextStruckThrough, freeTextColor, freeTextHighlighted, freeTextHighlightColor, onFreeTextDraftChange]);
 
   const freeTextStyleChanged =
     freeTextFamily !== (annot.fontFamily ?? "SansSerif") ||
@@ -957,6 +987,10 @@ function AnnotationControls({
           if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
+            if (annot.subtype === "FreeText" && onFreeTextCancel) {
+              onFreeTextCancel();
+              return;
+            }
             setLocalText(sourceText);
             setFreeTextFamily(annot.fontFamily ?? "SansSerif");
             setFreeTextSize(annot.fontSize ?? 12);
@@ -1079,7 +1113,7 @@ function AnnotationControls({
           )}
         </>
       )}
-      <Button
+      {annot.subtype !== "FreeText" && <Button
         type="button"
         variant="outline"
         size="sm"
@@ -1089,7 +1123,10 @@ function AnnotationControls({
         data-testid="context-annotation-apply-btn"
       >
         Apply
-      </Button>
+      </Button>}
+      {annot.subtype === "FreeText" && onFreeTextDone && (
+        <Button type="button" size="sm" className="h-8 text-xs" onClick={onFreeTextDone} data-testid="context-freetext-done-btn">Done</Button>
+      )}
       <Button
         type="button"
         variant="ghost"
@@ -1142,6 +1179,10 @@ export function PdfContextualToolbar({
   onUpdateAnnotationProperties,
   onDeleteAnnotation,
   onAddTextInstead,
+  freeTextDraft,
+  onFreeTextDraftChange,
+  onFreeTextDone,
+  onFreeTextCancel,
 }: PdfContextualToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{
@@ -1481,6 +1522,10 @@ export function PdfContextualToolbar({
           onUpdateAnnotationProperties={onUpdateAnnotationProperties}
           onDeleteAnnotation={onDeleteAnnotation}
           onDeselect={onDeselect}
+          freeTextDraft={freeTextDraft}
+          onFreeTextDraftChange={onFreeTextDraftChange}
+          onFreeTextDone={onFreeTextDone}
+          onFreeTextCancel={onFreeTextCancel}
         />
       )}
 
