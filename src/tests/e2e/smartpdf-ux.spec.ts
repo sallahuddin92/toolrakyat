@@ -48,6 +48,8 @@ test("FreeText drafts preview immediately, cancel rolls back, and export flushes
   });
   const confirm = page.getByTestId("confirm-dialog-confirm-btn");
   if (await confirm.isVisible().catch(() => false)) await confirm.click();
+  await expect(page.locator('[title="ux-reopened.pdf"]')).toBeVisible();
+  await expect(page.locator('canvas[data-rendered="true"]')).toBeVisible();
   await page.locator('[data-testid^="canvas-annotation-annot-obj-"][title*="FreeText"]').first().dispatchEvent("click");
   await expect(page.getByTestId("context-annotation-input")).toHaveValue("Final draft for export");
 });

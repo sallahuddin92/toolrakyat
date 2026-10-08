@@ -67,6 +67,16 @@ function createSession(): FreeTextEditSession {
 }
 
 describe("FreeText edit session state", () => {
+  it("treats RGB picker round trips as unchanged while detecting a one-step edit", () => {
+    const original = freeTextStateFromAnnotation(annotation);
+    const pickerRoundTrip = cloneFreeTextState(original);
+    pickerRoundTrip.textColor = original.textColor.map((value) => Math.round(value * 255) / 255) as [number, number, number];
+    pickerRoundTrip.highlightColor = original.highlightColor.map((value) => Math.round(value * 255) / 255) as [number, number, number];
+    expect(freeTextStatesEqual(original, pickerRoundTrip)).toBe(true);
+    pickerRoundTrip.textColor[0] += 1 / 255;
+    expect(freeTextStatesEqual(original, pickerRoundTrip)).toBe(false);
+  });
+
   it("captures and clones every authoritative editable property", () => {
     const state = freeTextStateFromAnnotation(annotation);
     const clone = cloneFreeTextState(state);

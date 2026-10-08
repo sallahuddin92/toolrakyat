@@ -163,7 +163,7 @@ export async function drainFreeTextSyncQueue(
 const sameColor = (
   left: [number, number, number],
   right: [number, number, number],
-) => left.every((channel, index) => Math.abs(channel - right[index]) < 0.0001);
+) => left.every((channel, index) => Math.round(channel * 255) === Math.round(right[index] * 255));
 
 export function freeTextStateFromAnnotation(annotation: PdfMarkupAnnotation): FreeTextEditState {
   return {

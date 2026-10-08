@@ -170,7 +170,7 @@ export function PdfInteractiveOverlay({
       x >= item.bounds.left && x <= item.bounds.left + item.bounds.width &&
       y >= item.bounds.top && y <= item.bounds.top + item.bounds.height);
     const ordered = orderedHitCandidates(hits.length ? hits : [fallback], selectedItem);
-    onSelectItem(event.altKey ? cycleHitCandidate(ordered, selectedItem) : ordered[0]);
+    onSelectItem(event.altKey ? cycleHitCandidate(ordered, selectedItem) : fallback);
   };
 
   const overlayRef = useRef<HTMLDivElement | null>(null);

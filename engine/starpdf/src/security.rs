@@ -269,10 +269,10 @@ impl DocumentSecurityInfo {
         } else {
             mutation.clone()
         };
-        let pages = if self.signature_state != SignatureState::Unsigned {
-            denied("SIGNED_PAGE_MUTATION_UNSUPPORTED")
-        } else {
+        let pages = if self.signature_state == SignatureState::Unsigned {
             mutation.clone()
+        } else {
+            denied("SIGNED_PAGE_MUTATION_UNSUPPORTED")
         };
         DocumentCapabilities {
             can_view: view,

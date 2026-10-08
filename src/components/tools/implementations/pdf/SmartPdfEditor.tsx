@@ -145,6 +145,7 @@ export function SmartPdfEditor() {
   const freeTextCommitRef = useRef<Promise<void> | null>(null);
   const sessionNumberRef = useRef(0);
   const sourceBytesRef = useRef<Uint8Array | null>(null);
+  const inspectionResultRef = useRef<DocumentInspectionResult | null>(null);
   const annotationValuesRef = useRef<Record<string, string>>({});
   const fieldValuesRef = useRef<Record<string, string | boolean | string[]>>({});
 
@@ -220,6 +221,7 @@ export function SmartPdfEditor() {
     };
   }, [cleanupProxy]);
 
+  const loadBarrierRef = useRef<Promise<void>>(Promise.resolve());
   const loadDocument = useCallback(
     async (
       bytes: Uint8Array,
@@ -228,6 +230,10 @@ export function SmartPdfEditor() {
       initialPage = 1,
       isHistoryRestore = false,
     ) => {
+      const previousLoad = loadBarrierRef.current;
+      let releaseLoad!: () => void;
+      loadBarrierRef.current = new Promise<void>((resolve) => { releaseLoad = resolve; });
+      await previousLoad;
       setIsLoading(true);
       setError(null);
       setSecurityInfo(null);
@@ -303,8 +309,9 @@ export function SmartPdfEditor() {
           initialAnnotationValues[annot.id] = annot.contents;
         }
 
-        setSourceBytes(bytes);
         sourceBytesRef.current = bytes;
+        inspectionResultRef.current = inspected;
+        setSourceBytes(bytes);
         setFilename(docFilename);
         setInspectionResult(inspected);
         setStarPdfDoc(starDoc);
@@ -341,6 +348,8 @@ export function SmartPdfEditor() {
         const friendly = formatPdfErrorMessage(err);
         setError(friendly.userMessage);
         toast.error(friendly.userMessage);
+      } finally {
+        releaseLoad();
       }
     },
     [cleanupProxy],
@@ -360,13 +369,10 @@ export function SmartPdfEditor() {
    * bounded history, dirty state, selection resolution, error translation, and user feedback.
    */
   const isBusyRef = useRef(false);
-  useEffect(() => {
-    isBusyRef.current = commandState.status === "RUNNING";
-  }, [commandState.status]);
 
   const executeCommand = useCallback(
     async (command: SmartPdfCommand): Promise<void> => {
-      if (!starPdfDocRef.current || evidenceLevel === "UNTRUSTED" || evidenceLevel === "INFERRED" || securityInfo?.mutation_allowed === false) {
+      if (!starPdfDocRef.current || (command.isMutating && securityInfo?.mutation_allowed !== true)) {
         toast.error(
           "This document is open as a read-only preview because its structure could not be safely loaded for editing.",
         );
@@ -376,18 +382,20 @@ export function SmartPdfEditor() {
 
 
       if (!isLightweight) {
-        // If currently running a previous operation, wait up to 2.5s for it to settle
+        // Page mutations may still be reopening the PDF when the user exports.
+        // Keep commands serialized until that load has completed.
         let waitCount = 0;
-        while (isBusyRef.current && waitCount < 50) {
+        while (isBusyRef.current && waitCount < 600) {
           await new Promise((resolve) => setTimeout(resolve, 50));
           waitCount++;
         }
 
         if (isBusyRef.current) {
-          console.warn(`Command "${command.label}" rejected: executor is currently busy.`);
+          toast.error("The previous PDF operation is still running. Please try again.");
           return;
         }
 
+        isBusyRef.current = true;
         setCommandState({
           status: "RUNNING",
           commandId: command.id,
@@ -399,12 +407,12 @@ export function SmartPdfEditor() {
         sourceBytes: sourceBytesRef.current,
         filename,
         currentPage,
-        pageCount: inspectionResult?.metadata.pageCount || 1,
+        pageCount: inspectionResultRef.current?.metadata.pageCount || 1,
         selection: selectedItem,
         starPdfDoc: starPdfDocRef.current,
         fieldValues: fieldValuesRef.current,
         annotationValues: annotationValuesRef.current,
-        inspectionResult,
+        inspectionResult: inspectionResultRef.current,
       };
 
       try {
@@ -544,6 +552,7 @@ export function SmartPdfEditor() {
         }
       } finally {
         if (!isLightweight) {
+          isBusyRef.current = false;
           setCommandState({ status: "IDLE" });
         }
       }
@@ -552,7 +561,6 @@ export function SmartPdfEditor() {
     [
       currentPage,
       filename,
-      evidenceLevel,
       inspectionResult,
       loadDocument,
       pageGraphics,
@@ -824,10 +832,14 @@ export function SmartPdfEditor() {
   const performOpenNewFile = useCallback(() => {
     cleanupProxy();
     setSourceBytes(null);
+    sourceBytesRef.current = null;
     setFilename("");
     setInspectionResult(null);
+    inspectionResultRef.current = null;
     setFieldValues({});
+    fieldValuesRef.current = {};
     setAnnotationValues({});
+    annotationValuesRef.current = {};
     setIsModified(false);
     setSelectedPages(new Set([1]));
     setError(null);
@@ -980,6 +992,12 @@ export function SmartPdfEditor() {
   const handleDeleteAnnotation = useCallback(
 
     async (annotId: string) => {
+      if (freeTextSessionRef.current?.annotationId === annotId) {
+        await freeTextCommitRef.current;
+        setSelectedItem(null);
+        freeTextSessionRef.current = null;
+        setFreeTextSession(null);
+      }
       await executeCommand(new DeleteAnnotationCommand(currentPage - 1, annotId));
     },
     [currentPage, executeCommand],
@@ -999,6 +1017,7 @@ export function SmartPdfEditor() {
           return;
         }
       }
+      fieldValuesRef.current = { ...fieldValuesRef.current, [fieldName]: value };
       setFieldValues((prev) => ({ ...prev, [fieldName]: value }));
       setIsModified(true);
       if (sourceBytes) {
@@ -1439,9 +1458,7 @@ export function SmartPdfEditor() {
   }
 
   const isBusy = commandState.status === "RUNNING";
-  const nativeMutationEnabled = starPdfDoc !== null &&
-    (evidenceLevel === "VERIFIED" || evidenceLevel === "RECOVERED_VERIFIED") &&
-    securityInfo?.mutation_allowed !== false;
+  const nativeMutationEnabled = starPdfDoc !== null && securityInfo?.mutation_allowed === true;
   const paletteResults = searchPdfPalette(paletteQuery);
   const runPaletteCommand = (id: PdfPaletteCommandId) => {
     setPaletteOpen(false);

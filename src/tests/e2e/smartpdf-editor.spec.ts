@@ -5073,6 +5073,10 @@ test.describe("SmartPDF text formatting and decorations", () => {
         await runAndWaitForCanvasRenderCycle(originalCanvas, () =>
           page.getByTestId("toolbar-redo-btn").click(),
         );
+        await expect.poll(async () =>
+          changedPixelRegionRatio(originalPng, await captureCanvasPng(originalCanvas), targetRegion),
+          { message: `${scriptCase.label} after redo` },
+        ).toBeGreaterThan(0.0001);
       }
 
       const firstOutput = await exportEditableBytes(page);
@@ -5086,18 +5090,22 @@ test.describe("SmartPDF text formatting and decorations", () => {
       expect(reopenedPng.byteLength, scriptCase.label).toBeGreaterThan(1_000);
       const reopenedAnnotation = page.locator(`[data-testid="${stableId}"]`);
       await expect(reopenedAnnotation).toHaveAttribute("title", new RegExp(scriptCase.contents));
+      await reopenedAnnotation.click();
+      await expect(page.getByTestId("context-freetext-font-size")).toHaveValue(
+        String(22 + index),
+      );
       if (scriptCase.visual) {
-        expect(
-          await changedPixelRegionRatio(originalPng, reopenedPng, targetRegion),
-          scriptCase.label,
+        await expect.poll(async () =>
+          changedPixelRegionRatio(originalPng, await captureCanvasPng(reopenedCanvas), targetRegion),
+          { message: scriptCase.label },
         ).toBeGreaterThan(0.0001);
+        const settledPng = await captureCanvasPng(reopenedCanvas);
         expect(
-          await changedPixelRegionRatio(originalPng, reopenedPng, unrelatedRegion),
+          await changedPixelRegionRatio(originalPng, settledPng, unrelatedRegion),
           `${scriptCase.label} unrelated region`,
         ).toBeLessThan(0.0001);
       }
 
-      await reopenedAnnotation.click();
       await expect(page.getByTestId("context-annotation-input")).toHaveValue(
         scriptCase.contents,
       );
