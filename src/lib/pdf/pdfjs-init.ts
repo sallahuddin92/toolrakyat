@@ -30,7 +30,9 @@ export async function getPdfjsLib(): Promise<typeof import("pdfjs-dist")> {
     };
   }
 
-  const lib = await import("pdfjs-dist");
+  // The unminified PDF.js bundle reuses Webpack's __webpack_exports__ name,
+  // which collides with Next's eval wrapper in Webpack development builds.
+  const lib = await import("pdfjs-dist/build/pdf.min.mjs");
   if (typeof window !== "undefined") {
     lib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
   }
