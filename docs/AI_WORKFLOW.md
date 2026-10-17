@@ -1,0 +1,126 @@
+# SmartPDF / StarPDF AI & Codex Agent Pre-Implementation Protocol
+
+**Document ID:** DOC-AI-001  
+**Status:** CANONICAL PROTOCOL (Phase 0 / Pre-Implementation)  
+**Audience:** All Autonomous AI Agents, Codex Runners & Human Contributors  
+**Repository:** `sallahuddin92/toolrakyat`  
+
+---
+
+## 1. Mandatory Pre-Flight Verification
+
+Every AI agent, automated pipeline, or engineering contributor preparing to execute an implementation task on the SmartPDF / StarPDF codebase **MUST follow this mandatory pre-flight protocol**.
+
+### Rule 0: No Assumptions Permitted
+No code modification, refactoring, or crate creation may proceed based solely on user prompt assumptions or external LLM training data. The canonical documents committed in `docs/` are the **sole authoritative source of truth**.
+
+---
+
+## 2. Mandatory Reading Order
+
+Before touching any code or making any repository modifications, the agent **MUST read and verify** the following 9 canonical documents:
+
+1. `docs/PROJECT_CONTEXT.md`
+2. `docs/product/PRD.md`
+3. `docs/technical/TRD.md`
+4. `docs/product/APP_FLOW.md`
+5. `docs/design/DESIGN_BRIEF.md`
+6. `docs/technical/BACKEND_SCHEMA.md`
+7. `docs/planning/IMPLEMENTATION_PLAN.md`
+8. `docs/REQUIREMENT_TRACEABILITY.md`
+9. `docs/AI_WORKFLOW.md` (this protocol)
+
+---
+
+## 3. Mandatory Pre-Implementation Report Template
+
+Prior to editing or creating any production or test file, the agent **MUST output the following structured pre-implementation report** in its message turn:
+
+```markdown
+### AGENT PRE-IMPLEMENTATION READINESS REPORT
+
+**BASE SHA:** [Current git rev-parse HEAD]
+**DOCUMENTS READ:**
+- [x] docs/PROJECT_CONTEXT.md
+- [x] docs/product/PRD.md
+- [x] docs/technical/TRD.md
+- [x] docs/product/APP_FLOW.md
+- [x] docs/design/DESIGN_BRIEF.md
+- [x] docs/technical/BACKEND_SCHEMA.md
+- [x] docs/planning/IMPLEMENTATION_PLAN.md
+- [x] docs/REQUIREMENT_TRACEABILITY.md
+- [x] docs/AI_WORKFLOW.md
+
+**REQUIREMENTS TARGETED:**
+- [Requirement IDs from PRD, e.g. PRD-FR-005, PRD-NFR-009]
+
+**CODE AREAS INSPECTED:**
+- [List exact files and line ranges inspected]
+
+**CURRENT BEHAVIOR:**
+- [Accurate, grounded description of how the system currently behaves]
+
+**TARGET BEHAVIOR:**
+- [Specific description of the exact change to be implemented]
+
+**ASSUMPTIONS:**
+- [Explicit list of validated technical assumptions]
+
+**CONFLICTS IDENTIFIED:**
+- [None / Detailed description of any discrepancy between docs and code]
+
+**EXPECTED FILES TO BE MODIFIED / CREATED:**
+- [List of exact file paths]
+```
+
+### Critical Stop Condition on Conflict
+> [!CAUTION]
+> If any conflict is detected between the canonical documents and the active codebase, or between different canonical documents, the agent **MUST STOP IMMEDIATELY**.
+> The agent must NOT guess, reconcile silently, or make arbitrary design decisions. It must report the exact conflict and wait for human instruction.
+
+---
+
+## 4. Git & Repository Safety Rules
+
+1. **Clean Workspace Verification:** Always inspect `git status --short`, `git branch --show-current`, and `git rev-parse HEAD` before starting work.
+2. **Explicit Staging Only:**
+   - **NEVER** run `git add -A` or `git add .`.
+   - Stage files explicitly by exact relative path: `git add crates/starpdf-app-core/src/lib.rs`.
+3. **No Destructive Operations:**
+   - **NEVER** run `git reset --hard`, `git clean -fd`, `git stash drop`, or `git rebase` without explicit human authorization.
+   - **NEVER** force-push (`git push --force`).
+4. **Strangler Migration Discipline:**
+   - Never perform a big-bang rewrite.
+   - All migrations must introduce additive, isolated layers that run side-by-side with existing working code.
+   - Existing qualified systems (e.g. `PDF.js` renderer, Playwright E2E suites) remain active until replacement systems pass all performance and correctness gates.
+
+---
+
+## 5. Mandatory Verification & Quality Gates
+
+Before declaring any implementation task complete, the agent must execute and pass the appropriate verification gates:
+
+### Rust Crates
+```sh
+cargo fmt --manifest-path engine/starpdf/Cargo.toml --check
+cargo clippy --manifest-path engine/starpdf/Cargo.toml --all-features -- -D warnings
+cargo test --manifest-path engine/starpdf/Cargo.toml --all-features
+```
+
+### Web Shell & WASM
+```sh
+npm run typecheck
+npm run test
+```
+
+### End-to-End Browser Suites (When UI/WASM is Modified)
+```sh
+npx playwright test src/tests/e2e/smartpdf-editor.spec.ts
+```
+
+### Qualification Corpus (When Engine Core is Modified)
+```sh
+python3 qualification/starpdf/run.py --regressions
+```
+
+Any gate failure invalidates the task. The agent must remediate the failure or rollback changes cleanly.
