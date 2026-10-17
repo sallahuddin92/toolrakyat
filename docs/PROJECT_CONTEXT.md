@@ -1,7 +1,7 @@
 # SmartPDF / StarPDF Project Context & Engineering Overview
 
 **Document ID:** DOC-CTX-001  
-**Status:** CANONICAL REFERENCE (Phase 0 / Pre-Implementation)  
+**Status:** CANONICAL QUALIFIED (Phase 0 / Pre-Implementation)  
 **Product:** SmartPDF  
 **Engine:** StarPDF  
 **Repository:** `sallahuddin92/toolrakyat`  
@@ -14,11 +14,15 @@
 
 SmartPDF is a world-class, local-first professional PDF application powered by the StarPDF engine. Designed to provide Adobe Acrobat Pro-class capability, familiarity, and workflow breadth, SmartPDF is engineered for users who demand professional document manipulation without compromising on privacy, memory safety, or structural precision.
 
-Unlike conventional PDF applications that either wrap legacy C/C++ libraries prone to security vulnerabilities or offer shallow web overlays that damage underlying document structures, SmartPDF is built on a **Rust-first foundation**. It guarantees mathematical proof that edits are contained within strict, declared boundaries where **UNEXPLAINED CHANGE = 0**.
+Unlike conventional PDF applications that either wrap legacy C/C++ libraries prone to security vulnerabilities or offer shallow web overlays that damage underlying document structures, SmartPDF is built on a **pure-Rust foundation with zero C-dependencies**. It guarantees mathematical proof that edits are contained within strict, declared boundaries where **UNEXPLAINED CHANGE = 0**.
 
 ### 1.1 Product vs. Engine Distinction
 - **SmartPDF:** The end-user application suite, comprising the desktop application (macOS, Windows, Linux), web workspace, UI design tokens, panels, tools, shortcuts, and user-facing workflows.
 - **StarPDF:** The low-level, high-performance, memory-safe PDF systems engine written in Rust. StarPDF owns parsing, COS object graph representation, xref recovery, incremental revisions, HarfRust font shaping, subsetting, layout calculation, execution contracts, security gating, and hardware-accelerated rendering.
+
+### 1.2 Dual Release Track Strategy
+- **TRACK A (Current Product & RC2 Release Candidate):** Stabilize and qualify the existing SmartPDF web application and StarPDF engine on `main` and `arch/integrated`. Completes manual acceptance testing (`docs/SMARTPDF_RC2_MANUAL_ACCEPTANCE.md`), verifies the 32-fixture qualification corpus (`qualification/starpdf/corpus.json`), and freezes `v1.0.0-rc.2`. Architecture work in Track B must NEVER rewrite, delay, or invalidate Track A deliverables.
+- **TRACK B (Rust-First Desktop & Architecture Redevelopment):** Strangler migration creating `starpdf-app-core`, `starpdf-render-wgpu`, `smartpdf-desktop`, bringing 100% of state and rendering authority into Rust.
 
 ---
 
@@ -38,7 +42,7 @@ The verified integration baseline at commit `f7ff85464b190b74c89c1f8be9862be3709
    - Safe text repositioning: direct `Tm` matrix editing with automatic dependency verification (refuses moves that disturb dependent downstream text).
 3. **Raster Image Manipulation:**
    - Enumeration of image XObjects, extraction of bounds, color spaces, and dimensions.
-   - In-place image replacement (JPEG/PNG) with automatic shared XObject isolation (modifying an image on page 1 never corrupts cloned instances on page 2).
+   - In-place image replacement (JPEG/PNG) with automatic shared XObject isolation (`is_shared` check clones XObject so modifying page 1 never corrupts cloned instances on page 2).
    - Direct spatial drag-move, corner resizing, and deletion of images.
    - Insertion of handwritten signatures and stamp images with alpha transparency.
 4. **Vector Graphics & Paths:**
@@ -47,18 +51,18 @@ The verified integration baseline at commit `f7ff85464b190b74c89c1f8be9862be3709
    - Direct manipulation of vector bounding boxes and path deletion.
 5. **Interactive AcroForms & Widgets:**
    - Traversal of AcroForm field hierarchies and terminal widget resolution.
-   - Spatial editing and value updating for text fields, checkboxes (`/AS` and `/V` synchronization), radio button groups, and dropdown choice menus.
+   - Spatial editing and state synchronization for text fields, checkboxes (`/AS` and `/V` synchronization), radio button groups, and dropdown choice menus.
    - ISO 32000-compliant `/AP` (Appearance Stream) regeneration with embedded font programs.
 6. **Markup & FreeText Annotations:**
    - Discovery and editing of FreeText, Highlight, Underline, Strikeout, Square, Circle, Line, and Ink annotations.
-   - Live on-canvas FreeText editing with real-time appearance regeneration and styling controls.
+   - Live on-canvas FreeText editing with real-time appearance regeneration and styling controls (`freetext-edit-session.ts`).
 7. **Document Assembly & Page Management:**
    - Page tree mutations: reorder, delete, duplicate, and insert blank pages with full multi-level undo/redo.
    - Multi-page organizer rail with Shift/Ctrl multi-selection and drag-and-drop.
    - Page extraction (selected pages, ranges, burst) and multi-document merging.
 8. **Security & Cryptographic Gating:**
-   - Detection of `/ByteRange` and digital signature contents; auditing of post-signing modifications.
-   - Fail-closed refusal of encrypted documents lacking valid authorization.
+   - Detection of Standard R2–R6 and Public-Key encryption; fail-closed refusal (`DecryptionUnavailable`). Actual decryptor is TARGET.
+   - Detection of `/ByteRange` and digital signature contents; auditing of post-signing modifications. Cryptographic verification is `NOT_PERFORMED` in baseline.
    - Execution contracts foundation (`StarNodeId`, `RenderNodeId`, `EvidenceLevel`, `ObjectState`, `DocumentDelta`, `MutationEnvelope`, `MutationCertificate`, $C_s(\Delta)$, $C_v(\Delta)$).
 
 ---
@@ -119,12 +123,12 @@ StarPDF introduces several foundational innovations that distinguish it from leg
 
 ### 5.1 Current vs. Target Renderer
 - **Current Production Renderer:** **PDF.js (v5.6)** running in the browser. It serves as the primary visual display and differential pixel oracle.
-- **Experimental Prototype:** A lightweight canvas adapter (`src/lib/pdf/execution/render/`) featuring a packed Bounding Volume Hierarchy (BVH) spatial index (~5.8 µs per query, 17× faster than linear scan).
+- **Experimental Prototype:** A lightweight TypeScript canvas adapter (`src/lib/pdf/execution/render/`) featuring a packed Bounding Volume Hierarchy (BVH) spatial index (~5.8 µs per query benchmarked over 10,000 synthetic rects on local desktop hardware).
 - **Target Production Renderer:** **`starpdf-render-wgpu`**, a native hardware-accelerated GPU pipeline written in Rust:
   - Compiles `StarGraph` into **Star Render IR** (`GlyphRun`, `ImageInstance`, `PathInstance`, `ClipNode`, `FormInstance`).
-  - Queries primitives via a SIMD-accelerated packed BVH.
+  - Queries primitives via a SIMD-accelerated packed BVH in Rust.
   - Blits via `wgpu` using Metal on macOS, DirectX 12 / Vulkan on Windows, Vulkan on Linux, and WebGPU in browsers.
-- **Strangler Rule:** PDF.js will **NOT** be removed until `starpdf-render-wgpu` independently proves 99.5%+ visual parity across a 1,000-document compatibility corpus.
+- **Strangler Rule:** PDF.js will **NOT** be removed until `starpdf-render-wgpu` independently proves 99.5%+ visual parity across a 1,000-fixture target compatibility corpus.
 
 ---
 
@@ -143,12 +147,12 @@ toolrakyat/
 │       │   ├── font/             <-- HarfRust, Skera, font catalog, CMap
 │       │   ├── mutation/         <-- Text, image, vector mutation engines
 │       │   ├── execution/        <-- StarNodeId, Delta, Envelopes, Closures
-│       │   ├── security.rs       <-- Encryption, permissions, signatures
+│       │   ├── security.rs       <-- Encryption detection, permissions, signatures
 │       │   ├── writer/           <-- Incremental & complete healing writers
 │       │   └── wasm/             <-- WASM bindings & DTOs
 │       └── tests/                <-- Extensive Rust test suites
 ├── qualification/
-│   └── starpdf/                  <-- Differential test harness (Poppler/PDF.js/qpdf)
+│   └── starpdf/                  <-- Regression harness (32 fixtures in corpus.json)
 ├── src/
 │   ├── app/smartpdf/             <-- Fullscreen Next.js web application route
 │   ├── components/tools/implementations/pdf/
@@ -178,13 +182,13 @@ toolrakyat/
 
 The evolution of SmartPDF follows an 11-phase Strangler migration pattern:
 - **Phase 0:** Canonical documentation & baseline freeze *(Completed in this run)*.
-- **Phase 1:** Ingest `starpdf-app-core` underneath current web UI.
+- **Phase 1:** Ingest `starpdf-app-core` underneath current web UI; conduct desktop UI spike.
 - **Phase 2:** Transfer authority of selection, editing sessions, and history into Rust.
 - **Phase 3:** Mature `StarGraph` and enforce `MutationCertificate` checks.
 - **Phase 4:** Port Render IR and packed BVH spatial index into Rust.
 - **Phase 5:** Build native `smartpdf-desktop` shell (`winit` + `wgpu`).
 - **Phase 6:** Implement `wgpu` hardware rasterization vertical slices.
-- **Phase 7:** Implement professional desktop UI workspace (Slint / native chrome).
+- **Phase 7:** Implement professional desktop UI workspace.
 - **Phase 8:** Expand Acrobat-class features (Redaction, Compare, Signatures, OCR, Accessibility).
 - **Phase 9:** Promote `starpdf-render-wgpu` to primary renderer.
 - **Phase 10:** Decommission React editor state authority in web shell.
@@ -194,8 +198,9 @@ The evolution of SmartPDF follows an 11-phase Strangler migration pattern:
 
 ## 8. Immediate Next Milestone: Phase 1
 
-The immediate next objective is **Phase 1: Rust App-Core Ingestion Under Current SmartPDF**.
+The immediate next objective is **Phase 1: Rust App-Core Ingestion Under Current SmartPDF**:
 - Create `crates/starpdf-app-core`.
 - Implement `SessionManager` and `DocumentSession` in Rust.
 - Expose session and tab query bindings through WASM.
+- Implement the UI Framework Desktop Spike (`apps/smartpdf-desktop-spike`) to evaluate Slint + `winit` + `wgpu` against the 7-point decision gate.
 - Hook `SmartPdfEditor.tsx` to read document session status directly from Rust without altering current visual behavior.

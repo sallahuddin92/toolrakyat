@@ -1,7 +1,7 @@
 # SmartPDF Local-First State Architecture & Data Schemas
 
 **Document ID:** DOC-SCH-001  
-**Status:** CANONICAL DRAFT (Phase 0 / Pre-Implementation)  
+**Status:** CANONICAL QUALIFIED (Phase 0 / Pre-Implementation)  
 **System:** SmartPDF Application Core State & StarPDF In-Memory Models  
 **Repository:** `sallahuddin92/toolrakyat`  
 **Current Baseline:** `f7ff85464b190b74c89c1f8be9862be37090dd7f` (`arch/integrated`)  
@@ -18,6 +18,9 @@ This document details the exact Rust data structures, schemas, and serialization
 1. In-Memory Document Execution State (`StarExecutionState`, `StarGraph`, `ObjectState`).
 2. Structural Mutations & Invariants (`DocumentDelta`, `MutationEnvelope`, `MutationCertificate`).
 3. Local Client-Side Persistence (Autosave Journals, History, Recent Files, Preferences).
+
+> [!NOTE]
+> Execution contracts (`StarNodeId`, `RenderNodeId`, `EvidenceLevel`, `ObjectState`, `DocumentDelta`, `MutationEnvelope`, `MutationCertificate`) are fully implemented and qualified in `engine/starpdf/src/execution/` as shadow contracts. Their promotion to authoritative production mutation gating occurs in Phase 3. Persistent JSON journal schemas are the target specification for Phase 2.
 
 ---
 
@@ -214,7 +217,7 @@ pub enum MutationCertificate {
 
 ---
 
-## 4. Local-First Persistence Schemas
+## 4. Local-First Persistence Schemas (Target Phase 2 Specification)
 
 ### 4.1 Session Journal (Autosave & Crash Recovery)
 SmartPDF persists active uncommitted edits to local disk (or browser IndexedDB) in an append-only JSON journal:

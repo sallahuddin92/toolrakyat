@@ -1,7 +1,7 @@
 # SmartPDF Application Flows & User Interaction Specification
 
 **Document ID:** DOC-FLOW-001  
-**Status:** CANONICAL DRAFT (Phase 0 / Pre-Implementation)  
+**Status:** CANONICAL QUALIFIED (Phase 0 / Pre-Implementation)  
 **System:** SmartPDF Desktop & Web  
 **Baseline Commit:** `f7ff85464b190b74c89c1f8be9862be37090dd7f` (`arch/integrated`)  
 
@@ -46,7 +46,8 @@ flowchart TD
     ReadOnlyFallback --> RenderViewport[Render Viewport via PDF.js Oracle]
     
     CheckEncryption -->|Not Encrypted| BuildExecutionState[Construct StarExecutionState & Index Pages]
-    CheckEncryption -->|Encrypted| AuthFlow[Password Authentication Modal]
+    CheckEncryption -->|Encrypted: Baseline| SafeRefusal[Fail-Closed Refusal: DecryptionUnavailable<br>Show Informational Banner]
+    CheckEncryption -->|Encrypted: Target Phase 8| AuthFlow[Password Authentication Modal]
     
     AuthFlow -->|Submit Password| VerifyCreds{Valid Password?}
     VerifyCreds -->|Yes| DecryptStreams[Derive File Encryption Key & Decrypt]
@@ -106,7 +107,7 @@ flowchart TD
 3. **Move & Resize:** User drags image corner:
    - Live bounding guide updates on canvas.
    - On mouse release, `starpdf-app-core` emits `MoveResizeImageCommand(image_ref, new_rect)`.
-   - Engine verifies image resource is isolated; if shared across multiple pages, it transparently duplicates the XObject dictionary to ensure other pages remain untouched.
+   - Engine verifies image resource is isolated; if shared across multiple pages (`is_shared`), it transparently duplicates the XObject dictionary to ensure other pages remain untouched.
 4. **Replacement:** User selects replacement JPEG/PNG:
    - Engine decodes image headers, creates replacement `/XObject /Subtype /Image` stream with identical or updated dimensions, and splices the resource reference.
 
@@ -150,7 +151,7 @@ flowchart TD
 ### 5.1 FreeText & Markup Annotation Flow
 1. User clicks **FreeText** (or Highlight, Shape, Sticky Note).
 2. User clicks or drags a rectangle on the document viewport.
-3. Instant optimistic canvas element appears for interactive input:
+3. Instant optimistic canvas element appears for interactive input (`freetext-edit-session.ts` with 220ms debounce):
    - Rich contextual styling bar floats adjacent to annotation (Font Family, Size, Stroke Color, Fill Color, Opacity).
 4. On focus blur or typing commit:
    - StarPDF constructs annotation dictionary (`/Type /Annot /Subtype /FreeText`).
@@ -164,7 +165,7 @@ flowchart TD
   - Clicking a checkbox toggles state (`/AS /Yes` vs `/AS /Off`) with immediate `/AP` refresh.
   - Radio buttons enforce mutual exclusivity within their parent field group.
   - Dropdown menus present clean selection overlays with immediate `/V` binding.
-- **Designer Mode:**
+- **Designer Mode (Target Phase 8):**
   - Palette exposes Text Field, Checkbox, Radio Button, List Box, Dropdown, Signature Field.
   - User drags to create new field bounding boxes, binds field names, and sets default export values.
 
@@ -183,7 +184,7 @@ flowchart TD
    - User enters replacement text and clicks *Replace All*.
    - Engine executes sequential `replaceText` mutations across all verified matches within a single undoable transaction.
 
-### 6.2 Permanent Redaction Flow
+### 6.2 Permanent Redaction Flow (Target Phase 8)
 
 ```mermaid
 flowchart TD
@@ -194,7 +195,7 @@ flowchart TD
     RedactAction -->|Cancel| RemoveMarker[Delete Pending Redaction Marker]
     RedactAction -->|Apply All Redactions| SanitizeModal[Prompt: Permanent Unrecoverable Removal Confirmation]
     
-    SanitizeModal -->|Confirm| ExecuteRedaction[StarPDF Redaction Engine Runs]
+    SanitizeModal -->|Confirm| ExecuteRedaction[StarPDF Redaction Engine Runs: Target Phase 8]
     ExecuteRedaction --> ClipStreams[Physically Delete Matching Content Stream Operators]
     ExecuteRedaction --> CropRaster[Tile & Re-Encode Underlying Raster Pixels]
     ExecuteRedaction --> PurgeMetadata[Purge Document Metadata, Hidden Text & Bookmarks]
@@ -218,7 +219,8 @@ flowchart TD
 5. Viewport triggers localized repaint; selection updates to reflect previous state.
 
 ### 7.2 Crash Recovery & Autosave Flow
-- Every 5 seconds during active editing, `starpdf-app-core` writes an append-only JSON journal to private local storage (IndexedDB / OS application support folder).
+- In current web shell: 220ms editing debounce and 25-step undo history in RAM.
+- In target architecture (Phase 2): Every 5 seconds during active editing, `starpdf-app-core` writes an append-only JSON journal to private local storage (IndexedDB / OS application support folder).
 - On application startup:
   - System checks for uncommitted journal entries with dangling session IDs.
   - If detected, displays **"Recover Unsaved Work"** dialogue with document name, timestamp, and modification count.

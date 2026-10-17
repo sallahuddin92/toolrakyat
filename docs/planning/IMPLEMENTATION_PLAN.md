@@ -1,51 +1,58 @@
 # SmartPDF / StarPDF Canonical Implementation Plan
 
 **Document ID:** DOC-PLAN-001  
-**Status:** CANONICAL DRAFT (Phase 0 / Pre-Implementation)  
+**Status:** CANONICAL QUALIFIED (Phase 0 / Pre-Implementation)  
 **System:** SmartPDF & StarPDF Strangler Migration  
 **Baseline Commit:** `f7ff85464b190b74c89c1f8be9862be37090dd7f` (`arch/integrated`)  
 **Methodology:** Strangler Migration (Zero Big-Bang Rewrites; Continuous Working Software)  
 
 ---
 
-## 1. Rust UI Framework Evaluation & Decision Matrix
+## 1. Dual Release Track Architecture
 
-To achieve Acrobat-class desktop polish, high-DPI rendering, complex docking panels, native menus, international typography/IME, and hardware acceleration across macOS, Windows, Linux, and Web/WASM, six architectural paths were evaluated:
+To maintain strict operational discipline and avoid disrupting active release operations, the engineering roadmap is divided into two decoupled tracks:
 
-| Criterion | egui / eframe | Slint | Iced | Dioxus | Floem | Custom winit + wgpu |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Desktop UX Quality** | 7/10 (Game/Tool feel) | 9/10 (Native look) | 8/10 (Clean flat) | 8/10 (Web-like) | 8/10 (Modern) | 9/10 (Tailored) |
-| **Complex Docking Panels** | 8/10 (egui_dock) | 7/10 (Manual) | 6/10 (Limited) | 7/10 (CSS-based) | 6/10 (Early) | 8/10 (Custom) |
-| **Document Tabs & Rails** | 8/10 | 9/10 | 7/10 | 9/10 | 7/10 | 9/10 |
-| **Accessibility (Screen Reader)** | 5/10 (AccessKit early) | 8/10 (Built-in) | 6/10 (AccessKit) | 7/10 (Web/Native) | 5/10 (Early) | 6/10 (AccessKit manual) |
-| **IME & Multilingual Entry** | 6/10 (Basic) | 9/10 (Robust) | 7/10 (WIP) | 9/10 (Native/Web) | 6/10 (Basic) | 7/10 (winit IME) |
-| **RTL & Complex Scripts** | 6/10 (Limited) | 8/10 (Good) | 6/10 (Cosmic-text) | 9/10 (Browser/OS) | 7/10 (Cosmic) | 9/10 (HarfRust direct) |
-| **Native Menus (OS Menu Bar)** | 6/10 (Muda wrapper) | 9/10 (First-class) | 6/10 (Muda) | 8/10 (Muda/Native)| 6/10 (Muda) | 9/10 (Muda direct) |
-| **Keyboard Shortcuts & Focus** | 8/10 | 9/10 | 8/10 | 8/10 | 8/10 | 9/10 |
-| **Drag & Drop / Clipboard** | 8/10 | 9/10 | 8/10 | 8/10 | 7/10 | 9/10 |
-| **Printing Integration** | 5/10 | 8/10 | 5/10 | 7/10 | 5/10 | 8/10 (OS print spool) |
-| **High DPI Scaling** | 8/10 | 9/10 | 8/10 | 8/10 | 8/10 | 9/10 |
-| **Multi-Window Support** | 7/10 | 9/10 | 7/10 | 8/10 | 7/10 | 9/10 |
-| **GPU Texture / wgpu Embed** | 9/10 (Native paint cb)| 8/10 (Skia/GL/wgpu)| 8/10 (wgpu layer)| 6/10 (Difficult)| 8/10 (wgpu) | 10/10 (Direct swapchain) |
-| **Web / WASM Compatibility**| 9/10 (Excellent) | 8/10 (WASM build) | 8/10 (WASM canvas)| 9/10 (Native web)| 5/10 (Experimental)| 8/10 (WebGPU canvas) |
-| **Startup Time (<800ms)** | 10/10 (<150ms) | 9/10 (<250ms) | 9/10 (<200ms) | 7/10 (<600ms) | 9/10 (<200ms)| 10/10 (<100ms) |
-| **Memory Footprint (<60MB)**| 9/10 (~35MB) | 9/10 (~40MB) | 9/10 (~45MB) | 6/10 (~90MB+) | 9/10 (~40MB)| 10/10 (~25MB) |
-| **Ecosystem Maturity** | 9/10 (Battle-tested)| 8/10 (Commercial) | 8/10 (Active) | 8/10 (Active) | 6/10 (Young) | 8/10 (winit/wgpu standard) |
-| **Licensing** | MIT / Apache-2.0 | GPLv3 / Royalty Free| MIT / Apache-2.0| MIT / Apache-2.0| MIT / Apache-2.0| MIT / Apache-2.0 |
-| **Packaging & Distribution**| 9/10 (Single binary)| 9/10 (Single bin) | 9/10 (Single bin) | 8/10 (Cargo-pack)| 8/10 (Single) | 9/10 (Single binary) |
-| **TOTAL SCORE (out of 190)**| **147** | **162** | **140** | **143** | **130** | **165** |
-
-### Decision & Recommendation
-- **Recommended Desktop Shell Architecture: Justified Hybrid (`winit` + `wgpu` + declarative UI layer)**
-  - **Core Viewport & Document Canvas:** Pure `winit` + `wgpu` render pipeline. Direct Metal / DX12 / Vulkan swapchain integration guarantees optimal 120fps scrolling, direct delta invalidation, and zero abstraction penalty for the PDF renderer.
-  - **Chrome & Workspace Panels (Docking, Menus, Toolbars):** Driven by **Slint** (or `egui_dock` embedded into the `wgpu` pass via standard render pass overlay). Slint provides native OS look-and-feel, accessibility hooks, first-class IME, and royalty-free licensing for internal/open-source use.
-  - **Transitional Web Shell:** Existing Next.js / React 19 web application continues running seamlessly via WASM bindings, gradually delegating authority to `starpdf-app-core` compiled to `wasm32-unknown-unknown`.
+- **TRACK A: Current Product & RC2 Release Candidate:**
+  - **Objective:** Finalize, qualify, and ship SmartPDF v1.0.0-rc.2 on `main` and `arch/integrated`.
+  - **Focus:** Complete manual acceptance testing (`docs/SMARTPDF_RC2_MANUAL_ACCEPTANCE.md`), ensure 100% pass across 171 Playwright E2E suites, verify the 32-fixture qualification corpus (`qualification/starpdf/corpus.json`), and freeze the stable release candidate.
+  - **Invariant:** Architecture work in Track B must never modify, delay, or invalidate Track A deliverables.
+- **TRACK B: Rust-First Desktop & Architecture Redevelopment:**
+  - **Objective:** Multi-phase Strangler migration to establish `starpdf-app-core`, `starpdf-render-wgpu`, and `smartpdf-desktop`.
+  - **Focus:** Phased development on dedicated architecture branches (`docs/rust-first-architecture`, `feat/starpdf-app-core`, etc.), moving state authority into Rust, building the native `wgpu` render pipeline, and packaging native desktop binaries.
 
 ---
 
-## 2. Target Modular Crate Structure
+## 2. Rust UI Framework Evaluation & Spike Decision Gate
 
-To avoid monolithic code while preventing excessive crate fragmentation, StarPDF adopts a phased, layered crate hierarchy with strict one-way dependency direction:
+To deliver Acrobat-class desktop ergonomics, high-DPI rendering, complex docking panels, native menus, international typography/IME, and hardware acceleration across macOS, Windows, Linux, and Web/WASM, six architectural paths were qualitatively assessed:
+
+| Architecture Candidate | Strengths | Technical Risks & Open Questions | Candidate Status |
+| :--- | :--- | :--- | :---: |
+| **egui / eframe** | Extremely lightweight; immediate-mode simplicity; excellent Web/WASM integration; zero-copy texture blitting. | Lacks native OS accessibility (AccessKit early); basic IME/RTL support; game-like UI styling requiring extensive custom theming. | Viable fallback for internal tools |
+| **Slint** | Native platform styling; first-class accessibility hooks; built-in IME; clean declarative syntax; responsive layout engine. | Requires commercial license review for closed-source or royalty-free terms; wgpu pass embedding needs empirical validation. | **Leading Candidate** (To be evaluated in Phase 1 spike) |
+| **Iced** | Clean Elm-inspired architecture; pure Rust; active community; wgpu-based rendering. | Complex docking panels are limited; IME support is in active development; multi-window management is early. | Secondary Candidate |
+| **Dioxus** | Familiar React-like ergonomics; shared code across desktop and web; strong ecosystem. | Higher memory footprint; difficult direct `wgpu` swapchain integration; desktop relies on system webview or blitz renderer. | Less suitable for high-perf PDF canvas |
+| **Floem** | Fine-grained reactivity; GPU-powered; modern widget design inspired by Lapce. | Immature ecosystem; API volatility; limited production hardening on Windows and Linux. | Experimental |
+| **Custom `winit` + `wgpu` (Direct)** | 100% control over swapchain, render passes, and delta invalidation; sub-100ms startup; <25MB idle memory. | High maintenance burden: requires building custom docking, tabs, menus, and text input from scratch. | **Target for Canvas Viewport Only** |
+
+### 2.1 Executable Phase 1 / Desktop-Spike Decision Gate
+Prior to committing to a final desktop UI framework in Phase 5, an isolated **Spike Prototype** (`apps/smartpdf-desktop-spike`) will be implemented and evaluated against seven concrete pass/fail criteria:
+
+1. **IME & Multilingual Composition:** User can compose complex text (Japanese Hiragana/Kanji, Arabic with shaping, diacritical marks) without input drop or visual glitches on macOS (AppKit), Windows (TSF), and Linux (Wayland text-input-v3 / IBus).
+2. **Accessibility (AT / Screen Reader):** UI controls expose valid AccessKit nodes recognized by VoiceOver (macOS) and Narrator (Windows).
+3. **GPU Render Pass Embedding:** Slint/UI chrome and `wgpu` PDF canvas can render within a single unified swapchain without offscreen texture readbacks or CPU memory copies.
+4. **Frame Responsiveness:** Maintains <16ms frame time (60–120 fps) during simultaneous UI panel resizing and canvas panning.
+5. **Cold Startup Footprint:** Binary cold startup < 400ms; idle RSS memory < 45MB on standard desktop hardware.
+6. **Multi-Window & Native Menus:** Supports opening multiple document windows sharing engine resources; integrates with native OS menu bars via `muda`.
+7. **Licensing & Distribution:** Satisfies project distribution requirements without restrictive runtime royalty obligations.
+
+**Rule:** Slint + `winit` + `wgpu` remains a **candidate to be proven by the spike gate**, not a foregone conclusion.
+
+---
+
+## 3. Target Modular Crate Structure
+
+To avoid monolithic code while preventing excessive crate fragmentation, StarPDF adopts a layered crate hierarchy with strict one-way dependency direction (zero circular dependencies):
 
 ```
 [Layer 5: UI & Applications]
@@ -81,32 +88,32 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 
 ---
 
-## 3. Phased Implementation Roadmap (Strangler Migration)
+## 4. Phased Implementation Roadmap (Strangler Migration)
 
 ### Phase 0: Canonical Documentation & Baseline Freeze (CURRENT)
 - **Objective:** Establish the immutable canonical single source of truth across all product, architecture, design, and planning requirements.
 - **Baseline:** Commit `f7ff85464b190b74c89c1f8be9862be37090dd7f` on branch `arch/integrated`.
 - **Dependencies:** None.
 - **Workstreams:** Documentation authoring only. Zero production code changes.
-- **Deliverables:** `PRD.md`, `TRD.md`, `APP_FLOW.md`, `DESIGN_BRIEF.md`, `BACKEND_SCHEMA.md`, `IMPLEMENTATION_PLAN.md`, `REQUIREMENT_TRACEABILITY.md`, `PROJECT_CONTEXT.md`, `AI_WORKFLOW.md`.
-- **Performance Gates:** N/A (Doc-only).
+- **Deliverables:** `PRD.md`, `TRD.md`, `APP_FLOW.md`, `DESIGN_BRIEF.md`, `BACKEND_SCHEMA.md`, `IMPLEMENTATION_PLAN.md`, `REQUIREMENT_TRACEABILITY.md`, `PROJECT_CONTEXT.md`, `AI_WORKFLOW.md`, `AGENTS.md`.
 - **Acceptance Criteria:** All 9 documents created, reviewed, verified; clean Git staging; committed and pushed to `docs/rust-first-architecture`.
 
 ---
 
 ### Phase 1: Rust App-Core Ingestion Under Current SmartPDF
-- **Objective:** Create `starpdf-app-core` crate in Rust. Move document session lifecycle, tab management, and active tool states from React into Rust.
+- **Objective:** Create `starpdf-app-core` crate in Rust. Move document session lifecycle, tab management, and active tool states from React into Rust. Conduct the UI Framework Desktop Spike.
 - **Baseline:** Phase 0 canonical documentation.
 - **Dependencies:** Existing `engine/starpdf`.
 - **Workstreams:**
   - Create `crates/starpdf-app-core`.
   - Implement `SessionManager`, `DocumentSession`, `TabState`.
   - Expose `starpdf_app_core` WASM bindings to Next.js.
+  - Implement and evaluate `apps/smartpdf-desktop-spike` against the decision gate.
 - **Crates:** `starpdf-app-core`, `starpdf`.
 - **Code Areas:** `engine/starpdf/src/wasm`, `src/lib/pdf/starpdf-client.ts`, `SmartPdfEditor.tsx`.
 - **Tests:** `cargo test -p starpdf-app-core`, Vitest session tests.
 - **Performance Gates:** Session switch latency < 10ms.
-- **Acceptance Criteria:** React editor queries `starpdf-app-core` for active document/tab metadata. Zero regressions in Playwright test suites.
+- **Acceptance Criteria:** React editor queries `starpdf-app-core` for active document/tab metadata. Zero regressions in Playwright test suites. UI framework spike gate evaluated.
 - **Rollback:** Retain React local state hooks behind feature flag.
 - **Stop Condition:** `npm run test` and `cargo test` pass 100%.
 
@@ -159,16 +166,16 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 - **Crates:** `starpdf-render-ir`, `starpdf-execution`.
 - **Code Areas:** `engine/starpdf/src/render_ir/`, `src/lib/pdf/execution/render/`.
 - **Tests:** Spatial index microbenchmarks, Render IR compilation golden tests.
-- **Performance Gates:** BVH hit-test < 6 µs per query over 10,000 primitives.
+- **Performance Gates:** BVH hit-test < 10 µs per query in Rust (targeting the ~5.8 µs demonstrated in synthetic TS benchmark).
 - **Acceptance Criteria:** Pointer click returns exact `RenderNodeId` and `StarNodeId` in sub-millisecond time.
 - **Rollback:** Continue using PDF.js text layer DOM hit testing.
-- **Stop Condition:** Benchmark confirms BVH matches or exceeds synthetic benchmark targets.
+- **Stop Condition:** Benchmark confirms Rust BVH matches or exceeds synthetic prototype targets.
 
 ---
 
 ### Phase 5: Rust Desktop Shell Prototype (`smartpdf-desktop`)
-- **Objective:** Build standalone native desktop binary running on macOS, Windows, and Linux using `winit` and basic window chrome.
-- **Baseline:** Phase 4 completed.
+- **Objective:** Build standalone native desktop binary running on macOS, Windows, and Linux using `winit` and selected UI framework.
+- **Baseline:** Phase 4 completed; Phase 1 spike gate evaluated.
 - **Dependencies:** `starpdf-app-core`, `starpdf-render-ir`.
 - **Workstreams:**
   - Create `apps/smartpdf-desktop`.
@@ -195,7 +202,7 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 - **Crates:** `starpdf-render-wgpu`, `starpdf-render-ir`.
 - **Code Areas:** `crates/starpdf-render-wgpu/src/`.
 - **Tests:** Differential pixel comparison against PDF.js oracle (`differential-smoke`).
-- **Performance Gates:** First-page render < 30ms; 120fps steady panning.
+- **Performance Gates:** First-page render < 30ms (target); steady 60–120fps panning.
 - **Acceptance Criteria:** 0 differing pixels on supported text and image primitives compared to oracle.
 - **Rollback:** PDF.js fallback overlay on diverged tiles.
 - **Stop Condition:** Differential test suite reports zero regressions across smoke corpus.
@@ -207,7 +214,7 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 - **Baseline:** Phase 6 completed.
 - **Dependencies:** `smartpdf-desktop`, `starpdf-app-core`.
 - **Workstreams:**
-  - Embed Slint / declarative chrome overlay into the `wgpu` render pass.
+  - Embed declarative UI chrome overlay into the `wgpu` render pass.
   - Implement Left Rail: Thumbnails, Bookmarks, Annotations, Attachments.
   - Implement Floating Contextual Toolbars and Command Palette (`Cmd+K`).
 - **Crates:** `smartpdf-desktop`, `starpdf-app-core`.
@@ -244,12 +251,12 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 - **Baseline:** Phase 8 completed.
 - **Dependencies:** `starpdf-render-wgpu`.
 - **Workstreams:**
-  - Implement complex path tessellation (lyon / pathfinder), blend modes, and shadings.
-  - Calibrate rendering across full 1,000-file corpus.
+  - Implement complex path tessellation, blend modes, and shadings.
+  - Calibrate rendering across full 1,000-fixture target corpus.
 - **Crates:** `starpdf-render-wgpu`.
 - **Code Areas:** `apps/smartpdf-desktop/`, `engine/starpdf/`.
 - **Tests:** Large-scale automated visual diff across PDF.js, Poppler, and StarPDF.
-- **Performance Gates:** 99.5% visual equivalence with PDF.js across standard corpus.
+- **Performance Gates:** 99.5% visual equivalence with PDF.js across target corpus.
 - **Acceptance Criteria:** Native renderer active by default across all platforms.
 - **Rollback:** Single-click setting to restore PDF.js oracle.
 - **Stop Condition:** Zero visual regressions on primary test corpus.
@@ -291,7 +298,7 @@ To avoid monolithic code while preventing excessive crate fragmentation, StarPDF
 
 ---
 
-## 4. Parallel Workstream Matrix
+## 5. Parallel Workstream Matrix
 
 The following streams can safely proceed concurrently without merge conflicts:
 
