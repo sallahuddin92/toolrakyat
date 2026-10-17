@@ -1,0 +1,1237 @@
+// SmartPDF Slint UI Specification
+// Built for high-performance, precision document engineering matching SmartPDF Design Brief
+
+export struct TabItem {
+    id: string,
+    title: string,
+    is_active: bool,
+    is_dirty: bool,
+}
+
+export struct PageThumbnail {
+    page_index: int,
+    label: string,
+    dimensions: string,
+    is_active: bool,
+}
+
+export struct TextSpanData {
+    id: string,
+    text: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    font_size: length,
+    font_family: string,
+    color_hex: string,
+    is_selected: bool,
+}
+
+export struct ElementItem {
+    id: string,
+    kind: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    label: string,
+    is_selected: bool,
+}
+
+export component AppWindow inherits Window {
+    title: "✦ SmartPDF — Precision Document Engineering";
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 960px;
+    min-height: 600px;
+    background: #0F172A; // Base Slate 900
+
+    // ==========================================
+    // Properties Bound from Rust Application Core
+    // ==========================================
+    in-out property <[TabItem]> tabs: [
+        { id: "tab-1", title: "sample_contract.pdf", is_active: true, is_dirty: false },
+    ];
+    in-out property <string> active_tab_id: "tab-1";
+    in-out property <string> active_tool: "select"; // "select", "text", "annotate", "forms", "pages"
+    
+    in-out property <[PageThumbnail]> thumbnails: [
+        { page_index: 0, label: "Page 1", dimensions: "612 × 792 pt", is_active: true },
+        { page_index: 1, label: "Page 2", dimensions: "612 × 792 pt", is_active: false },
+    ];
+    in-out property <int> active_page: 0;
+    in-out property <int> total_pages: 2;
+    in-out property <string> page_info_text: "Page 1 of 2";
+
+    // Viewport & Zoom
+    in-out property <float> zoom_scale: 1.0;
+    in-out property <int> zoom_percent: 100;
+    in-out property <length> page_width: 612px;
+    in-out property <length> page_height: 792px;
+
+    // Active Page Extracted Elements
+    in-out property <[TextSpanData]> text_spans: [];
+    in-out property <[ElementItem]> page_elements: [];
+
+    // Selection State
+    in-out property <bool> has_selection: false;
+    in-out property <string> selection_type: "None";
+    in-out property <string> selection_node_id: "";
+    in-out property <string> selection_bounds_text: "";
+    in-out property <string> selection_font_name: "";
+    in-out property <string> selection_font_size: "";
+    in-out property <string> selection_text_content: "";
+    in-out property <bool> selection_is_editable: false;
+    in-out property <length> sel_x: 0px;
+    in-out property <length> sel_y: 0px;
+    in-out property <length> sel_w: 0px;
+    in-out property <length> sel_h: 0px;
+
+    // In-place text editing
+    in-out property <bool> is_editing_text: false;
+    in-out property <string> editing_text_buffer: "";
+
+    // Status & Security
+    in-out property <string> evidence_level: "VERIFIED";
+    in-out property <string> security_status: "Unrestricted (Local-First)";
+    in-out property <int> undo_depth: 0;
+    in-out property <int> redo_depth: 0;
+    in-out property <bool> can_undo: false;
+    in-out property <bool> can_redo: false;
+
+    // Panel Toggles
+    in-out property <bool> left_panel_visible: true;
+    in-out property <bool> right_panel_visible: true;
+
+    // Toast / Feedback message
+    in-out property <string> status_message: "Ready";
+
+    // ==========================================
+    // Callbacks to Rust Application Core
+    // ==========================================
+    callback open_file_clicked();
+    callback export_document_clicked();
+    callback tab_selected(string);
+    callback tab_closed(string);
+    callback tool_changed(string);
+    callback page_selected(int);
+    callback prev_page_clicked();
+    callback next_page_clicked();
+    callback zoom_in_clicked();
+    callback zoom_out_clicked();
+    callback zoom_reset_clicked();
+    callback undo_clicked();
+    callback redo_clicked();
+    callback toggle_left_panel();
+    callback toggle_right_panel();
+    callback span_selected(string);
+    callback element_selected(string);
+    callback canvas_background_clicked();
+    callback text_edit_committed(string);
+    callback property_text_edited(string);
+
+    // Keyboard shortcut handler
+    forward-focus: key-handler;
+    key-handler := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.meta || event.modifiers.control) {
+                if (event.text == "o" || event.text == "O") {
+                    root.open_file_clicked();
+                    return accept;
+                }
+                if (event.text == "z" || event.text == "Z") {
+                    if (event.modifiers.shift) {
+                        root.redo_clicked();
+                    } else {
+                        root.undo_clicked();
+                    }
+                    return accept;
+                }
+                if (event.text == "y" || event.text == "Y") {
+                    root.redo_clicked();
+                    return accept;
+                }
+                if (event.text == "0") {
+                    root.zoom_reset_clicked();
+                    return accept;
+                }
+                if (event.text == "=" || event.text == "+") {
+                    root.zoom_in_clicked();
+                    return accept;
+                }
+                if (event.text == "-") {
+                    root.zoom_out_clicked();
+                    return accept;
+                }
+            }
+            if (event.text == Key.PageUp) {
+                root.prev_page_clicked();
+                return accept;
+            }
+            if (event.text == Key.PageDown) {
+                root.next_page_clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        // ====================================================================
+        // 1. TOP GLOBAL APPLICATION BAR (Branding + Tabs + Quick Tools)
+        // ====================================================================
+        Rectangle {
+            height: 82px;
+            background: #1E293B; // Slate 800
+
+            VerticalLayout {
+                spacing: 0px;
+                padding: 0px;
+
+                // 1A. Top Header & Document Tabs Rail (42px)
+                Rectangle {
+                    height: 42px;
+                    background: #151F2E;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 12px;
+                        alignment: center;
+
+                        // Branding
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            Text {
+                                text: "✦";
+                                font-size: 16px;
+                                font-weight: 800;
+                                color: #0EA5E9; // Sky 500
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: "SmartPDF";
+                                font-size: 14px;
+                                font-weight: 700;
+                                color: #F8FAFC;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Separator
+                        Rectangle {
+                            width: 1px;
+                            height: 20px;
+                            background: #475569;
+                        }
+
+                        // Document Tabs
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: start;
+
+                            for tab in root.tabs : Rectangle {
+                                width: 180px;
+                                height: 32px;
+                                background: tab.is_active ? #1E293B : #0F172A;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: tab.is_active ? #0EA5E9 : #334155;
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 6px;
+                                    spacing: 4px;
+                                    alignment: center;
+
+                                    Text {
+                                        text: tab.is_dirty ? tab.title + " *" : tab.title;
+                                        font-size: 12px;
+                                        font-weight: tab.is_active ? 600 : 400;
+                                        color: tab.is_active ? #F8FAFC : #94A3B8;
+                                        overflow: elide;
+                                        horizontal-alignment: left;
+                                        vertical-alignment: center;
+                                    }
+
+                                    // Close Tab Button
+                                    Rectangle {
+                                        width: 18px;
+                                        height: 18px;
+                                        border-radius: 9px;
+                                        background: close-ta.has-hover ? #EF4444 : transparent;
+
+                                        Text {
+                                            text: "×";
+                                            font-size: 14px;
+                                            color: close-ta.has-hover ? #FFFFFF : #64748B;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+
+                                        close-ta := TouchArea {
+                                            clicked => {
+                                                root.tab_closed(tab.id);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                TouchArea {
+                                    clicked => {
+                                        root.tab_selected(tab.id);
+                                    }
+                                }
+                            }
+
+                            // Add New Document / Open Button [+]
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: add-ta.has-hover ? #334155 : #1E293B;
+                                border-width: 1px;
+                                border-color: #475569;
+
+                                Text {
+                                    text: "+";
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                    color: #0EA5E9;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                add-ta := TouchArea {
+                                    clicked => {
+                                        root.open_file_clicked();
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right-aligned header actions
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // Panel toggle buttons
+                        Rectangle {
+                            width: 32px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: lp-ta.has-hover ? #334155 : (root.left_panel_visible ? #0284C7 : #1E293B);
+                            border-width: 1px;
+                            border-color: #475569;
+                            Text {
+                                text: "◨";
+                                font-size: 14px;
+                                color: #F8FAFC;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            lp-ta := TouchArea {
+                                clicked => { root.toggle_left_panel(); }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 32px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: rp-ta.has-hover ? #334155 : (root.right_panel_visible ? #0284C7 : #1E293B);
+                            border-width: 1px;
+                            border-color: #475569;
+                            Text {
+                                text: "◧";
+                                font-size: 14px;
+                                color: #F8FAFC;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            rp-ta := TouchArea {
+                                clicked => { root.toggle_right_panel(); }
+                            }
+                        }
+                    }
+                }
+
+                // Divider line
+                Rectangle {
+                    height: 1px;
+                    background: #334155;
+                }
+
+                // 1B. Quick Tools Bar (38px)
+                Rectangle {
+                    height: 38px;
+                    background: #1E293B;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        // Open Document Button
+                        Rectangle {
+                            width: 104px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: open-btn-ta.has-hover ? #0284C7 : #0EA5E9;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                Text {
+                                    text: "📂 Open PDF";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: #FFFFFF;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            open-btn-ta := TouchArea {
+                                clicked => {
+                                    root.open_file_clicked();
+                                }
+                            }
+                        }
+
+                        Rectangle { width: 1px; height: 18px; background: #475569; }
+
+                        // Tool Modes Switcher
+                        HorizontalLayout {
+                            spacing: 4px;
+
+                            // Select Mode
+                            Rectangle {
+                                width: 74px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: root.active_tool == "select" ? #0EA5E9 : (t-sel-ta.has-hover ? #334155 : transparent);
+                                Text {
+                                    text: "↖ Select";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.active_tool == "select" ? #FFFFFF : #CBD5E1;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                t-sel-ta := TouchArea {
+                                    clicked => { root.tool_changed("select"); }
+                                }
+                            }
+
+                            // Text Mode
+                            Rectangle {
+                                width: 68px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: root.active_tool == "text" ? #0EA5E9 : (t-txt-ta.has-hover ? #334155 : transparent);
+                                Text {
+                                    text: "T Text";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.active_tool == "text" ? #FFFFFF : #CBD5E1;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                t-txt-ta := TouchArea {
+                                    clicked => { root.tool_changed("text"); }
+                                }
+                            }
+
+                            // Annotate Mode
+                            Rectangle {
+                                width: 84px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: root.active_tool == "annotate" ? #0EA5E9 : (t-ann-ta.has-hover ? #334155 : transparent);
+                                Text {
+                                    text: "✎ Annotate";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.active_tool == "annotate" ? #FFFFFF : #CBD5E1;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                t-ann-ta := TouchArea {
+                                    clicked => { root.tool_changed("annotate"); }
+                                }
+                            }
+
+                            // Forms Mode
+                            Rectangle {
+                                width: 72px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: root.active_tool == "forms" ? #0EA5E9 : (t-frm-ta.has-hover ? #334155 : transparent);
+                                Text {
+                                    text: "☑ Forms";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.active_tool == "forms" ? #FFFFFF : #CBD5E1;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                t-frm-ta := TouchArea {
+                                    clicked => { root.tool_changed("forms"); }
+                                }
+                            }
+
+                            // Pages Mode
+                            Rectangle {
+                                width: 72px;
+                                height: 28px;
+                                border-radius: 4px;
+                                background: root.active_tool == "pages" ? #0EA5E9 : (t-pgs-ta.has-hover ? #334155 : transparent);
+                                Text {
+                                    text: "☷ Pages";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.active_tool == "pages" ? #FFFFFF : #CBD5E1;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                t-pgs-ta := TouchArea {
+                                    clicked => { root.tool_changed("pages"); }
+                                }
+                            }
+                        }
+
+                        Rectangle { width: 1px; height: 18px; background: #475569; }
+
+                        // Undo / Redo
+                        Rectangle {
+                            width: 32px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: undo-ta.has-hover && root.can_undo ? #334155 : transparent;
+                            Text {
+                                text: "↩";
+                                font-size: 15px;
+                                color: root.can_undo ? #F8FAFC : #64748B;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            undo-ta := TouchArea {
+                                clicked => { if (root.can_undo) { root.undo_clicked(); } }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 32px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: redo-ta.has-hover && root.can_redo ? #334155 : transparent;
+                            Text {
+                                text: "↪";
+                                font-size: 15px;
+                                color: root.can_redo ? #F8FAFC : #64748B;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            redo-ta := TouchArea {
+                                clicked => { if (root.can_redo) { root.redo_clicked(); } }
+                            }
+                        }
+
+                        Rectangle { width: 1px; height: 18px; background: #475569; }
+
+                        // Zoom Controls
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: zm-out-ta.has-hover ? #334155 : transparent;
+                            Text {
+                                text: "−";
+                                font-size: 16px;
+                                color: #CBD5E1;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            zm-out-ta := TouchArea {
+                                clicked => { root.zoom_out_clicked(); }
+                            }
+                        }
+
+                        Text {
+                            text: root.zoom_percent + "%";
+                            font-size: 12px;
+                            color: #F8FAFC;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: zm-in-ta.has-hover ? #334155 : transparent;
+                            Text {
+                                text: "+";
+                                font-size: 16px;
+                                color: #CBD5E1;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            zm-in-ta := TouchArea {
+                                clicked => { root.zoom_in_clicked(); }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 64px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: fit-ta.has-hover ? #334155 : transparent;
+                            Text {
+                                text: "Fit Page";
+                                font-size: 11px;
+                                color: #94A3B8;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            fit-ta := TouchArea {
+                                clicked => { root.zoom_reset_clicked(); }
+                            }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        // Export Button
+                        Rectangle {
+                            width: 96px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: exp-ta.has-hover ? #0284C7 : #0EA5E9;
+                            Text {
+                                text: "💾 Export ▾";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: #FFFFFF;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            exp-ta := TouchArea {
+                                clicked => { root.export_document_clicked(); }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom divider line of top bar
+                Rectangle {
+                    height: 1px;
+                    background: #334155;
+                }
+            }
+        }
+
+        // ====================================================================
+        // 2. MAIN THREE-PANEL WORKSPACE (Left Nav + Central Canvas + Right Props)
+        // ====================================================================
+        HorizontalLayout {
+            spacing: 0px;
+            vertical-stretch: 1;
+
+            // ----------------------------------------------------------------
+            // 2A. LEFT NAVIGATION RAIL (Collapsible, ~220px)
+            // ----------------------------------------------------------------
+            if root.left_panel_visible : HorizontalLayout {
+                spacing: 0px;
+                Rectangle {
+                    width: 220px;
+                    background: #1E293B; // Slate 800
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        // Header
+                        Rectangle {
+                            height: 28px;
+                            Text {
+                                text: "PAGES & THUMBNAILS";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: #94A3B8;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Thumbnails list
+                        VerticalLayout {
+                            spacing: 8px;
+                            vertical-stretch: 1;
+
+                            for thumb in root.thumbnails : Rectangle {
+                                height: 110px;
+                                background: thumb.is_active ? #0F172A : #151F2E;
+                                border-radius: 6px;
+                                border-width: thumb.is_active ? 2px : 1px;
+                                border-color: thumb.is_active ? #0EA5E9 : #334155;
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    alignment: center;
+
+                                    // Thumbnail preview box (Paper silhouette)
+                                    Rectangle {
+                                        width: 60px;
+                                        height: 75px;
+                                        background: #FFFFFF;
+                                        border-radius: 2px;
+                                        border-width: 1px;
+                                        border-color: #CBD5E1;
+
+                                        Text {
+                                            text: thumb.label;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #64748B;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: thumb.label + " (" + thumb.dimensions + ")";
+                                        font-size: 10px;
+                                        color: thumb.is_active ? #F8FAFC : #94A3B8;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+
+                                TouchArea {
+                                    clicked => {
+                                        root.page_selected(thumb.page_index);
+                                    }
+                                }
+                            }
+
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        // Metadata Accordion Section
+                        Rectangle {
+                            height: 70px;
+                            background: #0F172A;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            VerticalLayout {
+                                spacing: 3px;
+                                Text {
+                                    text: "DOCUMENT METADATA";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: #0EA5E9;
+                                }
+                                Text {
+                                    text: "Pages: " + root.total_pages;
+                                    font-size: 11px;
+                                    color: #CBD5E1;
+                                }
+                                Text {
+                                    text: "Security: Local-First / Private";
+                                    font-size: 10px;
+                                    color: #10B981;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Left panel separator
+                Rectangle {
+                    width: 1px;
+                    background: #334155;
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 2B. CENTRAL PDF VIEWPORT (Main Document Canvas)
+            // ----------------------------------------------------------------
+            Rectangle {
+                horizontal-stretch: 1;
+                background: #0B1120; // Deepest dark slate viewport
+
+                // Canvas Background click to clear selection
+                TouchArea {
+                    clicked => {
+                        root.canvas_background_clicked();
+                    }
+                }
+
+                // Centered Document Canvas
+                canvas_paper := Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: root.page_width * root.zoom_scale;
+                    height: root.page_height * root.zoom_scale;
+                    background: #FFFFFF; // Pure White Paper
+                    border-radius: 2px;
+                    border-width: 1px;
+                    border-color: #CBD5E1;
+                    drop-shadow-blur: 16px;
+                    drop-shadow-color: #00000066;
+
+                    // Prevent click passing through to clear selection
+                    TouchArea {
+                        clicked => {
+                            root.canvas_background_clicked();
+                        }
+                    }
+
+                    // Extracted Vector / Image Elements
+                    for elem in root.page_elements : Rectangle {
+                        x: elem.x * root.zoom_scale;
+                        y: elem.y * root.zoom_scale;
+                        width: elem.width * root.zoom_scale;
+                        height: elem.height * root.zoom_scale;
+                        background: #F1F5F9;
+                        border-width: elem.is_selected ? 2px : 1px;
+                        border-color: elem.is_selected ? #0EA5E9 : #CBD5E1;
+                        border-radius: 2px;
+
+                        Text {
+                            text: elem.label;
+                            font-size: 10px;
+                            color: #64748B;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                root.element_selected(elem.id);
+                            }
+                        }
+                    }
+
+                    // Extracted Text Spans
+                    for span in root.text_spans : Rectangle {
+                        x: span.x * root.zoom_scale;
+                        y: span.y * root.zoom_scale;
+                        width: span.width * root.zoom_scale;
+                        height: span.height * root.zoom_scale;
+                        background: span.is_selected ? #0EA5E91A : transparent;
+                        border-width: span.is_selected ? 1.5px : 0px;
+                        border-color: #0EA5E9;
+                        border-radius: 2px;
+
+                        Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: span.text;
+                            font-size: span.font_size * root.zoom_scale;
+                            font-family: span.font_family;
+                            color: #0F172A; // Crisp Dark Text
+                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                root.span_selected(span.id);
+                            }
+                        }
+                    }
+
+                    // In-Place Text Editing Field
+                    if root.is_editing_text : Rectangle {
+                        x: root.sel_x * root.zoom_scale;
+                        y: root.sel_y * root.zoom_scale;
+                        width: Math.max(root.sel_w * root.zoom_scale + 40px, 120px);
+                        height: Math.max(root.sel_h * root.zoom_scale + 8px, 26px);
+                        background: #FFFFFF;
+                        border-width: 2px;
+                        border-color: #0EA5E9;
+                        border-radius: 4px;
+
+                        HorizontalLayout {
+                            padding-left: 4px;
+                            padding-right: 4px;
+                            edit_input := TextInput {
+                                text: root.editing_text_buffer;
+                                font-size: 13px;
+                                color: #0F172A;
+                                vertical-alignment: center;
+                                edited => {
+                                    root.editing_text_buffer = self.text;
+                                }
+                                accepted => {
+                                    root.text_edit_committed(self.text);
+                                }
+                            }
+                        }
+                    }
+
+                    // Selection Transform Handles Box
+                    if root.has_selection && !root.is_editing_text : Rectangle {
+                        x: root.sel_x * root.zoom_scale;
+                        y: root.sel_y * root.zoom_scale;
+                        width: root.sel_w * root.zoom_scale;
+                        height: root.sel_h * root.zoom_scale;
+                        border-width: 1.5px;
+                        border-color: #0EA5E9;
+
+                        // 4 Corner Handles (7x7px white squares with dark borders)
+                        // Top-Left
+                        Rectangle { x: -4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                        // Top-Right
+                        Rectangle { x: parent.width - 4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                        // Bottom-Left
+                        Rectangle { x: -4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                        // Bottom-Right
+                        Rectangle { x: parent.width - 4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 2C. RIGHT CONTEXTUAL PROPERTIES PANEL (Collapsible, ~250px)
+            // ----------------------------------------------------------------
+            if root.right_panel_visible : HorizontalLayout {
+                spacing: 0px;
+                // Right panel separator
+                Rectangle {
+                    width: 1px;
+                    background: #334155;
+                }
+
+                Rectangle {
+                    width: 250px;
+                    background: #1E293B; // Slate 800
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+
+                        // Panel Title
+                        Text {
+                            text: "PROPERTIES";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #94A3B8;
+                        }
+
+                        // Selection Properties Card
+                        Rectangle {
+                            background: #0F172A;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            VerticalLayout {
+                                spacing: 8px;
+
+                                HorizontalLayout {
+                                    Text {
+                                        text: "Type:";
+                                        font-size: 11px;
+                                        color: #94A3B8;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        width: 60px;
+                                        height: 20px;
+                                        background: #0EA5E933;
+                                        border-radius: 4px;
+                                        Text {
+                                            text: root.selection_type;
+                                            font-size: 10px;
+                                            font-weight: 600;
+                                            color: #0EA5E9;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                if root.has_selection : VerticalLayout {
+                                    spacing: 6px;
+
+                                    Text {
+                                        text: "Bounds: " + root.selection_bounds_text;
+                                        font-size: 11px;
+                                        color: #CBD5E1;
+                                    }
+
+                                    if root.selection_font_name != "" : Text {
+                                        text: "Font: " + root.selection_font_name + " (" + root.selection_font_size + ")";
+                                        font-size: 11px;
+                                        color: #CBD5E1;
+                                    }
+
+                                    if root.selection_is_editable : VerticalLayout {
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Content:";
+                                            font-size: 11px;
+                                            color: #94A3B8;
+                                        }
+                                        prop_input := TextInput {
+                                            text: root.selection_text_content;
+                                            font-size: 12px;
+                                            color: #F8FAFC;
+                                            edited => {
+                                                root.property_text_edited(self.text);
+                                            }
+                                            accepted => {
+                                                root.text_edit_committed(self.text);
+                                            }
+                                        }
+                                        Rectangle {
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: apply-ta.has-hover ? #0284C7 : #0EA5E9;
+                                            Text {
+                                                text: "Apply Edit";
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: #FFFFFF;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            apply-ta := TouchArea {
+                                                clicked => {
+                                                    root.text_edit_committed(prop_input.text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if !root.has_selection : Text {
+                                    text: "Select an element on canvas to view and edit properties.";
+                                    font-size: 11px;
+                                    color: #64748B;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
+                        // Security & Evidence Card
+                        Rectangle {
+                            background: #0F172A;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "INTEGRITY & SECURITY";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: #94A3B8;
+                                }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    Text {
+                                        text: "Evidence:";
+                                        font-size: 11px;
+                                        color: #CBD5E1;
+                                    }
+                                    Rectangle {
+                                        width: 70px;
+                                        height: 18px;
+                                        background: #10B98122;
+                                        border-radius: 4px;
+                                        Text {
+                                            text: root.evidence_level;
+                                            font-size: 10px;
+                                            font-weight: 700;
+                                            color: #10B981; // Emerald
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: root.security_status;
+                                    font-size: 10px;
+                                    color: #64748B;
+                                }
+                            }
+                        }
+
+                        // History Stack Depth Card
+                        Rectangle {
+                            background: #0F172A;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            VerticalLayout {
+                                spacing: 4px;
+                                Text {
+                                    text: "HISTORY STACK";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: #94A3B8;
+                                }
+                                Text {
+                                    text: "Undo Depth: " + root.undo_depth;
+                                    font-size: 11px;
+                                    color: #CBD5E1;
+                                }
+                                Text {
+                                    text: "Redo Depth: " + root.redo_depth;
+                                    font-size: 11px;
+                                    color: #CBD5E1;
+                                }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+            }
+        }
+
+        // Divider above bottom status bar
+        Rectangle {
+            height: 1px;
+            background: #334155;
+        }
+
+        // ====================================================================
+        // 3. BOTTOM STATUS BAR (Page Navigation, Zoom, Status, Privacy)
+        // ====================================================================
+        Rectangle {
+            height: 28px;
+            background: #0F172A; // Slate 900
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                alignment: center;
+
+                // Page Navigation: Prev / Next
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 22px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: p-prev-ta.has-hover ? #334155 : transparent;
+                        Text {
+                            text: "◀";
+                            font-size: 10px;
+                            color: #CBD5E1;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        p-prev-ta := TouchArea {
+                            clicked => { root.prev_page_clicked(); }
+                        }
+                    }
+
+                    Text {
+                        text: root.page_info_text;
+                        font-size: 11px;
+                        font-weight: 500;
+                        color: #F8FAFC;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 22px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: p-next-ta.has-hover ? #334155 : transparent;
+                        Text {
+                            text: "▶";
+                            font-size: 10px;
+                            color: #CBD5E1;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        p-next-ta := TouchArea {
+                            clicked => { root.next_page_clicked(); }
+                        }
+                    }
+                }
+
+                Rectangle { width: 1px; height: 14px; background: #475569; }
+
+                // Zoom Display
+                Text {
+                    text: root.zoom_percent + "%";
+                    font-size: 11px;
+                    color: #94A3B8;
+                    vertical-alignment: center;
+                }
+
+                // Status message
+                Text {
+                    text: root.status_message;
+                    font-size: 11px;
+                    color: #64748B;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Evidence Level Tag
+                Rectangle {
+                    height: 18px;
+                    background: #10B98122;
+                    border-radius: 3px;
+                    border-width: 1px;
+                    border-color: #10B98144;
+
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Text {
+                            text: "●";
+                            font-size: 8px;
+                            color: #10B981;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.evidence_level;
+                            font-size: 10px;
+                            font-weight: 700;
+                            color: #10B981;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Privacy Reassurance Badge
+                Rectangle {
+                    height: 18px;
+                    background: #334155;
+                    border-radius: 3px;
+
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Text {
+                            text: "🛡️ Local-First / Private";
+                            font-size: 10px;
+                            font-weight: 500;
+                            color: #CBD5E1;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

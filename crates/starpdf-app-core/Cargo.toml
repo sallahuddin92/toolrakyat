@@ -1,0 +1,17 @@
+[package]
+name = "starpdf-app-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["ToolRakyat Core Engineering"]
+description = "App-core state authority, session management, commands, and selection for SmartPDF."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+starpdf = { path = "../../engine/starpdf" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+uuid = { version = "1.10", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.10"
+serde_json = "1.0"

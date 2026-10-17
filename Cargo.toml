@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "engine/starpdf",
+    "crates/starpdf-app-core",
+    "apps/smartpdf-desktop",
+]
+resolver = "2"
