@@ -130,6 +130,7 @@ export component AppWindow inherits Window {
     callback canvas_background_clicked();
     callback text_edit_committed(string);
     callback property_text_edited(string);
+    callback save_document_clicked();
 
     // Keyboard shortcut handler
     forward-focus: key-handler;
@@ -138,6 +139,10 @@ export component AppWindow inherits Window {
             if (event.modifiers.meta || event.modifiers.control) {
                 if (event.text == "o" || event.text == "O") {
                     root.open_file_clicked();
+                    return accept;
+                }
+                if (event.text == "s" || event.text == "S") {
+                    root.save_document_clicked();
                     return accept;
                 }
                 if (event.text == "z" || event.text == "Z") {
@@ -603,6 +608,27 @@ export component AppWindow inherits Window {
                         }
 
                         Rectangle { horizontal-stretch: 1; }
+
+                        // Save Button
+                        Rectangle {
+                            width: 76px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: sav-ta.has-hover ? #334155 : #1E293B;
+                            border-width: 1px;
+                            border-color: #475569;
+                            Text {
+                                text: "🖫 Save";
+                                font-size: 12px;
+                                font-weight: 500;
+                                color: #F8FAFC;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            sav-ta := TouchArea {
+                                clicked => { root.save_document_clicked(); }
+                            }
+                        }
 
                         // Export Button
                         Rectangle {

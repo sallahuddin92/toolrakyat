@@ -85,23 +85,23 @@ impl DocumentSession {
             || DocumentCapabilities {
                 can_view: CapabilityDecision {
                     allowed: true,
-                    reason: "UNENCRYPTED_VERIFIED",
+                    reason: "UNENCRYPTED_STANDARD",
                 },
                 can_edit: CapabilityDecision {
                     allowed: true,
-                    reason: "UNENCRYPTED_VERIFIED",
+                    reason: "UNENCRYPTED_STANDARD",
                 },
                 can_extract: CapabilityDecision {
                     allowed: true,
-                    reason: "UNENCRYPTED_VERIFIED",
+                    reason: "UNENCRYPTED_STANDARD",
                 },
                 can_annotate: CapabilityDecision {
                     allowed: true,
-                    reason: "UNENCRYPTED_VERIFIED",
+                    reason: "UNENCRYPTED_STANDARD",
                 },
                 can_modify_pages: CapabilityDecision {
                     allowed: true,
-                    reason: "UNENCRYPTED_VERIFIED",
+                    reason: "UNENCRYPTED_STANDARD",
                 },
             },
             |s| s.capabilities(true),
@@ -262,6 +262,35 @@ impl DocumentSession {
             Ok(true)
         } else {
             Err(AppCoreError::CannotRedo)
+        }
+    }
+
+    /// Determines the authoritative, accurate evidence confidence level for this session.
+    pub fn evidence_level(&self) -> &'static str {
+        let has_verified = self
+            .execution_state
+            .effective_object_index
+            .values()
+            .any(|o| {
+                matches!(
+                    o.evidence.level,
+                    starpdf::execution::EvidenceLevel::Verified
+                        | starpdf::execution::EvidenceLevel::RecoveredVerified
+                )
+            });
+
+        if has_verified {
+            "VERIFIED"
+        } else if self.is_dirty() {
+            "MUTATION_STAGED"
+        } else if self
+            .security_info
+            .as_ref()
+            .is_some_and(|s| s.encryption_state != starpdf::security::EncryptionState::NotEncrypted)
+        {
+            "RESTRICTED"
+        } else {
+            "LOCAL_PARSED"
         }
     }
 

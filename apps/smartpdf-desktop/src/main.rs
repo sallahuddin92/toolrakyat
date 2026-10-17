@@ -112,37 +112,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Save Document Dialog / Shortcut (Cmd+S)
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        let is_editing = is_editing.clone();
+        app.on_save_document_clicked(move || {
+            if let Some(app) = app_weak.upgrade() {
+                commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+
+                let file_path = {
+                    let mgr = manager.borrow();
+                    mgr.active_session().and_then(|s| s.file_path.clone())
+                };
+
+                let save_path = if let Some(p) = file_path {
+                    Some(p)
+                } else {
+                    rfd::FileDialog::new()
+                        .add_filter("PDF Document", &["pdf"])
+                        .set_title("Save PDF Document")
+                        .set_file_name("document.pdf")
+                        .save_file()
+                };
+
+                if let Some(dest) = save_path {
+                    let mut mgr = manager.borrow_mut();
+                    match mgr.dispatch(AppCommand::SaveDocument {
+                        destination_path: Some(dest),
+                    }) {
+                        Ok(res) => {
+                            app.set_status_message(res.message.into());
+                            sync_ui(&app, &mgr, &active_tool.borrow(), *is_editing.borrow());
+                        }
+                        Err(err) => {
+                            app.set_status_message(format!("Save failed: {err}").into());
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Export Document Dialog
     {
         let app_weak = app.as_weak();
         let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        let is_editing = is_editing.clone();
         app.on_export_document_clicked(move || {
-            let mut mgr = manager.borrow_mut();
-            match mgr.dispatch(AppCommand::ExportDocument {
-                profile: ExportProfile::IncrementalPdf,
-            }) {
-                Ok(res) => {
-                    if let Some(exported_bytes) = res.exported_bytes {
-                        if let Some(save_path) = rfd::FileDialog::new()
-                            .add_filter("PDF Document", &["pdf"])
-                            .set_title("Export PDF Document")
-                            .set_file_name("smartpdf_export.pdf")
-                            .save_file()
-                        {
-                            if let Err(e) = std::fs::write(&save_path, exported_bytes) {
-                                if let Some(app) = app_weak.upgrade() {
+            if let Some(app) = app_weak.upgrade() {
+                commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+                let mut mgr = manager.borrow_mut();
+                match mgr.dispatch(AppCommand::ExportDocument {
+                    profile: ExportProfile::IncrementalPdf,
+                }) {
+                    Ok(res) => {
+                        if let Some(exported_bytes) = res.exported_bytes {
+                            if let Some(save_path) = rfd::FileDialog::new()
+                                .add_filter("PDF Document", &["pdf"])
+                                .set_title("Export PDF Document")
+                                .set_file_name("smartpdf_export.pdf")
+                                .save_file()
+                            {
+                                if let Err(e) = std::fs::write(&save_path, exported_bytes) {
                                     app.set_status_message(format!("Save failed: {e}").into());
+                                } else {
+                                    app.set_status_message(
+                                        format!("Exported to {}", save_path.display()).into(),
+                                    );
                                 }
-                            } else if let Some(app) = app_weak.upgrade() {
-                                app.set_status_message(
-                                    format!("Saved to {}", save_path.display()).into(),
-                                );
                             }
                         }
                     }
-                }
-                Err(err) => {
-                    if let Some(app) = app_weak.upgrade() {
+                    Err(err) => {
                         app.set_status_message(format!("Export failed: {err}").into());
                     }
                 }
@@ -388,54 +432,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active_tool = active_tool.clone();
         let is_editing = is_editing.clone();
         app.on_span_selected(move |span_id| {
-            let mut mgr = manager.borrow_mut();
-            let mut span_found = None;
+            if let Some(app) = app_weak.upgrade() {
+                commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+                let mut mgr = manager.borrow_mut();
+                let mut span_found = None;
 
-            if let Some(session) = mgr.active_session() {
-                if let Ok(mut doc) = session.pdf_document() {
-                    if let Ok(pages) = doc.extract_all_text() {
-                        if let Some(page) = pages.get(session.current_page as usize) {
-                            for s in &page.spans {
-                                if s.span_id == span_id.as_str() {
-                                    span_found = Some(s.clone());
-                                    break;
+                if let Some(session) = mgr.active_session() {
+                    if let Ok(mut doc) = session.pdf_document() {
+                        if let Ok(pages) = doc.extract_all_text() {
+                            if let Some(page) = pages.get(session.current_page as usize) {
+                                for s in &page.spans {
+                                    if s.span_id == span_id.as_str() {
+                                        span_found = Some(s.clone());
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if let Some(span) = span_found {
-                let page_height = 792.0;
-                let canvas_y = (page_height - span.y - span.height).max(0.0);
-                let bounds = Rect::new(
-                    span.x,
-                    canvas_y,
-                    span.width.max(10.0),
-                    span.height.max(12.0),
-                );
-                let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &span.span_id)
-                    .unwrap_or_else(|_| {
-                        // Safe fallback canonical ID
-                        StarNodeId::new("doc", ObjectRef::new(1, 0), "span").unwrap()
-                    });
+                if let Some(span) = span_found {
+                    let page_height = 792.0;
+                    let canvas_y = (page_height - span.y - span.height).max(0.0);
+                    let bounds = Rect::new(
+                        span.x,
+                        canvas_y,
+                        span.width.max(10.0),
+                        span.height.max(12.0),
+                    );
+                    let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &span.span_id)
+                        .unwrap_or_else(|_| {
+                            // Safe fallback canonical ID
+                            StarNodeId::new("doc", ObjectRef::new(1, 0), "span").unwrap()
+                        });
 
-                let sel = SelectionState::Text {
-                    star_node_id,
-                    render_node_id: None,
-                    text: span.text.clone(),
-                    bounds,
-                    font_info: Some(FontInfo::new(span.font_name.clone(), span.font_size)),
-                    is_editable: true,
-                };
+                    let sel = SelectionState::Text {
+                        star_node_id,
+                        render_node_id: None,
+                        text: span.text.clone(),
+                        bounds,
+                        font_info: Some(FontInfo::new(span.font_name.clone(), span.font_size)),
+                        is_editable: true,
+                    };
 
-                let _ = mgr.dispatch(AppCommand::SetSelection { selection: sel });
+                    let _ = mgr.dispatch(AppCommand::SetSelection { selection: sel });
 
-                *is_editing.borrow_mut() = *active_tool.borrow() == "text";
-            }
+                    *is_editing.borrow_mut() = *active_tool.borrow() == "text";
+                }
 
-            if let Some(app) = app_weak.upgrade() {
                 sync_ui(&app, &mgr, &active_tool.borrow(), *is_editing.borrow());
             }
         });
@@ -448,22 +493,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active_tool = active_tool.clone();
         let is_editing = is_editing.clone();
         app.on_element_selected(move |elem_id| {
-            let mut mgr = manager.borrow_mut();
-            let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &elem_id)
-                .unwrap_or_else(|_| StarNodeId::new("doc", ObjectRef::new(1, 0), "elem").unwrap());
-
-            let sel = SelectionState::Image {
-                star_node_id,
-                render_node_id: None,
-                image_ref: elem_id.to_string(),
-                bounds: Rect::new(50.0, 50.0, 200.0, 150.0),
-                is_shared: false,
-            };
-
-            let _ = mgr.dispatch(AppCommand::SetSelection { selection: sel });
-            *is_editing.borrow_mut() = false;
-
             if let Some(app) = app_weak.upgrade() {
+                commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+                let mut mgr = manager.borrow_mut();
+                let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &elem_id)
+                    .unwrap_or_else(|_| {
+                        StarNodeId::new("doc", ObjectRef::new(1, 0), "elem").unwrap()
+                    });
+
+                let sel = SelectionState::Image {
+                    star_node_id,
+                    render_node_id: None,
+                    image_ref: elem_id.to_string(),
+                    bounds: Rect::new(50.0, 50.0, 200.0, 150.0),
+                    is_shared: false,
+                };
+
+                let _ = mgr.dispatch(AppCommand::SetSelection { selection: sel });
+                *is_editing.borrow_mut() = false;
+
                 sync_ui(&app, &mgr, &active_tool.borrow(), *is_editing.borrow());
             }
         });
@@ -476,11 +524,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active_tool = active_tool.clone();
         let is_editing = is_editing.clone();
         app.on_canvas_background_clicked(move || {
-            let mut mgr = manager.borrow_mut();
-            let _ = mgr.dispatch(AppCommand::ClearSelection);
-            *is_editing.borrow_mut() = false;
             if let Some(app) = app_weak.upgrade() {
-                sync_ui(&app, &mgr, &active_tool.borrow(), *is_editing.borrow());
+                commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+                let mut mgr = manager.borrow_mut();
+                let _ = mgr.dispatch(AppCommand::ClearSelection);
+                *is_editing.borrow_mut() = false;
+                sync_ui(&app, &mgr, &active_tool.borrow(), false);
             }
         });
     }
@@ -540,6 +589,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Automatically commits any pending in-place text edits before navigation or deselect.
+fn commit_active_text_edit(
+    app: &AppWindow,
+    manager: &Rc<RefCell<SessionManager>>,
+    active_tool: &Rc<RefCell<String>>,
+    is_editing: &Rc<RefCell<bool>>,
+) {
+    if !*is_editing.borrow() {
+        return;
+    }
+    let draft_text = app.get_editing_text_buffer().to_string();
+    let mut mgr = manager.borrow_mut();
+    let mut target_span = None;
+
+    if let Some(session) = mgr.active_session() {
+        if let SelectionState::Text {
+            star_node_id, text, ..
+        } = &session.selection
+        {
+            if text != &draft_text {
+                let (_, _, occ) = star_node_id.parts();
+                target_span = Some((occ, draft_text));
+            }
+        }
+    }
+
+    if let Some((target, new_text)) = target_span {
+        match mgr.dispatch(AppCommand::ReplaceText {
+            target_node: target,
+            new_text,
+        }) {
+            Ok(res) => {
+                app.set_status_message(res.message.into());
+            }
+            Err(err) => {
+                app.set_status_message(format!("Edit error: {err}").into());
+            }
+        }
+    }
+    *is_editing.borrow_mut() = false;
+    sync_ui(app, &mgr, &active_tool.borrow(), false);
+}
+
 /// Synchronizes state from authoritative `starpdf_app_core::session::SessionManager` to the Slint UI.
 fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_editing: bool) {
     // 1. Sync Document Tabs
@@ -577,11 +669,11 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         app.set_can_undo(session.history.can_undo());
         app.set_can_redo(session.history.can_redo());
 
-        app.set_evidence_level("VERIFIED".into());
+        app.set_evidence_level(session.evidence_level().into());
         let sec_status = if session.capabilities.can_edit.allowed {
             "Unrestricted (Local-First)"
         } else {
-            "Read-Only / Protected"
+            session.capabilities.can_edit.reason
         };
         app.set_security_status(sec_status.into());
 
@@ -809,7 +901,8 @@ mod tests {
             app.get_active_tab_id(),
             manager.active_session().unwrap().id
         );
-        assert_eq!(app.get_evidence_level(), "VERIFIED");
+        // Correct evidence level: newly opened unverified PDF reports LOCAL_PARSED
+        assert_eq!(app.get_evidence_level(), "LOCAL_PARSED");
         assert_eq!(app.get_zoom_percent(), 100);
         assert!(!app.get_has_selection());
         assert!(app.get_text_spans().row_count() > 0);
@@ -850,6 +943,64 @@ mod tests {
         assert_eq!(app.get_selection_text_content(), "Heading Line");
         assert!(app.get_is_editing_text());
         assert_eq!(app.get_editing_text_buffer(), "Heading Line");
+    }
+
+    #[test]
+    fn test_live_editing_and_auto_commit_without_mandatory_apply() {
+        init_testing();
+        let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
+        let manager = Rc::new(RefCell::new(SessionManager::new()));
+        let active_tool = Rc::new(RefCell::new("text".to_string()));
+        let is_editing = Rc::new(RefCell::new(true));
+
+        manager
+            .borrow_mut()
+            .dispatch(AppCommand::OpenDocument {
+                path: None,
+                bytes: DEFAULT_SAMPLE_PDF.to_vec(),
+                title: "test.pdf".into(),
+            })
+            .expect("Failed to open document");
+
+        let (real_span_id, original_text) = {
+            let mgr = manager.borrow();
+            let session = mgr.active_session().unwrap();
+            let mut doc = session.pdf_document().unwrap();
+            let pages = doc.extract_all_text().unwrap();
+            (
+                pages[0].spans[0].span_id.clone(),
+                pages[0].spans[0].text.clone(),
+            )
+        };
+
+        let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &real_span_id).unwrap();
+        let sel = SelectionState::Text {
+            star_node_id,
+            render_node_id: None,
+            text: original_text,
+            bounds: Rect::new(50.0, 100.0, 150.0, 24.0),
+            font_info: Some(FontInfo::new("Helvetica", 18.0)),
+            is_editable: true,
+        };
+
+        manager
+            .borrow_mut()
+            .dispatch(AppCommand::SetSelection { selection: sel })
+            .expect("SetSelection");
+
+        sync_ui(&app, &manager.borrow(), "text", true);
+
+        // Simulate typing directly on-canvas into editing_text_buffer
+        app.set_editing_text_buffer("Star Orion Live Edit".into());
+
+        // Blur or deselect triggers auto-commit WITHOUT mandatory Apply button!
+        commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+
+        // Verify session is dirty, edit was committed to session manager
+        let mgr = manager.borrow();
+        let session = mgr.active_session().unwrap();
+        assert!(session.is_dirty());
+        assert_eq!(session.evidence_level(), "MUTATION_STAGED");
     }
 
     #[test]

@@ -64,6 +64,9 @@ pub enum AppCommand {
     ExportDocument {
         profile: ExportProfile,
     },
+    SaveDocument {
+        destination_path: Option<PathBuf>,
+    },
 }
 
 /// Structured outcome of command execution.
@@ -415,6 +418,60 @@ pub fn dispatch_command(
             ))
             .with_session(session_id)
             .with_bytes(exported_bytes))
+        }
+
+        AppCommand::SaveDocument { destination_path } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+
+            let target_path = destination_path
+                .or_else(|| session.file_path.clone())
+                .ok_or_else(|| {
+                    AppCoreError::InvalidOperation("No destination path provided for save".into())
+                })?;
+
+            let session_id = session.id.clone();
+            let bytes = session.bytes.clone();
+
+            // Perform atomic write using a temporary file in the same parent directory
+            let parent_dir = target_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let temp_file_name = format!(
+                ".smartpdf_atomic_save_{}_{}.tmp",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            );
+            let temp_path = parent_dir.join(temp_file_name);
+
+            let write_res = (|| -> std::io::Result<()> {
+                use std::io::Write;
+                let mut f = std::fs::File::create(&temp_path)?;
+                f.write_all(&bytes)?;
+                f.sync_all()?;
+                std::fs::rename(&temp_path, &target_path)?;
+                Ok(())
+            })();
+
+            if let Err(e) = write_res {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(AppCoreError::Io(format!(
+                    "Atomic save to {} failed: {e}",
+                    target_path.display()
+                )));
+            }
+
+            // On success: mark history baseline clean and update session file path
+            session.history.mark_clean();
+            session.file_path = Some(target_path.clone());
+
+            Ok(CommandResult::ok(format!(
+                "Document saved successfully to {}",
+                target_path.display()
+            ))
+            .with_session(session_id))
         }
     }
 }

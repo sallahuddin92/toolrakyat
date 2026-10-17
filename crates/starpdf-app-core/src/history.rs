@@ -15,14 +15,23 @@ pub struct HistoryStack {
     current_index: usize,
     clean_baseline_index: Option<usize>,
     max_depth: usize,
+    max_bytes: usize,
 }
 
 impl HistoryStack {
     pub const DEFAULT_MAX_DEPTH: usize = 50;
+    /// Default maximum memory threshold for history snapshots (128 MB).
+    pub const DEFAULT_MAX_BYTES: usize = 128 * 1024 * 1024;
 
     /// Creates a new `HistoryStack` initialized with the document's baseline byte snapshot.
     pub fn new(initial_bytes: Vec<u8>, max_depth: usize) -> Self {
+        Self::with_byte_limit(initial_bytes, max_depth, Self::DEFAULT_MAX_BYTES)
+    }
+
+    /// Creates a new `HistoryStack` with explicit max depth and byte memory limit.
+    pub fn with_byte_limit(initial_bytes: Vec<u8>, max_depth: usize, max_bytes: usize) -> Self {
         let max_depth = max_depth.max(1);
+        let max_bytes = max_bytes.max(1024 * 1024); // at least 1MB
         Self {
             snapshots: vec![HistoryRecord {
                 description: "Initial".to_string(),
@@ -31,6 +40,7 @@ impl HistoryStack {
             current_index: 0,
             clean_baseline_index: Some(0),
             max_depth,
+            max_bytes,
         }
     }
 
@@ -60,6 +70,15 @@ impl HistoryStack {
             self.clean_baseline_index = self
                 .clean_baseline_index
                 .and_then(|clean| clean.checked_sub(overflow));
+        }
+
+        // Enforce max memory budget: drain oldest history snapshots if total memory exceeds budget
+        while self.snapshots.len() > 1 && self.memory_usage() > self.max_bytes {
+            self.snapshots.remove(0);
+            self.current_index = self.current_index.saturating_sub(1);
+            self.clean_baseline_index = self
+                .clean_baseline_index
+                .and_then(|clean| clean.checked_sub(1));
         }
     }
 
@@ -147,5 +166,68 @@ impl HistoryStack {
     /// Total count of stored snapshots.
     pub fn snapshot_count(&self) -> usize {
         self.snapshots.len()
+    }
+
+    /// Approximated memory consumption of all snapshots in bytes.
+    pub fn memory_usage(&self) -> usize {
+        self.snapshots
+            .iter()
+            .map(|s| s.bytes.len() + s.description.len())
+            .sum()
+    }
+
+    /// Configured maximum memory threshold for history.
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    /// Updates the maximum memory threshold.
+    pub fn set_max_bytes(&mut self, max_bytes: usize) {
+        self.max_bytes = max_bytes.max(1024 * 1024);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_history_memory_limit_eviction() {
+        // Initialize with 1MB max_bytes budget
+        let mut history = HistoryStack::with_byte_limit(vec![0u8; 400_000], 10, 1024 * 1024);
+        assert_eq!(history.snapshot_count(), 1);
+        assert!(!history.is_dirty());
+
+        // Push second snapshot (400KB -> 800KB total, within 1MB)
+        history.push("Second", vec![1u8; 400_000]);
+        assert_eq!(history.snapshot_count(), 2);
+        assert!(history.is_dirty());
+
+        // Push third snapshot (400KB -> 1.2MB total, exceeds 1MB -> oldest evicted)
+        history.push("Third", vec![2u8; 400_000]);
+        assert!(history.memory_usage() <= 1024 * 1024);
+        assert_eq!(history.snapshot_count(), 2);
+        // Baseline 0 was evicted, so dirty remains true
+        assert!(history.is_dirty());
+    }
+
+    #[test]
+    fn test_history_undo_redo_and_truncation() {
+        let mut history = HistoryStack::new(vec![1, 2, 3], 5);
+        history.push("Step 1", vec![1, 2, 3, 4]);
+        history.push("Step 2", vec![1, 2, 3, 4, 5]);
+
+        assert_eq!(history.undo_depth(), 2);
+        assert_eq!(history.redo_depth(), 0);
+
+        let undone = history.undo().unwrap();
+        assert_eq!(undone, &[1, 2, 3, 4]);
+        assert_eq!(history.undo_depth(), 1);
+        assert_eq!(history.redo_depth(), 1);
+
+        // Branching: pushing new step discards redo
+        history.push("Step 2-branched", vec![9, 9, 9]);
+        assert_eq!(history.redo_depth(), 0);
+        assert_eq!(history.current_bytes(), &[9, 9, 9]);
     }
 }

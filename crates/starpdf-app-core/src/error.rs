@@ -39,6 +39,9 @@ pub enum AppCoreError {
     #[error("Export failed: {0}")]
     ExportError(String),
 
+    #[error("I/O error: {0}")]
+    Io(String),
+
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 }
