@@ -29,6 +29,8 @@ import {
   Image as ImageIcon,
   PenTool,
   Sparkles,
+  Home,
+  LayoutGrid,
 } from "lucide-react";
 import type { ExportMode } from "@/lib/pdf/pdf-types";
 
@@ -73,6 +75,8 @@ interface PdfToolbarProps {
   formAssistEnabled?: boolean;
   onToggleFormAssist?: () => void;
   mutationEnabled?: boolean;
+  onHomeClick?: () => void;
+  onAllToolsClick?: () => void;
 }
 
 export function PdfToolbar({
@@ -113,6 +117,8 @@ export function PdfToolbar({
   formAssistEnabled = true,
   onToggleFormAssist,
   mutationEnabled = true,
+  onHomeClick,
+  onAllToolsClick,
 }: PdfToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [internalShowSearchInput, setInternalShowSearchInput] = useState(false);
@@ -125,6 +131,36 @@ export function PdfToolbar({
       <header className="h-14 border-b border-slate-200 bg-white px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-3 shrink-0 select-none">
         {/* Left: Rail toggle / Open / Filename / Modified badge / Undo / Redo */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {onHomeClick && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onHomeClick}
+              className="text-xs text-slate-600 gap-1.5 h-8 rounded-lg shrink-0"
+              title="Go to SmartPDF Home"
+              data-testid="toolbar-home-btn"
+            >
+              <Home className="size-3.5" />
+              <span className="hidden md:inline">Home</span>
+            </Button>
+          )}
+
+          {onAllToolsClick && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onAllToolsClick}
+              className="text-xs text-slate-600 gap-1.5 h-8 rounded-lg shrink-0"
+              title="View All PDF Tools"
+              data-testid="toolbar-all-tools-btn"
+            >
+              <LayoutGrid className="size-3.5" />
+              <span className="hidden md:inline">All Tools</span>
+            </Button>
+          )}
+
           {onToggleThumbnails && (
             <Button
               type="button"

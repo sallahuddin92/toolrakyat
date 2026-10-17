@@ -100,8 +100,30 @@ import { PdfContextualToolbar } from "./PdfContextualToolbar";
 import { PdfConfirmDialog } from "./PdfConfirmDialog";
 import { SmartPdfImportModal } from "./SmartPdfImportModal";
 import { SmartPdfSplitModal } from "./SmartPdfSplitModal";
+import { SmartPdfHome } from "@/components/smartpdf/home/SmartPdfHome";
+import { SmartPdfAllTools } from "@/components/smartpdf/tools/SmartPdfAllTools";
+import { SmartPdfNavbar } from "@/components/smartpdf/layout/SmartPdfNavbar";
+import { addRecentDocument } from "@/components/smartpdf/recent/recentFilesStore";
+import type { SmartPdfSurface, PdfToolDefinition } from "@/components/smartpdf/types";
 
-export function SmartPdfEditor() {
+export interface SmartPdfEditorProps {
+  initialFile?: {
+    filename: string;
+    bytes: Uint8Array;
+  };
+  initialMode?: EditorMode;
+  onHomeClick?: () => void;
+  onAllToolsClick?: () => void;
+  onDocumentLoaded?: (doc: { filename: string; bytes: Uint8Array; pageCount: number }) => void;
+}
+
+export function SmartPdfEditor({
+  initialFile,
+  initialMode,
+  onHomeClick: externalHomeClick,
+  onAllToolsClick: externalAllToolsClick,
+  onDocumentLoaded,
+}: SmartPdfEditorProps = {}) {
   const [sourceBytes, setSourceBytes] = useState<Uint8Array | null>(null);
   const [filename, setFilename] = useState<string>("");
   const [inspectionResult, setInspectionResult] = useState<DocumentInspectionResult | null>(null);
@@ -127,8 +149,11 @@ export function SmartPdfEditor() {
   const [isModified, setIsModified] = useState<boolean>(false);
   const [selectedPages, setSelectedPages] = useState<Set<number>>(() => new Set([1]));
 
+  // Top-level 3-Surface Navigation: "home" | "tools" | "workspace"
+  const [surface, setSurface] = useState<SmartPdfSurface>("home");
+
   // Application Tool Mode System (Phase 3A / 3A.1)
-  const [editorMode, setEditorMode] = useState<EditorMode>("SELECT");
+  const [editorMode, setEditorMode] = useState<EditorMode>(initialMode || "SELECT");
   const [fillAndSignTool, setFillAndSignTool] = useState<FillAndSignTool>("text");
   const [showFlatFormBanner, setShowFlatFormBanner] = useState<boolean>(true);
   const [formAssistEnabled, setFormAssistEnabled] = useState<boolean>(true);
@@ -334,6 +359,19 @@ export function SmartPdfEditor() {
           setIsModified(false);
           const initialHistory = createInitialHistoryState(bytes, "Initial document");
           setHistoryState(initialHistory);
+          setSurface("workspace");
+          void addRecentDocument({
+            name: docFilename,
+            bytes,
+            pageCount: inspected.metadata.pageCount,
+          });
+          if (onDocumentLoaded) {
+            onDocumentLoaded({
+              filename: docFilename,
+              bytes,
+              pageCount: inspected.metadata.pageCount,
+            });
+          }
           if (inspected.fields.length > 0) {
             toast.success(
               `Loaded "${docFilename}" with ${inspected.fields.length} interactive form field(s).`,
@@ -362,6 +400,12 @@ export function SmartPdfEditor() {
     },
     [loadDocument],
   );
+
+  useEffect(() => {
+    if (initialFile && initialFile.bytes.byteLength > 0) {
+      void loadDocument(initialFile.bytes, initialFile.filename, initialFile.bytes.byteLength, 1);
+    }
+  }, [initialFile, loadDocument]);
 
   /**
    * Centralized Command Execution Lifecycle
@@ -1400,49 +1444,72 @@ export function SmartPdfEditor() {
   );
 
 
-  // Dropzone screen when no document is active
+  // 3-Surface Navigation: Home, All Tools, Workspace
   if (!sourceBytes || !inspectionResult) {
+    if (surface === "tools") {
+      return (
+        <div
+          className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative select-none"
+          data-testid="smartpdf-editor-workspace"
+        >
+          <SmartPdfNavbar
+            surface="tools"
+            onSelectSurface={setSurface}
+            tabs={[]}
+            activeTabId={null}
+            onSelectTab={() => {}}
+            onCloseTab={() => {}}
+            onOpenNewFile={handleOpenNewFileClick}
+          />
+          <SmartPdfAllTools
+            hasActiveDocument={false}
+            onOpenFileWithTool={async (file, tool) => {
+              await handleFileSelected(file);
+              if (tool.recommendedMode) {
+                setEditorMode(tool.recommendedMode);
+              }
+              setSurface("workspace");
+            }}
+          />
+          <footer
+            className="h-8 border-t border-slate-200 bg-white px-4 flex items-center justify-between text-xs text-slate-400 shrink-0 select-none"
+            data-testid="smartpdf-status-bar"
+          >
+            <span>No document open</span>
+            <span className="flex items-center gap-1.5 text-slate-500">
+              <ShieldCheck className="size-3.5 text-emerald-600" />
+              Zero bytes uploaded • 100% Client-Side WebAssembly
+            </span>
+          </footer>
+        </div>
+      );
+    }
+
     return (
       <div
         className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative select-none"
         data-testid="smartpdf-editor-workspace"
       >
-        {/* Top Header for Empty Application State */}
-        <header className="h-14 border-b border-slate-200 bg-white px-4 sm:px-6 flex items-center justify-between shrink-0 select-none">
-          <div className="flex items-center gap-3">
-            <div className="grid size-8 place-items-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white font-bold text-xs shadow-xs">
-              SP
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-900 text-sm tracking-tight">SmartPDF</span>
-                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  Powered by StarPDF
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-full">
-              <ShieldCheck className="size-3.5 text-emerald-600" />
-              Local processing
-            </span>
-          </div>
-        </header>
-
-        {/* Center Empty Workspace with Dropzone */}
-        <div className="flex-1 flex items-center justify-center p-6 sm:p-12 overflow-auto bg-slate-50/50">
-          <div className="w-full max-w-xl space-y-6">
-            <PdfDropzone
-              onFileSelect={loadDocument}
-              isLoading={isLoading}
-              loadingMessage={loadingMessage}
-              error={error}
-            />
-          </div>
-        </div>
-
-        {/* Bottom Status Bar for Empty State */}
+        <SmartPdfNavbar
+          surface="home"
+          onSelectSurface={setSurface}
+          tabs={[]}
+          activeTabId={null}
+          onSelectTab={() => {}}
+          onCloseTab={() => {}}
+          onOpenNewFile={handleOpenNewFileClick}
+        />
+        <SmartPdfHome
+          onOpenFile={(file, mode) => {
+            void handleFileSelected(file);
+            if (mode) setEditorMode(mode);
+          }}
+          onOpenBytes={(name, bytes, mode) => {
+            void loadDocument(bytes, name, bytes.byteLength, 1);
+            if (mode) setEditorMode(mode);
+          }}
+          onNavigateToTools={() => setSurface("tools")}
+        />
         <footer
           className="h-8 border-t border-slate-200 bg-white px-4 flex items-center justify-between text-xs text-slate-400 shrink-0 select-none"
           data-testid="smartpdf-status-bar"
@@ -1453,6 +1520,106 @@ export function SmartPdfEditor() {
             Zero bytes uploaded • 100% Client-Side WebAssembly
           </span>
         </footer>
+      </div>
+    );
+  }
+
+  // Active document loaded: surface switching support
+  if (surface === "home") {
+    return (
+      <div
+        className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative select-none"
+        data-testid="smartpdf-editor-workspace"
+      >
+        <SmartPdfNavbar
+          surface="home"
+          onSelectSurface={setSurface}
+          tabs={[
+            {
+              id: "active-doc",
+              title: filename,
+              sourceBytes,
+              isModified,
+              pageCount: inspectionResult.metadata.pageCount,
+            },
+          ]}
+          activeTabId="active-doc"
+          onSelectTab={() => setSurface("workspace")}
+          onCloseTab={() => {
+            cleanupProxy();
+            setSourceBytes(null);
+            setInspectionResult(null);
+            setFilename("");
+            setSurface("home");
+          }}
+          onOpenNewFile={handleOpenNewFileClick}
+        />
+        <SmartPdfHome
+          onOpenFile={(file, mode) => {
+            void handleFileSelected(file);
+            if (mode) setEditorMode(mode);
+          }}
+          onOpenBytes={(name, bytes, mode) => {
+            void loadDocument(bytes, name, bytes.byteLength, 1);
+            if (mode) setEditorMode(mode);
+          }}
+          onNavigateToTools={() => setSurface("tools")}
+        />
+      </div>
+    );
+  }
+
+  if (surface === "tools") {
+    return (
+      <div
+        className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative select-none"
+        data-testid="smartpdf-editor-workspace"
+      >
+        <SmartPdfNavbar
+          surface="tools"
+          onSelectSurface={setSurface}
+          tabs={[
+            {
+              id: "active-doc",
+              title: filename,
+              sourceBytes,
+              isModified,
+              pageCount: inspectionResult.metadata.pageCount,
+            },
+          ]}
+          activeTabId="active-doc"
+          onSelectTab={() => setSurface("workspace")}
+          onCloseTab={() => {
+            cleanupProxy();
+            setSourceBytes(null);
+            setInspectionResult(null);
+            setFilename("");
+            setSurface("home");
+          }}
+          onOpenNewFile={handleOpenNewFileClick}
+        />
+        <SmartPdfAllTools
+          hasActiveDocument={true}
+          onOpenFileWithTool={async (file, tool) => {
+            await handleFileSelected(file);
+            if (tool.recommendedMode) {
+              setEditorMode(tool.recommendedMode);
+            }
+            setSurface("workspace");
+          }}
+          onActivateToolForCurrentDoc={(tool) => {
+            if (tool.recommendedMode) {
+              setEditorMode(tool.recommendedMode);
+            } else if (tool.dialogTarget === "merge") {
+              mergeInputRef.current?.click();
+            } else if (tool.dialogTarget === "split") {
+              setShowSplitModal(true);
+            } else if (tool.dialogTarget === "info") {
+              setShowInfoModal(true);
+            }
+            setSurface("workspace");
+          }}
+        />
       </div>
     );
   }
@@ -1642,6 +1809,14 @@ export function SmartPdfEditor() {
         formAssistEnabled={formAssistEnabled}
         onToggleFormAssist={() => setFormAssistEnabled((prev) => !prev)}
         mutationEnabled={nativeMutationEnabled}
+        onHomeClick={() => {
+          if (externalHomeClick) externalHomeClick();
+          else setSurface("home");
+        }}
+        onAllToolsClick={() => {
+          if (externalAllToolsClick) externalAllToolsClick();
+          else setSurface("tools");
+        }}
       />
 
 
