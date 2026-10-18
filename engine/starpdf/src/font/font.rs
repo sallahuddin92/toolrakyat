@@ -516,10 +516,10 @@ impl Font {
             for &b in bytes {
                 let code = b as u32;
                 let (text, width) = self.decode_char_code(code);
-                let glyph_id = self
-                    .embedded_sfnt
-                    .as_ref()
-                    .and_then(|f| f.get_glyph_id(code));
+                let glyph_id = self.embedded_sfnt.as_ref().and_then(|f| {
+                    f.get_glyph_id(code)
+                        .or_else(|| text.chars().next().and_then(|c| f.get_glyph_id(c as u32)))
+                });
 
                 result.push(DecodedGlyphSpan {
                     text,

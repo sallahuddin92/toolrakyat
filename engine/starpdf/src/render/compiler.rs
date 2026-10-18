@@ -1,6 +1,7 @@
 use crate::content::operand::ContentOperand;
 use crate::content::operator::ContentOperator;
 use crate::content::parser::ContentParser;
+use crate::document::object_store::ObjectStore;
 use crate::document::PdfDocument;
 use crate::error::PdfResult;
 use crate::execution::{RenderNodeId, StarNodeId};
@@ -24,7 +25,7 @@ struct GraphicsState {
     miter_limit: f32,
     dash_pattern: Option<(Vec<f32>, f32)>,
     clip_pending: Option<FillRule>,
-    clip_active: bool,
+    clip_depth: usize,
     stroke_alpha: f32,
     fill_alpha: f32,
     blend_mode: BlendMode,
@@ -43,7 +44,7 @@ impl Default for GraphicsState {
             miter_limit: 10.0,
             dash_pattern: None,
             clip_pending: None,
-            clip_active: false,
+            clip_depth: 0,
             stroke_alpha: 1.0,
             fill_alpha: 1.0,
             blend_mode: BlendMode::Normal,
@@ -146,11 +147,26 @@ impl RenderCompiler {
             subpath_start: None,
             current_point: None,
             recursion_depth: 0,
+            local_fonts_stack: Vec::new(),
         };
 
         // 4. Process Content Streams into Render Items
         for (stream_index, stream_bytes) in decompressed_streams.iter().enumerate() {
             ctx.process_stream(stream_bytes, stream_index, None);
+        }
+
+        // Pop any unclosed clips left on the page
+        while ctx.current_graphics.clip_depth > 0 {
+            ctx.items.push(RenderItem::PopClip);
+            ctx.current_graphics.clip_depth -= 1;
+        }
+
+        // 5. Process Page Annotations (FreeText, Widget, Stamp, Ink appearances)
+        ctx.process_annotations();
+
+        while ctx.current_graphics.clip_depth > 0 {
+            ctx.items.push(RenderItem::PopClip);
+            ctx.current_graphics.clip_depth -= 1;
         }
 
         Ok(RenderPage {
@@ -343,6 +359,7 @@ struct CompilationContext<'a, 'doc> {
     subpath_start: Option<(f32, f32)>,
     current_point: Option<(f32, f32)>,
     recursion_depth: usize,
+    local_fonts_stack: Vec<std::collections::BTreeMap<String, Font>>,
 }
 
 impl<'a, 'doc> CompilationContext<'a, 'doc> {
@@ -374,7 +391,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 }
                 ContentOperator::QEnd => {
                     if let Some(prev) = self.graphics_stack.pop() {
-                        if self.current_graphics.clip_active && !prev.clip_active {
+                        let diff = self.current_graphics.clip_depth.saturating_sub(prev.clip_depth);
+                        for _ in 0..diff {
                             self.items.push(RenderItem::PopClip);
                         }
                         self.current_graphics = prev;
@@ -560,7 +578,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                             rule,
                             transform: self.current_graphics.ctm,
                         }));
-                        self.current_graphics.clip_active = true;
+                        self.current_graphics.clip_depth += 1;
                     }
                     self.current_path.clear();
                     self.subpath_start = None;
@@ -847,13 +865,60 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     }
                 }
 
-                // Harmless or color space setting and marked content / compatibility metadata
+                ContentOperator::SCFill | ContentOperator::SCNFill => {
+                    let nums: Vec<f32> = inst
+                        .operands
+                        .iter()
+                        .filter_map(|op| match op {
+                            ContentOperand::Integer(i) => Some(*i as f32),
+                            ContentOperand::Real(r) => Some(*r as f32),
+                            _ => None,
+                        })
+                        .collect();
+                    match nums.len() {
+                        1 => {
+                            self.current_graphics.fill_color = ColorRgba::from_gray(nums[0]);
+                        }
+                        3 => {
+                            self.current_graphics.fill_color =
+                                ColorRgba::from_rgb(nums[0], nums[1], nums[2]);
+                        }
+                        4 => {
+                            self.current_graphics.fill_color =
+                                ColorRgba::from_cmyk(nums[0], nums[1], nums[2], nums[3]);
+                        }
+                        _ => {}
+                    }
+                }
+                ContentOperator::SCStroke | ContentOperator::SCNStroke => {
+                    let nums: Vec<f32> = inst
+                        .operands
+                        .iter()
+                        .filter_map(|op| match op {
+                            ContentOperand::Integer(i) => Some(*i as f32),
+                            ContentOperand::Real(r) => Some(*r as f32),
+                            _ => None,
+                        })
+                        .collect();
+                    match nums.len() {
+                        1 => {
+                            self.current_graphics.stroke_color = ColorRgba::from_gray(nums[0]);
+                        }
+                        3 => {
+                            self.current_graphics.stroke_color =
+                                ColorRgba::from_rgb(nums[0], nums[1], nums[2]);
+                        }
+                        4 => {
+                            self.current_graphics.stroke_color =
+                                ColorRgba::from_cmyk(nums[0], nums[1], nums[2], nums[3]);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Harmless color space setting and marked content / compatibility metadata
                 ContentOperator::CSFill
                 | ContentOperator::CSStroke
-                | ContentOperator::SCFill
-                | ContentOperator::SCStroke
-                | ContentOperator::SCNFill
-                | ContentOperator::SCNStroke
                 | ContentOperator::Bmc
                 | ContentOperator::Bdc
                 | ContentOperator::Emc
@@ -1212,8 +1277,19 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 rule: FillRule::NonZero,
                 transform: self.current_graphics.ctm,
             }));
-            let prev_clip = self.current_graphics.clip_active;
-            self.current_graphics.clip_active = true;
+            self.current_graphics.clip_depth += 1;
+
+            let has_fonts = if let Some(ref res) = form_resources {
+                if res.contains_key("Font") {
+                    let fonts = Self::extract_fonts_from_resources(res, self.doc.store_mut());
+                    self.local_fonts_stack.push(fonts);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
             self.recursion_depth += 1;
             self.process_stream(
@@ -1223,9 +1299,13 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
             );
             self.recursion_depth -= 1;
 
+            if has_fonts {
+                self.local_fonts_stack.pop();
+            }
+
             // Pop clip
             self.items.push(RenderItem::PopClip);
-            self.current_graphics.clip_active = prev_clip;
+            self.current_graphics.clip_depth = self.current_graphics.clip_depth.saturating_sub(1);
 
             // Restore graphics state
             if let Some(prev) = self.graphics_stack.pop() {
@@ -1554,7 +1634,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 rule,
                 transform: self.current_graphics.ctm,
             }));
-            self.current_graphics.clip_active = true;
+            self.current_graphics.clip_depth += 1;
         }
 
         if !self.current_path.is_empty() {
@@ -1602,10 +1682,20 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
         star_node_id: Option<StarNodeId>,
         render_node_id: Option<RenderNodeId>,
     ) {
-        let font = self
-            .resources
-            .fonts
-            .get(&self.text_state.font_name)
+        let font_name = &self.text_state.font_name;
+        let clean_name = font_name.strip_prefix('/').unwrap_or(font_name);
+
+        let local_font = self.local_fonts_stack.iter().rev().find_map(|map| {
+            map.get(clean_name)
+                .or_else(|| map.get(font_name))
+                .or_else(|| {
+                    let with_slash = format!("/{}", clean_name);
+                    map.get(&with_slash)
+                })
+        });
+
+        let font = local_font
+            .or_else(|| self.resources.get_font(font_name))
             .unwrap_or(&self.fallback_font);
 
         let decoded_glyphs = font.decode_bytes_full(bytes);
@@ -1664,5 +1754,233 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
 
         let advance_transform = Transform2D::translation(local_x, 0.0);
         self.text_state.text_matrix = advance_transform.multiply(&self.text_state.text_matrix);
+    }
+
+    fn extract_fonts_from_resources(
+        res_dict: &std::collections::BTreeMap<String, PdfObject>,
+        store: &mut ObjectStore<'_>,
+    ) -> std::collections::BTreeMap<String, Font> {
+        let mut fonts = std::collections::BTreeMap::new();
+        if let Some(font_entry) = res_dict.get("Font") {
+            if let Ok(resolved_fonts) = store.resolve_object(font_entry) {
+                if let Some(font_map) = resolved_fonts.as_dict() {
+                    for (font_name, font_obj_ref) in font_map {
+                        if let Ok(resolved_font_obj) = store.resolve_object(font_obj_ref) {
+                            if let Some(font_dict) = resolved_font_obj.as_dict() {
+                                if let Ok(font) = Font::from_dict(font_name, font_dict, store) {
+                                    fonts.insert(font_name.clone(), font);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        fonts
+    }
+
+    fn process_annotations(&mut self) {
+        let annots_arr = match self.page_dict.get("Annots") {
+            Some(PdfObject::Array(arr)) => arr.clone(),
+            Some(PdfObject::Reference(r)) => {
+                if let Ok(PdfObject::Array(arr)) =
+                    self.doc.store_mut().resolve_object(&PdfObject::Reference(*r))
+                {
+                    arr
+                } else {
+                    return;
+                }
+            }
+            _ => return,
+        };
+
+        for annot_ref in annots_arr {
+            let annot_obj = match self.doc.store_mut().resolve_object(&annot_ref) {
+                Ok(obj) => obj,
+                Err(_) => continue,
+            };
+            let annot_dict = match annot_obj.as_dict() {
+                Some(d) => d.clone(),
+                None => continue,
+            };
+
+            // Check annotation flags /F: bit 2 (Hidden = 2) or bit 6 (NoView = 32)
+            if let Some(flags) = annot_dict.get("F").and_then(PdfObject::as_i64) {
+                if (flags & 2) != 0 || (flags & 32) != 0 {
+                    continue;
+                }
+            }
+
+            // Resolve /Rect [x0 y0 x1 y1]
+            let rect = match RenderCompiler::resolve_box(&annot_dict, "Rect") {
+                Some(r) => r,
+                None => continue,
+            };
+            let rx0 = rect[0].min(rect[2]);
+            let rx1 = rect[0].max(rect[2]);
+            let ry0 = rect[1].min(rect[3]);
+            let ry1 = rect[1].max(rect[3]);
+            let rect_w = rx1 - rx0;
+            let rect_h = ry1 - ry0;
+            if rect_w <= 0.0 || rect_h <= 0.0 {
+                continue;
+            }
+
+            // Resolve /AP (Appearance dictionary)
+            let ap_obj = match annot_dict.get("AP") {
+                Some(o) => match self.doc.store_mut().resolve_object(o) {
+                    Ok(resolved) => resolved,
+                    Err(_) => continue,
+                },
+                None => continue,
+            };
+
+            // /AP can be a Stream directly, or a Dict with /N
+            let n_stream = match ap_obj {
+                PdfObject::Stream(s) => Some(s),
+                PdfObject::Dictionary(ap_dict) => {
+                    if let Some(n_ref) = ap_dict.get("N") {
+                        if let Ok(n_obj) = self.doc.store_mut().resolve_object(n_ref) {
+                            match n_obj {
+                                PdfObject::Stream(s) => Some(s),
+                                PdfObject::Dictionary(sub_dict) => {
+                                    // Check /AS appearance state
+                                    let as_state = annot_dict.get("AS").and_then(PdfObject::as_name);
+                                    let target_ref = if let Some(state) = as_state {
+                                        sub_dict.get(state)
+                                    } else {
+                                        sub_dict.values().next()
+                                    };
+                                    if let Some(t_ref) = target_ref {
+                                        if let Ok(PdfObject::Stream(s)) =
+                                            self.doc.store_mut().resolve_object(t_ref)
+                                        {
+                                            Some(s)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+
+            let form_stream = match n_stream {
+                Some(s) => s,
+                None => continue,
+            };
+
+            // BBox of the form
+            let bbox = RenderCompiler::resolve_box(&form_stream.dict, "BBox")
+                .unwrap_or([0.0, 0.0, rect_w, rect_h]);
+            let bx0 = bbox[0].min(bbox[2]);
+            let bx1 = bbox[0].max(bbox[2]);
+            let by0 = bbox[1].min(bbox[3]);
+            let by1 = bbox[1].max(bbox[3]);
+            let bw = (bx1 - bx0).max(0.001);
+            let bh = (by1 - by0).max(0.001);
+
+            let form_matrix = if let Some(m_arr) = form_stream.dict.get("Matrix").and_then(PdfObject::as_array) {
+                if m_arr.len() >= 6 {
+                    let m = Transform2D::new(
+                        RenderCompiler::obj_num(&m_arr[0]),
+                        RenderCompiler::obj_num(&m_arr[1]),
+                        RenderCompiler::obj_num(&m_arr[2]),
+                        RenderCompiler::obj_num(&m_arr[3]),
+                        RenderCompiler::obj_num(&m_arr[4]),
+                        RenderCompiler::obj_num(&m_arr[5]),
+                    );
+                    Transform2D::translation(rx0, ry0).multiply(&m)
+                } else {
+                    let sx = rect_w / bw;
+                    let sy = rect_h / bh;
+                    Transform2D::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy)
+                }
+            } else {
+                let sx = rect_w / bw;
+                let sy = rect_h / bh;
+                Transform2D::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy)
+            };
+
+            let form_resources = if let Some(r_obj) = form_stream.dict.get("Resources") {
+                self.doc
+                    .store_mut()
+                    .resolve_object(r_obj)
+                    .ok()
+                    .and_then(|o| o.as_dict().cloned())
+            } else {
+                None
+            };
+
+            let has_fonts = if let Some(ref res) = form_resources {
+                if res.contains_key("Font") {
+                    let fonts = Self::extract_fonts_from_resources(res, self.doc.store_mut());
+                    self.local_fonts_stack.push(fonts);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let stream_bytes = match self.doc.decompress_stream_data(&form_stream) {
+                Ok(b) => b,
+                Err(_) => {
+                    if has_fonts {
+                        self.local_fonts_stack.pop();
+                    }
+                    continue;
+                }
+            };
+
+            // Push graphics state and establish annotation CTM
+            self.graphics_stack.push(self.current_graphics.clone());
+            self.current_graphics = GraphicsState::default();
+            self.current_graphics.ctm = form_matrix;
+
+            // Push BBox clip
+            let clip_verbs = vec![
+                PathVerb::MoveTo(bbox[0], bbox[1]),
+                PathVerb::LineTo(bbox[2], bbox[1]),
+                PathVerb::LineTo(bbox[2], bbox[3]),
+                PathVerb::LineTo(bbox[0], bbox[3]),
+                PathVerb::Close,
+            ];
+            self.items.push(RenderItem::PushClip(RenderClip {
+                verbs: clip_verbs,
+                rule: FillRule::NonZero,
+                transform: self.current_graphics.ctm,
+            }));
+            self.current_graphics.clip_depth += 1;
+
+            // Process appearance stream
+            self.recursion_depth += 1;
+            self.process_stream(&stream_bytes, 88888, form_resources.as_ref());
+            self.recursion_depth -= 1;
+
+            // Pop clip
+            self.items.push(RenderItem::PopClip);
+            self.current_graphics.clip_depth = self.current_graphics.clip_depth.saturating_sub(1);
+
+            if has_fonts {
+                self.local_fonts_stack.pop();
+            }
+
+            // Restore graphics state
+            if let Some(saved) = self.graphics_stack.pop() {
+                self.current_graphics = saved;
+            }
+        }
     }
 }
