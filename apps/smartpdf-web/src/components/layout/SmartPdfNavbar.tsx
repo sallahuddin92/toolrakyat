@@ -23,7 +23,7 @@ import {
   Command,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { EditorMode } from "@/components/tools/implementations/pdf/PdfToolbar";
+import type { EditorMode } from "../workspace/PdfToolbar";
 import type { SmartPdfSurface, DocumentTabSession } from "../types";
 
 interface SmartPdfNavbarProps {

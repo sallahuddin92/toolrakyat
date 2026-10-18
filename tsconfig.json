@@ -19,7 +19,10 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@smartpdf/*": ["./apps/smartpdf-web/src/*"],
+      "@/lib/pdf/*": ["./apps/smartpdf-web/src/lib/pdf/*"],
+      "@/components/smartpdf/*": ["./apps/smartpdf-web/src/components/*"]
     }
   },
   "include": [
@@ -30,5 +33,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "smartpdf", "backend"]
+  "exclude": ["node_modules", "apps", "backend"]
 }

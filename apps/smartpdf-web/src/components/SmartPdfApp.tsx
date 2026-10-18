@@ -1,24 +1,25 @@
 "use client";
 
 import React, { useState, useCallback, useEffect } from "react";
-import { SmartPdfEditor } from "@/components/tools/implementations/pdf/SmartPdfEditor";
+import { SmartPdfEditor } from "./workspace/SmartPdfEditor";
 import { SmartPdfHome } from "./home/SmartPdfHome";
 import { SmartPdfAllTools } from "./tools/SmartPdfAllTools";
 import { SmartPdfNavbar } from "./layout/SmartPdfNavbar";
 import { addRecentDocument, getRecentDocuments } from "./recent/recentFilesStore";
 import type { SmartPdfSurface, DocumentTabSession, PdfToolDefinition } from "./types";
-import type { EditorMode } from "@/components/tools/implementations/pdf/PdfToolbar";
+import type { EditorMode } from "./workspace/PdfToolbar";
 
 export function SmartPdfApp() {
   const [surface, setSurface] = useState<SmartPdfSurface>("home");
   const [tabs, setTabs] = useState<DocumentTabSession[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [targetMode, setTargetMode] = useState<EditorMode | undefined>(undefined);
+  const [activeToolId, setActiveToolId] = useState<string | undefined>(undefined);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
   const handleOpenDocument = useCallback(
-    async (file: File, mode?: EditorMode) => {
+    async (file: File, mode?: EditorMode, toolId?: string) => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const newTabId = `tab-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const newTab: DocumentTabSession = {
@@ -33,6 +34,7 @@ export function SmartPdfApp() {
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTabId);
       setTargetMode(mode);
+      setActiveToolId(toolId);
       setSurface("workspace");
 
       void addRecentDocument({
@@ -44,7 +46,7 @@ export function SmartPdfApp() {
   );
 
   const handleOpenBytes = useCallback(
-    (name: string, bytes: Uint8Array, mode?: EditorMode) => {
+    (name: string, bytes: Uint8Array, mode?: EditorMode, toolId?: string) => {
       const newTabId = `tab-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const newTab: DocumentTabSession = {
         id: newTabId,
@@ -58,6 +60,7 @@ export function SmartPdfApp() {
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTabId);
       setTargetMode(mode);
+      setActiveToolId(toolId);
       setSurface("workspace");
 
       void addRecentDocument({
@@ -135,12 +138,13 @@ export function SmartPdfApp() {
         <SmartPdfAllTools
           hasActiveDocument={Boolean(activeTab)}
           onOpenFileWithTool={async (file, tool) => {
-            await handleOpenDocument(file, tool.recommendedMode);
+            await handleOpenDocument(file, tool.recommendedMode, tool.id);
           }}
           onActivateToolForCurrentDoc={(tool) => {
             if (tool.recommendedMode) {
               setTargetMode(tool.recommendedMode);
             }
+            setActiveToolId(tool.id);
             setSurface("workspace");
           }}
         />
@@ -157,6 +161,7 @@ export function SmartPdfApp() {
                 bytes: activeTab.sourceBytes,
               }}
               initialMode={targetMode || activeTab.initialMode}
+              initialToolId={activeToolId}
               onHomeClick={() => setSurface("home")}
               onAllToolsClick={() => setSurface("tools")}
             />

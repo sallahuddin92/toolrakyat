@@ -1,6 +1,6 @@
 "use client";
 
-import { SmartPdfApp } from "@/components/smartpdf/SmartPdfApp";
+import { SmartPdfApp } from "@smartpdf/components/SmartPdfApp";
 
 export default function SmartPdfAppPage() {
   return (

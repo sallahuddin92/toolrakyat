@@ -18,7 +18,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { EditorMode } from "@/components/tools/implementations/pdf/PdfToolbar";
+import toast from "react-hot-toast";
+import type { EditorMode } from "../workspace/PdfToolbar";
 import type { RecentDocumentMeta } from "../types";
 import {
   getRecentDocuments,
@@ -101,11 +102,20 @@ export function SmartPdfHome({
   };
 
   const handleOpenRecent = async (item: RecentDocumentMeta) => {
-    const cachedBytes = await getRecentDocumentBytes(item.id);
-    if (cachedBytes) {
-      onOpenBytes(item.name, cachedBytes);
-    } else {
-      // Prompt user to select file since cache expired
+    try {
+      const cachedBytes = await getRecentDocumentBytes(item.id);
+      if (cachedBytes && cachedBytes.byteLength > 0) {
+        toast.success(`Loaded "${item.name}" from local storage cache.`);
+        onOpenBytes(item.name, cachedBytes);
+      } else {
+        toast.error(
+          `Local cache not found for "${item.name}". Please re-select the file from your local disk to reopen.`,
+          { duration: 5000, id: "cache-reopen" }
+        );
+        triggerFileSelect();
+      }
+    } catch {
+      toast.error(`Could not read local cache for "${item.name}". Please re-select the file.`);
       triggerFileSelect();
     }
   };

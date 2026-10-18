@@ -1,4 +1,4 @@
-import type { EditorMode } from "@/components/tools/implementations/pdf/PdfToolbar";
+import type { EditorMode } from "./workspace/PdfToolbar";
 
 export type SmartPdfSurface = "home" | "tools" | "workspace";
 

@@ -100,11 +100,11 @@ import { PdfContextualToolbar } from "./PdfContextualToolbar";
 import { PdfConfirmDialog } from "./PdfConfirmDialog";
 import { SmartPdfImportModal } from "./SmartPdfImportModal";
 import { SmartPdfSplitModal } from "./SmartPdfSplitModal";
-import { SmartPdfHome } from "@/components/smartpdf/home/SmartPdfHome";
-import { SmartPdfAllTools } from "@/components/smartpdf/tools/SmartPdfAllTools";
-import { SmartPdfNavbar } from "@/components/smartpdf/layout/SmartPdfNavbar";
-import { addRecentDocument } from "@/components/smartpdf/recent/recentFilesStore";
-import type { SmartPdfSurface, PdfToolDefinition } from "@/components/smartpdf/types";
+import { SmartPdfHome } from "../home/SmartPdfHome";
+import { SmartPdfAllTools } from "../tools/SmartPdfAllTools";
+import { SmartPdfNavbar } from "../layout/SmartPdfNavbar";
+import { addRecentDocument } from "../recent/recentFilesStore";
+import type { SmartPdfSurface, PdfToolDefinition } from "../types";
 
 export interface SmartPdfEditorProps {
   initialFile?: {
@@ -112,6 +112,7 @@ export interface SmartPdfEditorProps {
     bytes: Uint8Array;
   };
   initialMode?: EditorMode;
+  initialToolId?: string;
   onHomeClick?: () => void;
   onAllToolsClick?: () => void;
   onDocumentLoaded?: (doc: { filename: string; bytes: Uint8Array; pageCount: number }) => void;
@@ -120,6 +121,7 @@ export interface SmartPdfEditorProps {
 export function SmartPdfEditor({
   initialFile,
   initialMode,
+  initialToolId,
   onHomeClick: externalHomeClick,
   onAllToolsClick: externalAllToolsClick,
   onDocumentLoaded,
@@ -406,6 +408,34 @@ export function SmartPdfEditor({
       void loadDocument(initialFile.bytes, initialFile.filename, initialFile.bytes.byteLength, 1);
     }
   }, [initialFile, loadDocument]);
+
+  // Handle Initial Tool Activation from All Tools
+  useEffect(() => {
+    if (!initialToolId || !inspectionResult) return;
+    if (initialToolId === "tool-merge-pdf") {
+      setShowImportModal(true);
+    } else if (initialToolId === "tool-split-pdf") {
+      setShowSplitModal(true);
+    } else if (
+      initialToolId === "tool-metadata-inspector" ||
+      initialToolId === "tool-signature-audit"
+    ) {
+      setShowInfoModal(true);
+    } else if (initialToolId === "tool-place-signature") {
+      setEditorMode("FILL_AND_SIGN");
+      setFillAndSignTool("signature");
+    } else if (initialToolId === "tool-check-cross") {
+      setEditorMode("FILL_AND_SIGN");
+      setFillAndSignTool("check");
+    } else if (initialToolId === "tool-flat-form-assist") {
+      setEditorMode("FILL_AND_SIGN");
+      setFillAndSignTool("text");
+    } else if (initialToolId === "tool-insert-blank") {
+      setEditorMode("PAGES");
+    } else if (initialToolId === "tool-duplicate-page") {
+      setEditorMode("PAGES");
+    }
+  }, [initialToolId, inspectionResult]);
 
   /**
    * Centralized Command Execution Lifecycle
@@ -1608,6 +1638,39 @@ export function SmartPdfEditor({
             setSurface("workspace");
           }}
           onActivateToolForCurrentDoc={(tool) => {
+            if (tool.id === "tool-export-canonical") {
+              setSurface("workspace");
+              void commitFreeTextSession().then(() => executeCommand(new ExportDocumentCommand("editable")));
+              return;
+            }
+            if (tool.id === "tool-add-image") {
+              setSurface("workspace");
+              imageInputRef.current?.click();
+              return;
+            }
+            if (tool.id === "tool-insert-blank") {
+              setSurface("workspace");
+              void executeCommand(new InsertBlankPageCommand(currentPage, 612, 792));
+              return;
+            }
+            if (tool.id === "tool-duplicate-page") {
+              setSurface("workspace");
+              void executeCommand(new DuplicatePageCommand(currentPage));
+              return;
+            }
+            if (tool.id === "tool-place-signature") {
+              setEditorMode("FILL_AND_SIGN");
+              setFillAndSignTool("signature");
+              if (!signatureFile) signatureInputRef.current?.click();
+              setSurface("workspace");
+              return;
+            }
+            if (tool.id === "tool-check-cross") {
+              setEditorMode("FILL_AND_SIGN");
+              setFillAndSignTool("check");
+              setSurface("workspace");
+              return;
+            }
             if (tool.recommendedMode) {
               setEditorMode(tool.recommendedMode);
             } else if (tool.dialogTarget === "merge") {

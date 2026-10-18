@@ -31,7 +31,7 @@ import {
   PDF_WORKFLOW_CATEGORIES,
 } from "./pdfToolsCatalog";
 import type { PdfToolDefinition, PdfWorkflowCategory } from "../types";
-import type { EditorMode } from "@/components/tools/implementations/pdf/PdfToolbar";
+import type { EditorMode } from "../workspace/PdfToolbar";
 
 interface SmartPdfAllToolsProps {
   onOpenFileWithTool: (file: File, tool: PdfToolDefinition) => void;

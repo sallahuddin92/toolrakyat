@@ -5,7 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { FileUp, FileText, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { validateUploadedFile } from "@/lib/tools/file-validation";
+import { validateUploadedFile } from "@/lib/utils/validation";
 
 interface PdfDropzoneProps {
   onFileSelect: (bytes: Uint8Array, filename: string, fileSize: number) => Promise<void>;

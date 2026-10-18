@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { type PdfDocumentMetadata } from "@/lib/pdf/pdf-types";
-import { formatBytes } from "@/lib/tools/format";
+import { formatBytes } from "@/lib/utils/format";
 import { Button } from "@/components/ui/button";
 import {
   Info,
