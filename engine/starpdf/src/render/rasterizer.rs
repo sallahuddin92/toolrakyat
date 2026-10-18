@@ -434,8 +434,6 @@ impl NativeRasterizer {
                         continue;
                     }
 
-                    let active_mask = mask_stack.last();
-
                     let mut fill_paint = tiny_skia::Paint::default();
                     let fcol = text_run
                         .fill_color
@@ -506,20 +504,29 @@ impl NativeRasterizer {
                                                     .multiply(&page_transform)
                                                     .to_tiny_skia();
 
-                                                if text_run.render_mode == 0
+                                                let should_fill = text_run.render_mode == 0
                                                     || text_run.render_mode == 2
-                                                {
+                                                    || text_run.render_mode == 4
+                                                    || text_run.render_mode == 6;
+
+                                                let should_stroke = text_run.render_mode == 1
+                                                    || text_run.render_mode == 2
+                                                    || text_run.render_mode == 5
+                                                    || text_run.render_mode == 6;
+
+                                                let should_clip = text_run.render_mode >= 4
+                                                    && text_run.render_mode <= 7;
+
+                                                if should_fill {
                                                     pixmap.fill_path(
                                                         &path,
                                                         &fill_paint,
                                                         tiny_skia::FillRule::Winding,
                                                         combined,
-                                                        active_mask,
+                                                        mask_stack.last(),
                                                     );
                                                 }
-                                                if text_run.render_mode == 1
-                                                    || text_run.render_mode == 2
-                                                {
+                                                if should_stroke {
                                                     let sk_stroke = tiny_skia::Stroke {
                                                         width: (text_run.font_size * 0.05).max(0.5),
                                                         ..Default::default()
@@ -529,8 +536,28 @@ impl NativeRasterizer {
                                                         &stroke_paint,
                                                         &sk_stroke,
                                                         combined,
-                                                        active_mask,
+                                                        mask_stack.last(),
                                                     );
+                                                }
+                                                if should_clip {
+                                                    if let Some(mask) = mask_stack.last_mut() {
+                                                        mask.fill_path(
+                                                            &path,
+                                                            tiny_skia::FillRule::Winding,
+                                                            true,
+                                                            combined,
+                                                        );
+                                                    } else if let Some(mut new_mask) =
+                                                        tiny_skia::Mask::new(target_width, target_height)
+                                                    {
+                                                        new_mask.fill_path(
+                                                            &path,
+                                                            tiny_skia::FillRule::Winding,
+                                                            true,
+                                                            combined,
+                                                        );
+                                                        mask_stack.push(new_mask);
+                                                    }
                                                 }
                                             }
                                         }

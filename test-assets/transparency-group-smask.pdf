@@ -1,0 +1,72 @@
+%PDF-1.7
+%ÄÅÇÉ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [ 3 0 R ] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [ 0 0 612 792 ] /Contents 4 0 R /Resources 5 0 R /Group 9 0 R >>
+endobj
+4 0 obj
+<< /Length 191 >>
+stream
+q
+1 1 1 rg 0 0 612 792 re f
+0 0 1 rg
+100 450 200 200 re f
+q
+1 0 0 1 150 500 cm
+/Fm1 Do
+Q
+0 0 0 rg
+BT
+/F1 16 Tf
+50 400 Td
+(Isolated Transparency Group Form XObject with alpha blending) Tj
+ET
+Q
+endstream
+endobj
+5 0 obj
+<< /XObject << /Fm1 6 0 R >> /Font << /F1 8 0 R >> >>
+endobj
+6 0 obj
+<< /Type /XObject /Subtype /Form /FormType 1 /BBox [ 0 0 200 200 ] /Group << /Type /Group /S /Transparency /CS /DeviceRGB >> /Resources << /ExtGState << /GS1 7 0 R >> >> /Length 65 >>
+stream
+q
+/GS1 gs
+1 0 0 rg
+0 0 150 150 re f
+0 1 0 rg
+50 50 150 150 re f
+Q
+endstream
+endobj
+7 0 obj
+<< /Type /ExtGState /ca 0.6 /CA 0.6 /BM /Normal >>
+endobj
+8 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+9 0 obj
+<< /Type /Group /S /Transparency /CS /DeviceRGB >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000123 00000 n 
+0000000242 00000 n 
+0000000484 00000 n 
+0000000553 00000 n 
+0000000835 00000 n 
+0000000901 00000 n 
+0000000971 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+1037
+%%EOF

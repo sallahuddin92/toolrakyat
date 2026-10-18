@@ -2,6 +2,8 @@ pub mod compiler;
 pub mod differential;
 pub mod ir;
 pub mod rasterizer;
+#[cfg(feature = "gpu")]
+pub mod wgpu_backend;
 
 pub use compiler::RenderCompiler;
 pub use differential::{DifferentialComparator, DifferentialMetrics};
@@ -11,3 +13,6 @@ pub use ir::{
     ShadingPattern, StrokeStyle, Transform2D, UnsupportedOperatorReport,
 };
 pub use rasterizer::{NativeRasterizer, RenderedPage};
+#[cfg(feature = "gpu")]
+pub use wgpu_backend::{GpuPerformanceMetrics, GpuRenderResult, WgpuRenderer};
+

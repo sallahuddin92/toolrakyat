@@ -15,6 +15,16 @@ use crate::render::ir::{
 use crate::syntax::object::{ObjectRef, PdfObject};
 
 #[derive(Debug, Clone)]
+struct ActiveTilingPattern {
+    stream_bytes: Vec<u8>,
+    _bbox: [f32; 4],
+    x_step: f32,
+    y_step: f32,
+    matrix: Transform2D,
+    resources: Option<std::collections::BTreeMap<String, PdfObject>>,
+}
+
+#[derive(Debug, Clone)]
 struct GraphicsState {
     ctm: Transform2D,
     stroke_color: ColorRgba,
@@ -30,6 +40,7 @@ struct GraphicsState {
     fill_alpha: f32,
     blend_mode: BlendMode,
     text_render_mode: u8,
+    tiling_pattern: Option<ActiveTilingPattern>,
 }
 
 impl Default for GraphicsState {
@@ -49,6 +60,7 @@ impl Default for GraphicsState {
             fill_alpha: 1.0,
             blend_mode: BlendMode::Normal,
             text_render_mode: 0,
+            tiling_pattern: None,
         }
     }
 }
@@ -635,6 +647,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     if !inst.operands.is_empty() {
                         self.current_graphics.fill_color =
                             ColorRgba::from_gray(RenderCompiler::num(&inst.operands[0]));
+                        self.current_graphics.tiling_pattern = None;
                     }
                 }
                 ContentOperator::GStroke => {
@@ -649,6 +662,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let g = RenderCompiler::num(&inst.operands[1]);
                         let b = RenderCompiler::num(&inst.operands[2]);
                         self.current_graphics.fill_color = ColorRgba::from_rgb(r, g, b);
+                        self.current_graphics.tiling_pattern = None;
                     }
                 }
                 ContentOperator::RGStroke => {
@@ -666,6 +680,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let y = RenderCompiler::num(&inst.operands[2]);
                         let k = RenderCompiler::num(&inst.operands[3]);
                         self.current_graphics.fill_color = ColorRgba::from_cmyk(c, m, y, k);
+                        self.current_graphics.tiling_pattern = None;
                     }
                 }
                 ContentOperator::KStroke => {
@@ -878,16 +893,129 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     match nums.len() {
                         1 => {
                             self.current_graphics.fill_color = ColorRgba::from_gray(nums[0]);
+                            self.current_graphics.tiling_pattern = None;
                         }
                         3 => {
                             self.current_graphics.fill_color =
                                 ColorRgba::from_rgb(nums[0], nums[1], nums[2]);
+                            self.current_graphics.tiling_pattern = None;
                         }
                         4 => {
                             self.current_graphics.fill_color =
                                 ColorRgba::from_cmyk(nums[0], nums[1], nums[2], nums[3]);
+                            self.current_graphics.tiling_pattern = None;
                         }
-                        _ => {}
+                        _ => {
+                            // If pattern name is supplied (e.g. /Pattern cs /P1 scn)
+                            if let Some(ContentOperand::Name(pat_name)) = inst.operands.last() {
+                                if let Some(pat_obj) = RenderCompiler::find_resource_object(
+                                    self.doc,
+                                    &self.page_dict,
+                                    local_res,
+                                    "Pattern",
+                                    pat_name,
+                                ) {
+                                    let pat_dict = match pat_obj {
+                                        PdfObject::Dictionary(ref d) => Some(d),
+                                        PdfObject::Stream(ref s) => Some(&s.dict),
+                                        _ => None,
+                                    };
+                                    if let Some(d) = pat_dict {
+                                        let pat_type = d.get("PatternType").and_then(PdfObject::as_i64).unwrap_or(0);
+                                        if pat_type == 1 {
+                                            if let PdfObject::Stream(ref s) = pat_obj {
+                                                if let Ok(bytes) = self.doc.decompress_stream_data(s) {
+                                                    let x_step = d.get("XStep").map(RenderCompiler::obj_num).unwrap_or(20.0);
+                                                    let y_step = d.get("YStep").map(RenderCompiler::obj_num).unwrap_or(20.0);
+                                                    let bbox = d.get("BBox").and_then(PdfObject::as_array).map(|arr| {
+                                                        [
+                                                            arr.first().map(RenderCompiler::obj_num).unwrap_or(0.0),
+                                                            arr.get(1).map(RenderCompiler::obj_num).unwrap_or(0.0),
+                                                            arr.get(2).map(RenderCompiler::obj_num).unwrap_or(x_step),
+                                                            arr.get(3).map(RenderCompiler::obj_num).unwrap_or(y_step),
+                                                        ]
+                                                    }).unwrap_or([0.0, 0.0, x_step, y_step]);
+
+                                                    let matrix = if let Some(m_arr) = d.get("Matrix").and_then(PdfObject::as_array) {
+                                                        if m_arr.len() >= 6 {
+                                                            Transform2D::new(
+                                                                RenderCompiler::obj_num(&m_arr[0]),
+                                                                RenderCompiler::obj_num(&m_arr[1]),
+                                                                RenderCompiler::obj_num(&m_arr[2]),
+                                                                RenderCompiler::obj_num(&m_arr[3]),
+                                                                RenderCompiler::obj_num(&m_arr[4]),
+                                                                RenderCompiler::obj_num(&m_arr[5]),
+                                                            )
+                                                        } else {
+                                                            Transform2D::identity()
+                                                        }
+                                                    } else {
+                                                        Transform2D::identity()
+                                                    };
+
+                                                    let pat_resources = d.get("Resources").and_then(|r| match r {
+                                                        PdfObject::Dictionary(rd) => Some(rd.clone()),
+                                                        PdfObject::Reference(rf) => {
+                                                            self.doc.store_mut().resolve(*rf).ok().and_then(PdfObject::as_dict).cloned()
+                                                        }
+                                                        _ => None,
+                                                    });
+
+                                                    self.current_graphics.tiling_pattern = Some(ActiveTilingPattern {
+                                                        stream_bytes: bytes,
+                                                        _bbox: bbox,
+                                                        x_step,
+                                                        y_step,
+                                                        matrix,
+                                                        resources: pat_resources,
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(sh_obj) = d.get("Shading") {
+                                            if let Ok(resolved_sh) = self.doc.store_mut().resolve_object(sh_obj) {
+                                                if let Some(sh_d) = resolved_sh.as_dict() {
+                                                    if let Some(func_obj) = sh_d.get("Function") {
+                                                        let (c0, c1) = Self::resolve_gradient_colors(self.doc, func_obj);
+                                                        self.current_graphics.fill_color = ColorRgba::new(
+                                                            (c0.r + c1.r) * 0.5,
+                                                            (c0.g + c1.g) * 0.5,
+                                                            (c0.b + c1.b) * 0.5,
+                                                            1.0,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if let PdfObject::Stream(ref s) = pat_obj {
+                                            if let Ok(bytes) = self.doc.decompress_stream_data(s) {
+                                                let text = String::from_utf8_lossy(&bytes);
+                                                let tokens: Vec<&str> = text.split_whitespace().collect();
+                                                let mut colors = Vec::new();
+                                                for (i, tok) in tokens.iter().enumerate() {
+                                                    if *tok == "rg" && i >= 3 {
+                                                        if let (Ok(r), Ok(g), Ok(b)) = (
+                                                            tokens[i - 3].parse::<f32>(),
+                                                            tokens[i - 2].parse::<f32>(),
+                                                            tokens[i - 1].parse::<f32>(),
+                                                        ) {
+                                                            colors.push(ColorRgba::from_rgb(r, g, b));
+                                                        }
+                                                    }
+                                                }
+                                                if !colors.is_empty() {
+                                                    let avg_r = colors.iter().map(|c| c.r).sum::<f32>() / colors.len() as f32;
+                                                    let avg_g = colors.iter().map(|c| c.g).sum::<f32>() / colors.len() as f32;
+                                                    let avg_b = colors.iter().map(|c| c.b).sum::<f32>() / colors.len() as f32;
+                                                    self.current_graphics.fill_color = ColorRgba::from_rgb(avg_r, avg_g, avg_b);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 ContentOperator::SCStroke | ContentOperator::SCNStroke => {
@@ -1638,39 +1766,158 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
         }
 
         if !self.current_path.is_empty() {
-            let fill_style = if fill {
-                Some(FillStyle {
-                    color: self.current_graphics.fill_color,
+            if fill && self.current_graphics.tiling_pattern.is_some() {
+                let pat = self.current_graphics.tiling_pattern.clone().unwrap();
+                let path_verbs = self.current_path.clone();
+
+                let mut min_x = f32::INFINITY;
+                let mut min_y = f32::INFINITY;
+                let mut max_x = f32::NEG_INFINITY;
+                let mut max_y = f32::NEG_INFINITY;
+                for v in &path_verbs {
+                    match v {
+                        PathVerb::MoveTo(x, y) | PathVerb::LineTo(x, y) => {
+                            min_x = min_x.min(*x);
+                            min_y = min_y.min(*y);
+                            max_x = max_x.max(*x);
+                            max_y = max_y.max(*y);
+                        }
+                        PathVerb::QuadTo(x1, y1, x2, y2) => {
+                            min_x = min_x.min(*x1).min(*x2);
+                            min_y = min_y.min(*y1).min(*y2);
+                            max_x = max_x.max(*x1).max(*x2);
+                            max_y = max_y.max(*y1).max(*y2);
+                        }
+                        PathVerb::CubicTo(x1, y1, x2, y2, x3, y3) => {
+                            min_x = min_x.min(*x1).min(*x2).min(*x3);
+                            min_y = min_y.min(*y1).min(*y2).min(*y3);
+                            max_x = max_x.max(*x1).max(*x2).max(*x3);
+                            max_y = max_y.max(*y1).max(*y2).max(*y3);
+                        }
+                        PathVerb::Close => {}
+                    }
+                }
+
+                // Push clip for the fill boundary
+                self.items.push(RenderItem::PushClip(RenderClip {
+                    verbs: path_verbs.clone(),
                     rule: fill_rule,
-                })
-            } else {
-                None
-            };
+                    transform: self.current_graphics.ctm,
+                }));
+                self.current_graphics.clip_depth += 1;
 
-            let stroke_style = if stroke {
-                Some(StrokeStyle {
-                    color: self.current_graphics.stroke_color,
-                    width: self.current_graphics.line_width,
-                    cap: self.current_graphics.line_cap,
-                    join: self.current_graphics.line_join,
-                    miter_limit: self.current_graphics.miter_limit,
-                    dash_pattern: self.current_graphics.dash_pattern.clone(),
-                })
-            } else {
-                None
-            };
+                let x_step = pat.x_step.abs().max(1.0);
+                let y_step = pat.y_step.abs().max(1.0);
+                let start_i = (min_x / x_step).floor() as i32;
+                let end_i = (max_x / x_step).ceil() as i32;
+                let start_j = (min_y / y_step).floor() as i32;
+                let end_j = (max_y / y_step).ceil() as i32;
+                let num_tiles = (end_i - start_i + 1).max(0) * (end_j - start_j + 1).max(0);
 
-            self.items.push(RenderItem::Path(RenderPath {
-                verbs: std::mem::take(&mut self.current_path),
-                fill: fill_style,
-                stroke: stroke_style,
-                transform: self.current_graphics.ctm,
-                stroke_alpha: self.current_graphics.stroke_alpha,
-                fill_alpha: self.current_graphics.fill_alpha,
-                blend_mode: self.current_graphics.blend_mode,
-                star_node_id,
-                render_node_id,
-            }));
+                if num_tiles > 0 && num_tiles <= 2500 {
+                    let parent_ctm = self.current_graphics.ctm;
+                    let has_fonts = if let Some(ref res) = pat.resources {
+                        if res.contains_key("Font") {
+                            let fonts =
+                                Self::extract_fonts_from_resources(res, self.doc.store_mut());
+                            self.local_fonts_stack.push(fonts);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    self.recursion_depth += 1;
+                    for i in start_i..=end_i {
+                        for j in start_j..=end_j {
+                            let tx = i as f32 * x_step;
+                            let ty = j as f32 * y_step;
+                            let tile_shift = Transform2D::translation(tx, ty);
+                            let tile_ctm = tile_shift.multiply(&pat.matrix).multiply(&parent_ctm);
+
+                            self.graphics_stack.push(self.current_graphics.clone());
+                            self.current_graphics.ctm = tile_ctm;
+                            self.process_stream(
+                                &pat.stream_bytes,
+                                7777 + self.recursion_depth,
+                                pat.resources.as_ref(),
+                            );
+                            if let Some(prev) = self.graphics_stack.pop() {
+                                self.current_graphics = prev;
+                            }
+                        }
+                    }
+                    self.recursion_depth -= 1;
+
+                    if has_fonts {
+                        self.local_fonts_stack.pop();
+                    }
+                }
+
+                // Pop clip
+                self.items.push(RenderItem::PopClip);
+                self.current_graphics.clip_depth =
+                    self.current_graphics.clip_depth.saturating_sub(1);
+
+                if stroke {
+                    let stroke_style = Some(StrokeStyle {
+                        color: self.current_graphics.stroke_color,
+                        width: self.current_graphics.line_width,
+                        cap: self.current_graphics.line_cap,
+                        join: self.current_graphics.line_join,
+                        miter_limit: self.current_graphics.miter_limit,
+                        dash_pattern: self.current_graphics.dash_pattern.clone(),
+                    });
+
+                    self.items.push(RenderItem::Path(RenderPath {
+                        verbs: path_verbs,
+                        fill: None,
+                        stroke: stroke_style,
+                        transform: self.current_graphics.ctm,
+                        stroke_alpha: self.current_graphics.stroke_alpha,
+                        fill_alpha: self.current_graphics.fill_alpha,
+                        blend_mode: self.current_graphics.blend_mode,
+                        star_node_id,
+                        render_node_id,
+                    }));
+                }
+            } else {
+                let fill_style = if fill {
+                    Some(FillStyle {
+                        color: self.current_graphics.fill_color,
+                        rule: fill_rule,
+                    })
+                } else {
+                    None
+                };
+
+                let stroke_style = if stroke {
+                    Some(StrokeStyle {
+                        color: self.current_graphics.stroke_color,
+                        width: self.current_graphics.line_width,
+                        cap: self.current_graphics.line_cap,
+                        join: self.current_graphics.line_join,
+                        miter_limit: self.current_graphics.miter_limit,
+                        dash_pattern: self.current_graphics.dash_pattern.clone(),
+                    })
+                } else {
+                    None
+                };
+
+                self.items.push(RenderItem::Path(RenderPath {
+                    verbs: std::mem::take(&mut self.current_path),
+                    fill: fill_style,
+                    stroke: stroke_style,
+                    transform: self.current_graphics.ctm,
+                    stroke_alpha: self.current_graphics.stroke_alpha,
+                    fill_alpha: self.current_graphics.fill_alpha,
+                    blend_mode: self.current_graphics.blend_mode,
+                    star_node_id,
+                    render_node_id,
+                }));
+            }
         }
 
         self.current_path.clear();
