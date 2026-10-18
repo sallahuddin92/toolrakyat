@@ -229,6 +229,47 @@ impl Default for StrokeStyle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendMode {
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+}
+
+impl Default for BlendMode {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl BlendMode {
+    pub fn to_tiny_skia(self) -> tiny_skia::BlendMode {
+        match self {
+            Self::Normal => tiny_skia::BlendMode::SourceOver,
+            Self::Multiply => tiny_skia::BlendMode::Multiply,
+            Self::Screen => tiny_skia::BlendMode::Screen,
+            Self::Overlay => tiny_skia::BlendMode::Overlay,
+            Self::Darken => tiny_skia::BlendMode::Darken,
+            Self::Lighten => tiny_skia::BlendMode::Lighten,
+            Self::ColorDodge => tiny_skia::BlendMode::ColorDodge,
+            Self::ColorBurn => tiny_skia::BlendMode::ColorBurn,
+            Self::HardLight => tiny_skia::BlendMode::HardLight,
+            Self::SoftLight => tiny_skia::BlendMode::SoftLight,
+            Self::Difference => tiny_skia::BlendMode::Difference,
+            Self::Exclusion => tiny_skia::BlendMode::Exclusion,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillStyle {
     pub color: ColorRgba,
@@ -259,6 +300,9 @@ pub struct RenderPath {
     pub fill: Option<FillStyle>,
     pub stroke: Option<StrokeStyle>,
     pub transform: Transform2D,
+    pub stroke_alpha: f32,
+    pub fill_alpha: f32,
+    pub blend_mode: BlendMode,
     pub star_node_id: Option<StarNodeId>,
     pub render_node_id: Option<RenderNodeId>,
 }
@@ -281,6 +325,9 @@ pub struct RenderTextRun {
     pub fill_color: Option<ColorRgba>,
     pub stroke_color: Option<ColorRgba>,
     pub transform: Transform2D,
+    pub fill_alpha: f32,
+    pub stroke_alpha: f32,
+    pub render_mode: u8,
     pub font_data: Option<Vec<u8>>,
     pub is_vertical: bool,
     pub star_node_id: Option<StarNodeId>,
@@ -294,6 +341,8 @@ pub struct RenderImage {
     pub rgba_data: Vec<u8>,
     pub transform: Transform2D,
     pub opacity: f32,
+    pub is_mask: bool,
+    pub blend_mode: BlendMode,
     pub star_node_id: Option<StarNodeId>,
     pub render_node_id: Option<RenderNodeId>,
 }

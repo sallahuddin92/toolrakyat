@@ -14,6 +14,7 @@ pub enum ContentOperator {
     Tz,          // Tz: Set horizontal scaling
     TL,          // TL: Set text leading
     Ts,          // Ts: Set text rise
+    Tr,          // Tr: Set text rendering mode
     Tm,          // Tm: Set text matrix
     Td,          // Td: Move text position
     TD,          // TD: Move text position and set leading
@@ -81,6 +82,7 @@ impl ContentOperator {
             "Tz" => Self::Tz,
             "TL" => Self::TL,
             "Ts" => Self::Ts,
+            "Tr" => Self::Tr,
             "Tm" => Self::Tm,
             "Td" => Self::Td,
             "TD" => Self::TD,
@@ -148,6 +150,7 @@ impl ContentOperator {
             Self::Tz => "Tz",
             Self::TL => "TL",
             Self::Ts => "Ts",
+            Self::Tr => "Tr",
             Self::Tm => "Tm",
             Self::Td => "Td",
             Self::TD => "TD",

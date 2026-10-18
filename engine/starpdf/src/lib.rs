@@ -94,7 +94,7 @@ pub use page_ops::{
     PageOperationLimits, PageOperationPlan, PageOperationType, PageRange, PageSource,
 };
 pub use render::{
-    ColorRgba, DifferentialComparator, DifferentialMetrics, FillRule, FillStyle, LineCap,
+    BlendMode, ColorRgba, DifferentialComparator, DifferentialMetrics, FillRule, FillStyle, LineCap,
     LineJoin, NativeRasterizer, PathVerb, RenderClip, RenderCompiler, RenderGlyph, RenderImage,
     RenderItem, RenderPage, RenderPath, RenderTextRun, RenderedPage, StrokeStyle, Transform2D,
     UnsupportedOperatorReport,
