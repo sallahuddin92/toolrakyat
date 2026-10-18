@@ -90,4 +90,9 @@ impl SfntFont {
         let raw_adv = hmtx.get_advance_width(glyph_id) as f64;
         Some((raw_adv / upem) * 1000.0)
     }
+
+    /// Resolves character code to glyph ID via cmap table.
+    pub fn get_glyph_id(&self, code: u32) -> Option<u16> {
+        self.cmap.as_ref().and_then(|c| c.map_char_to_glyph(code))
+    }
 }

@@ -258,7 +258,7 @@ fn test_differential_comparator_metrics() {
 
 #[test]
 fn test_unsupported_operators_policy_fails_closed() {
-    let dummy_pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 25 >>\nstream\n/Shading1 sh\n10 10 m\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000216 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n290\n%%EOF\n";
+    let dummy_pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 34 >>\nstream\n/RelativeColorimetric ri\n10 10 m\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000216 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n300\n%%EOF\n";
 
     let mut doc = PdfDocument::from_bytes(dummy_pdf).expect("open dummy pdf");
     let page = RenderCompiler::compile_page(&mut doc, 0).expect("compile page");
@@ -270,11 +270,11 @@ fn test_unsupported_operators_policy_fails_closed() {
         .map(|o| o.operator.as_str())
         .collect();
     assert!(
-        op_names.contains(&"sh"),
-        "Shading operator 'sh' must be reported as unsupported"
+        op_names.contains(&"ri"),
+        "Rendering intent operator 'ri' must be reported as unsupported"
     );
 
     let rendered = NativeRasterizer::render(&page, 1.0).expect("render");
     assert!(rendered.has_unsupported_operators());
-    assert!(rendered.unsupported_operators.contains(&"sh".to_string()));
+    assert!(rendered.unsupported_operators.contains(&"ri".to_string()));
 }

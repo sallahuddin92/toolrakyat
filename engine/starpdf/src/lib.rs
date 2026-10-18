@@ -96,8 +96,8 @@ pub use page_ops::{
 pub use render::{
     BlendMode, ColorRgba, DifferentialComparator, DifferentialMetrics, FillRule, FillStyle, LineCap,
     LineJoin, NativeRasterizer, PathVerb, RenderClip, RenderCompiler, RenderGlyph, RenderImage,
-    RenderItem, RenderPage, RenderPath, RenderTextRun, RenderedPage, StrokeStyle, Transform2D,
-    UnsupportedOperatorReport,
+    RenderItem, RenderPage, RenderPath, RenderShading, RenderTextRun, RenderedPage, ShadingPattern,
+    StrokeStyle, Transform2D, UnsupportedOperatorReport,
 };
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,

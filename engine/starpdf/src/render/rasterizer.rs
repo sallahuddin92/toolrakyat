@@ -6,7 +6,7 @@ use skrifa::outline::OutlinePen;
 use skrifa::MetadataProvider;
 
 use crate::render::ir::{
-    LineCap, LineJoin, PathVerb, RenderItem, RenderPage, Transform2D,
+    LineCap, LineJoin, PathVerb, RenderItem, RenderPage, ShadingPattern, Transform2D,
 };
 
 struct SkiaPen<'a> {
@@ -311,6 +311,121 @@ impl NativeRasterizer {
                             .to_tiny_skia();
 
                         pixmap.draw_pixmap(0, 0, img_pixmap, &paint, final_tf, active_mask);
+                    }
+                }
+                RenderItem::Shading(render_shading) => {
+                    let active_mask = mask_stack.last();
+                    let bbox = render_shading
+                        .bbox
+                        .unwrap_or([0.0, 0.0, page.width, page.height]);
+
+                    let mut pb = tiny_skia::PathBuilder::new();
+                    pb.move_to(bbox[0], bbox[1]);
+                    pb.line_to(bbox[2], bbox[1]);
+                    pb.line_to(bbox[2], bbox[3]);
+                    pb.line_to(bbox[0], bbox[3]);
+                    pb.close();
+
+                    if let Some(path) = pb.finish() {
+                        let combined_tf = render_shading.transform.multiply(&page_transform);
+
+                        match &render_shading.pattern {
+                            ShadingPattern::Axial {
+                                coords,
+                                start_color,
+                                end_color,
+                                ..
+                            } => {
+                                let (x0, y0) = combined_tf.transform_point(coords[0], coords[1]);
+                                let (x1, y1) = combined_tf.transform_point(coords[2], coords[3]);
+
+                                let [r0, g0, b0, a0] = start_color.to_u8_array();
+                                let [r1, g1, b1, a1] = end_color.to_u8_array();
+
+                                let a0_f = (a0 as f32 * render_shading.alpha).round() as u8;
+                                let a1_f = (a1 as f32 * render_shading.alpha).round() as u8;
+
+                                let stops = vec![
+                                    tiny_skia::GradientStop::new(
+                                        0.0,
+                                        tiny_skia::Color::from_rgba8(r0, g0, b0, a0_f),
+                                    ),
+                                    tiny_skia::GradientStop::new(
+                                        1.0,
+                                        tiny_skia::Color::from_rgba8(r1, g1, b1, a1_f),
+                                    ),
+                                ];
+
+                                if let Some(shader) = tiny_skia::LinearGradient::new(
+                                    tiny_skia::Point::from_xy(x0, y0),
+                                    tiny_skia::Point::from_xy(x1, y1),
+                                    stops,
+                                    tiny_skia::SpreadMode::Pad,
+                                    tiny_skia::Transform::identity(),
+                                ) {
+                                    let mut paint = tiny_skia::Paint::default();
+                                    paint.shader = shader;
+                                    paint.anti_alias = true;
+                                    paint.blend_mode = render_shading.blend_mode.to_tiny_skia();
+
+                                    pixmap.fill_path(
+                                        &path,
+                                        &paint,
+                                        tiny_skia::FillRule::Winding,
+                                        combined_tf.to_tiny_skia(),
+                                        active_mask,
+                                    );
+                                }
+                            }
+                            ShadingPattern::Radial {
+                                coords,
+                                start_color,
+                                end_color,
+                                ..
+                            } => {
+                                let (x1, y1) = combined_tf.transform_point(coords[3], coords[4]);
+                                let r1 = coords[5] * page_transform.a.abs();
+
+                                let [r0, g0, b0, a0] = start_color.to_u8_array();
+                                let [r1_c, g1_c, b1_c, a1] = end_color.to_u8_array();
+
+                                let a0_f = (a0 as f32 * render_shading.alpha).round() as u8;
+                                let a1_f = (a1 as f32 * render_shading.alpha).round() as u8;
+
+                                let stops = vec![
+                                    tiny_skia::GradientStop::new(
+                                        0.0,
+                                        tiny_skia::Color::from_rgba8(r0, g0, b0, a0_f),
+                                    ),
+                                    tiny_skia::GradientStop::new(
+                                        1.0,
+                                        tiny_skia::Color::from_rgba8(r1_c, g1_c, b1_c, a1_f),
+                                    ),
+                                ];
+
+                                if let Some(shader) = tiny_skia::RadialGradient::new(
+                                    tiny_skia::Point::from_xy(x1, y1),
+                                    tiny_skia::Point::from_xy(x1, y1),
+                                    r1.max(1.0),
+                                    stops,
+                                    tiny_skia::SpreadMode::Pad,
+                                    tiny_skia::Transform::identity(),
+                                ) {
+                                    let mut paint = tiny_skia::Paint::default();
+                                    paint.shader = shader;
+                                    paint.anti_alias = true;
+                                    paint.blend_mode = render_shading.blend_mode.to_tiny_skia();
+
+                                    pixmap.fill_path(
+                                        &path,
+                                        &paint,
+                                        tiny_skia::FillRule::Winding,
+                                        combined_tf.to_tiny_skia(),
+                                        active_mask,
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 RenderItem::TextRun(text_run) => {

@@ -81,6 +81,14 @@ pub struct Font {
     pub style: FontStyle,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecodedGlyphSpan {
+    pub text: String,
+    pub width: f64,
+    pub glyph_id: Option<u16>,
+    pub char_code: u32,
+}
+
 impl Font {
     /// Constructs a standard fallback font (e.g. Helvetica / Type1).
     pub fn standard_fallback(name: &str) -> Self {
@@ -471,8 +479,8 @@ impl Font {
         Ok(FontProgramKind::UnknownFontProgram)
     }
 
-    /// Decodes a byte sequence into individual character glyph representations and advances.
-    pub fn decode_bytes(&self, bytes: &[u8]) -> Vec<(String, f64)> {
+    /// Decodes a byte sequence into rich character glyph representations, advance widths, and glyph IDs.
+    pub fn decode_bytes_full(&self, bytes: &[u8]) -> Vec<DecodedGlyphSpan> {
         let mut result = Vec::new();
 
         if self.is_composite {
@@ -489,17 +497,48 @@ impl Font {
                 };
 
                 let (text, width) = self.decode_char_code(code);
-                result.push((text, width));
+                let glyph_id = if self.composite_identity_mapping {
+                    Some(code as u16)
+                } else {
+                    self.embedded_sfnt
+                        .as_ref()
+                        .and_then(|f| f.get_glyph_id(code))
+                };
+
+                result.push(DecodedGlyphSpan {
+                    text,
+                    width,
+                    glyph_id,
+                    char_code: code,
+                });
             }
         } else {
             for &b in bytes {
                 let code = b as u32;
                 let (text, width) = self.decode_char_code(code);
-                result.push((text, width));
+                let glyph_id = self
+                    .embedded_sfnt
+                    .as_ref()
+                    .and_then(|f| f.get_glyph_id(code));
+
+                result.push(DecodedGlyphSpan {
+                    text,
+                    width,
+                    glyph_id,
+                    char_code: code,
+                });
             }
         }
 
         result
+    }
+
+    /// Decodes a byte sequence into individual character glyph representations and advances.
+    pub fn decode_bytes(&self, bytes: &[u8]) -> Vec<(String, f64)> {
+        self.decode_bytes_full(bytes)
+            .into_iter()
+            .map(|s| (s.text, s.width))
+            .collect()
     }
 
     /// Decodes a single character code into Unicode string and width.

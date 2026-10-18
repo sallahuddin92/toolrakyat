@@ -8,8 +8,8 @@ use crate::font::font::Font;
 use crate::font::resource::PageResources;
 use crate::render::ir::{
     BlendMode, ColorRgba, FillRule, FillStyle, LineCap, LineJoin, PathVerb, RenderClip,
-    RenderGlyph, RenderImage, RenderItem, RenderPage, RenderPath, RenderTextRun, StrokeStyle,
-    Transform2D, UnsupportedOperatorReport,
+    RenderGlyph, RenderImage, RenderItem, RenderPage, RenderPath, RenderShading, RenderTextRun,
+    ShadingPattern, StrokeStyle, Transform2D, UnsupportedOperatorReport,
 };
 use crate::syntax::object::{ObjectRef, PdfObject};
 
@@ -835,13 +835,32 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     }
                 }
 
-                // Harmless or color space setting
+                // Shading Invocation
+                ContentOperator::Sh => {
+                    if let Some(ContentOperand::Name(sh_name)) = inst.operands.first() {
+                        self.compile_shading(
+                            sh_name,
+                            local_res,
+                            star_node_id,
+                            render_node_id,
+                        );
+                    }
+                }
+
+                // Harmless or color space setting and marked content / compatibility metadata
                 ContentOperator::CSFill
                 | ContentOperator::CSStroke
                 | ContentOperator::SCFill
                 | ContentOperator::SCStroke
                 | ContentOperator::SCNFill
-                | ContentOperator::SCNStroke => {}
+                | ContentOperator::SCNStroke
+                | ContentOperator::Bmc
+                | ContentOperator::Bdc
+                | ContentOperator::Emc
+                | ContentOperator::Mp
+                | ContentOperator::Dp
+                | ContentOperator::Bx
+                | ContentOperator::Ex => {}
 
                 // Report unsupported operators
                 other => {
@@ -933,6 +952,181 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     }
                 }
             }
+        }
+    }
+
+    fn compile_shading(
+        &mut self,
+        sh_name: &str,
+        local_res: Option<&std::collections::BTreeMap<String, PdfObject>>,
+        star_node_id: Option<StarNodeId>,
+        render_node_id: Option<RenderNodeId>,
+    ) {
+        let sh_obj = match RenderCompiler::find_resource_object(
+            self.doc,
+            &self.page_dict,
+            local_res,
+            "Shading",
+            sh_name,
+        ) {
+            Some(obj) => obj,
+            None => return,
+        };
+
+        let dict = match &sh_obj {
+            PdfObject::Dictionary(d) => d,
+            PdfObject::Stream(s) => &s.dict,
+            _ => return,
+        };
+
+        let sh_type = dict
+            .get("ShadingType")
+            .and_then(PdfObject::as_i64)
+            .unwrap_or(2);
+
+        let bbox = RenderCompiler::resolve_box(dict, "BBox");
+
+        let (start_color, end_color) = if let Some(func_obj) = dict.get("Function") {
+            Self::resolve_gradient_colors(self.doc, func_obj)
+        } else {
+            (ColorRgba::BLACK, self.current_graphics.fill_color)
+        };
+
+        if sh_type == 2 {
+            let coords = if let Some(arr) = dict.get("Coords").and_then(PdfObject::as_array) {
+                if arr.len() >= 4 {
+                    [
+                        RenderCompiler::obj_num(&arr[0]),
+                        RenderCompiler::obj_num(&arr[1]),
+                        RenderCompiler::obj_num(&arr[2]),
+                        RenderCompiler::obj_num(&arr[3]),
+                    ]
+                } else {
+                    [0.0, 0.0, 100.0, 0.0]
+                }
+            } else {
+                [0.0, 0.0, 100.0, 0.0]
+            };
+
+            let extend = if let Some(arr) = dict.get("Extend").and_then(PdfObject::as_array) {
+                if arr.len() >= 2 {
+                    [
+                        arr[0].as_bool().unwrap_or(true),
+                        arr[1].as_bool().unwrap_or(true),
+                    ]
+                } else {
+                    [true, true]
+                }
+            } else {
+                [true, true]
+            };
+
+            self.items.push(RenderItem::Shading(RenderShading {
+                pattern: ShadingPattern::Axial {
+                    coords,
+                    start_color,
+                    end_color,
+                    extend,
+                },
+                bbox,
+                transform: self.current_graphics.ctm,
+                alpha: self.current_graphics.fill_alpha,
+                blend_mode: self.current_graphics.blend_mode,
+                star_node_id,
+                render_node_id,
+            }));
+        } else if sh_type == 3 {
+            let coords = if let Some(arr) = dict.get("Coords").and_then(PdfObject::as_array) {
+                if arr.len() >= 6 {
+                    [
+                        RenderCompiler::obj_num(&arr[0]),
+                        RenderCompiler::obj_num(&arr[1]),
+                        RenderCompiler::obj_num(&arr[2]),
+                        RenderCompiler::obj_num(&arr[3]),
+                        RenderCompiler::obj_num(&arr[4]),
+                        RenderCompiler::obj_num(&arr[5]),
+                    ]
+                } else {
+                    [0.0, 0.0, 0.0, 100.0, 100.0, 50.0]
+                }
+            } else {
+                [0.0, 0.0, 0.0, 100.0, 100.0, 50.0]
+            };
+
+            let extend = if let Some(arr) = dict.get("Extend").and_then(PdfObject::as_array) {
+                if arr.len() >= 2 {
+                    [
+                        arr[0].as_bool().unwrap_or(true),
+                        arr[1].as_bool().unwrap_or(true),
+                    ]
+                } else {
+                    [true, true]
+                }
+            } else {
+                [true, true]
+            };
+
+            self.items.push(RenderItem::Shading(RenderShading {
+                pattern: ShadingPattern::Radial {
+                    coords,
+                    start_color,
+                    end_color,
+                    extend,
+                },
+                bbox,
+                transform: self.current_graphics.ctm,
+                alpha: self.current_graphics.fill_alpha,
+                blend_mode: self.current_graphics.blend_mode,
+                star_node_id,
+                render_node_id,
+            }));
+        }
+    }
+
+    fn resolve_gradient_colors(
+        doc: &mut PdfDocument<'_>,
+        func_obj: &PdfObject,
+    ) -> (ColorRgba, ColorRgba) {
+        let resolved = doc.store_mut().resolve_object(func_obj).ok();
+        if let Some(f_dict) = resolved.as_ref().and_then(|o| o.as_dict()) {
+            let c0 = f_dict.get("C0").and_then(PdfObject::as_array);
+            let c1 = f_dict.get("C1").and_then(PdfObject::as_array);
+
+            let start = if let Some(arr) = c0 {
+                if arr.len() >= 3 {
+                    ColorRgba::from_rgb(
+                        RenderCompiler::obj_num(&arr[0]),
+                        RenderCompiler::obj_num(&arr[1]),
+                        RenderCompiler::obj_num(&arr[2]),
+                    )
+                } else if arr.len() == 1 {
+                    ColorRgba::from_gray(RenderCompiler::obj_num(&arr[0]))
+                } else {
+                    ColorRgba::BLACK
+                }
+            } else {
+                ColorRgba::BLACK
+            };
+
+            let end = if let Some(arr) = c1 {
+                if arr.len() >= 3 {
+                    ColorRgba::from_rgb(
+                        RenderCompiler::obj_num(&arr[0]),
+                        RenderCompiler::obj_num(&arr[1]),
+                        RenderCompiler::obj_num(&arr[2]),
+                    )
+                } else if arr.len() == 1 {
+                    ColorRgba::from_gray(RenderCompiler::obj_num(&arr[0]))
+                } else {
+                    ColorRgba::WHITE
+                }
+            } else {
+                ColorRgba::WHITE
+            };
+
+            (start, end)
+        } else {
+            (ColorRgba::BLACK, ColorRgba::WHITE)
         }
     }
 
@@ -1132,7 +1326,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 .unwrap_or("");
 
             let raw_data = &stream_obj.data;
-            let rgba_data = if filter == "DCTDecode" {
+            let mut rgba_data = if filter == "DCTDecode" {
                 // Decode JPEG
                 let mut decoder = jpeg_decoder::Decoder::new(&raw_data[..]);
                 match decoder.decode() {
@@ -1293,6 +1487,38 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 }
             };
 
+            // Apply Image /SMask (soft mask) if present
+            if let Some(smask_ref) = stream_obj.dict.get("SMask") {
+                if let Ok(smask_obj) = self.doc.store_mut().resolve_object(smask_ref) {
+                    if let Some(smask_stream) = smask_obj.as_stream() {
+                        if let Ok(smask_bytes) = self.doc.decompress_stream_data(&smask_stream) {
+                            let decode_invert = if let Some(PdfObject::Array(dec)) = smask_stream.dict.get("Decode") {
+                                if dec.len() >= 2 {
+                                    dec[0].as_f64().unwrap_or(0.0) > dec[1].as_f64().unwrap_or(1.0)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            };
+                            let total_px = (width * height) as usize;
+                            if smask_bytes.len() == total_px {
+                                for i in 0..total_px {
+                                    if i * 4 + 3 < rgba_data.len() {
+                                        let alpha_val = if decode_invert {
+                                            255 - smask_bytes[i]
+                                        } else {
+                                            smask_bytes[i]
+                                        };
+                                        rgba_data[i * 4 + 3] = alpha_val;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if rgba_data.len() == (width * height * 4) as usize {
                 self.items.push(RenderItem::Image(RenderImage {
                     width,
@@ -1382,7 +1608,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
             .get(&self.text_state.font_name)
             .unwrap_or(&self.fallback_font);
 
-        let decoded_glyphs = font.decode_bytes(bytes);
+        let decoded_glyphs = font.decode_bytes_full(bytes);
         if decoded_glyphs.is_empty() {
             return;
         }
@@ -1390,10 +1616,10 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
         let mut glyphs = Vec::new();
         let mut local_x = 0.0f32;
 
-        for (text_chunk, char_width) in decoded_glyphs {
-            let scaled_advance = (char_width as f32) / 1000.0 * self.text_state.font_size;
+        for span in decoded_glyphs {
+            let scaled_advance = (span.width as f32) / 1000.0 * self.text_state.font_size;
             let spacing = self.text_state.char_spacing
-                + if text_chunk == " " {
+                + if span.text == " " {
                     self.text_state.word_spacing
                 } else {
                     0.0
@@ -1401,14 +1627,14 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
             let total_advance =
                 (scaled_advance + spacing) * (self.text_state.horizontal_scaling / 100.0);
 
-            let codepoint = text_chunk.chars().next().map_or(0, |c| c as u32);
+            let codepoint = span.text.chars().next().map_or(0, |c| c as u32);
             glyphs.push(RenderGlyph {
                 codepoint,
-                glyph_id: None,
+                glyph_id: span.glyph_id,
                 x: local_x,
                 y: self.text_state.text_rise,
                 advance: total_advance,
-                text: text_chunk,
+                text: span.text,
             });
 
             local_x += total_advance;

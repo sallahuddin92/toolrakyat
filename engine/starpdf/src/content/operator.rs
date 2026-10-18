@@ -65,6 +65,13 @@ pub enum ContentOperator {
     SCNStroke,  // SCN: Set color for stroking (extended)
     SCNFill,    // scn: Set color for non-stroking (extended)
     Sh,         // sh: Paint area defined by shading pattern
+    Bmc,        // BMC: Begin marked content
+    Bdc,        // BDC: Begin marked content with property list
+    Emc,        // EMC: End marked content
+    Mp,         // MP: Define marked content point
+    Dp,         // DP: Define marked content point with property list
+    Bx,         // BX: Begin compatibility section
+    Ex,         // EX: End compatibility section
     Unknown(String),
 }
 
@@ -133,6 +140,13 @@ impl ContentOperator {
             "SCN" => Self::SCNStroke,
             "scn" => Self::SCNFill,
             "sh" => Self::Sh,
+            "BMC" => Self::Bmc,
+            "BDC" => Self::Bdc,
+            "EMC" => Self::Emc,
+            "MP" => Self::Mp,
+            "DP" => Self::Dp,
+            "BX" => Self::Bx,
+            "EX" => Self::Ex,
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -201,6 +215,13 @@ impl ContentOperator {
             Self::SCNStroke => "SCN",
             Self::SCNFill => "scn",
             Self::Sh => "sh",
+            Self::Bmc => "BMC",
+            Self::Bdc => "BDC",
+            Self::Emc => "EMC",
+            Self::Mp => "MP",
+            Self::Dp => "DP",
+            Self::Bx => "BX",
+            Self::Ex => "EX",
             Self::Unknown(s) => s.as_str(),
         }
     }

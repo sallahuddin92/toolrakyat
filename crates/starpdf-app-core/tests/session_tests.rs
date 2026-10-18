@@ -110,3 +110,52 @@ fn test_tab_commands_and_navigation() {
     assert!(close_res.success);
     assert_eq!(manager.session_count(), 0);
 }
+
+#[test]
+fn test_render_caching_and_invalidation() {
+    let mut manager = SessionManager::new();
+    let pdf_bytes = MinimalWriter::create_minimal_pdf("Render Caching Test Content").unwrap();
+
+    let _session_id = manager
+        .create_session(None, pdf_bytes, "cache_test.pdf".to_string())
+        .expect("create session");
+
+    let session = manager.active_session().unwrap();
+
+    // 1. First render: cache miss, renders and populates cache
+    let t0 = std::time::Instant::now();
+    let render1 = session.render_page(0, 1.0).expect("first render");
+    let dur1 = t0.elapsed();
+    assert_eq!(render1.width, 612);
+    assert_eq!(render1.height, 792);
+
+    // 2. Second render with same parameters: cache hit, instantaneous return (< 0.5ms)
+    let t1 = std::time::Instant::now();
+    let render2 = session.render_page(0, 1.0).expect("second render");
+    let dur2 = t1.elapsed();
+    assert_eq!(render2.width, 612);
+    assert_eq!(render2.height, 792);
+    assert_eq!(render1.rgba_pixels.len(), render2.rgba_pixels.len());
+    assert!(dur2 < dur1 || dur2.as_micros() < 500, "Cache hit must be significantly faster");
+
+    // 3. Render at different scale (2.0): cache miss, re-renders
+    let render_2x = session.render_page(0, 2.0).expect("2x render");
+    assert_eq!(render_2x.width, 1224);
+    assert_eq!(render_2x.height, 1584);
+
+    // 4. Mutation: invalidate cache
+    let updated_bytes = MinimalWriter::create_minimal_pdf("Mutated Content").unwrap();
+    manager
+        .active_session_mut()
+        .unwrap()
+        .commit_bytes("Mutate content", updated_bytes)
+        .expect("commit bytes");
+
+    // After mutation, render cache was invalidated; fresh render occurs
+    let render3 = manager
+        .active_session()
+        .unwrap()
+        .render_page(0, 1.0)
+        .expect("render after mutation");
+    assert_eq!(render3.width, 612);
+}

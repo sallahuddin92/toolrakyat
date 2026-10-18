@@ -7,7 +7,7 @@ pub use compiler::RenderCompiler;
 pub use differential::{DifferentialComparator, DifferentialMetrics};
 pub use ir::{
     BlendMode, ColorRgba, FillRule, FillStyle, LineCap, LineJoin, PathVerb, RenderClip,
-    RenderGlyph, RenderImage, RenderItem, RenderPage, RenderPath, RenderTextRun, StrokeStyle,
-    Transform2D, UnsupportedOperatorReport,
+    RenderGlyph, RenderImage, RenderItem, RenderPage, RenderPath, RenderShading, RenderTextRun,
+    ShadingPattern, StrokeStyle, Transform2D, UnsupportedOperatorReport,
 };
 pub use rasterizer::{NativeRasterizer, RenderedPage};

@@ -355,10 +355,38 @@ pub struct RenderClip {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum ShadingPattern {
+    Axial {
+        coords: [f32; 4],
+        start_color: ColorRgba,
+        end_color: ColorRgba,
+        extend: [bool; 2],
+    },
+    Radial {
+        coords: [f32; 6],
+        start_color: ColorRgba,
+        end_color: ColorRgba,
+        extend: [bool; 2],
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderShading {
+    pub pattern: ShadingPattern,
+    pub bbox: Option<[f32; 4]>,
+    pub transform: Transform2D,
+    pub alpha: f32,
+    pub blend_mode: BlendMode,
+    pub star_node_id: Option<StarNodeId>,
+    pub render_node_id: Option<RenderNodeId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum RenderItem {
     Path(RenderPath),
     TextRun(RenderTextRun),
     Image(RenderImage),
+    Shading(RenderShading),
     PushClip(RenderClip),
     PopClip,
 }
