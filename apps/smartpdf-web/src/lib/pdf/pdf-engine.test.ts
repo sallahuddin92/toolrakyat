@@ -10,10 +10,10 @@ import {
   generateExportFilename,
 } from "./pdf-engine";
 import { PdfParseError } from "./pdf-errors";
+import { loadRepoFixture } from "./test-utils";
 
 function loadTestAsset(filename: string): Uint8Array {
-  const filePath = path.join(process.cwd(), "test-assets", filename);
-  return new Uint8Array(fs.readFileSync(filePath));
+  return loadRepoFixture("test-assets", filename);
 }
 
 describe("SmartPDF Core Engine (pdf-engine)", () => {

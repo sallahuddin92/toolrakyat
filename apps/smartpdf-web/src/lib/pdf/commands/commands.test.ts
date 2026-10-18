@@ -18,6 +18,7 @@ import {
 } from "./page-commands";
 import { StarPdfClient } from "../starpdf-client";
 import type { SmartPdfCommandContext } from "./types";
+import { resolveRepoPath } from "../test-utils";
 
 
 describe("SmartPDF Command Architecture & History Lifecycle", () => {
@@ -397,7 +398,7 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       const { StarPdfClient } = await import("../starpdf-client");
       const { UpdateVectorCommand } = await import("./vector-commands");
 
-      const fixturePath = path.resolve(process.cwd(), "test-assets/vector-primitives.pdf");
+      const fixturePath = resolveRepoPath("test-assets/vector-primitives.pdf");
       const bytes = fs.readFileSync(fixturePath);
       const starDoc = await StarPdfClient.open(bytes);
 
@@ -439,7 +440,7 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       const { StarPdfClient } = await import("../starpdf-client");
       const { MoveTextCommand } = await import("./text-commands");
 
-      const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+      const fixturePath = resolveRepoPath("test-assets/edit-test.pdf");
       const bytes = fs.readFileSync(fixturePath);
 
       const starDoc = await StarPdfClient.open(bytes);
@@ -473,7 +474,7 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
       const { StarPdfClient } = await import("../starpdf-client");
       const { SetFormFieldValueCommand } = await import("./form-commands");
 
-      const fixturePath = path.resolve(process.cwd(), "engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf");
+      const fixturePath = resolveRepoPath("engine/starpdf/tests/fixtures/v0_10_compat/pdfkit-text-checkbox.pdf");
       const bytes = fs.readFileSync(fixturePath);
 
       const starDoc = await StarPdfClient.open(bytes);
@@ -516,7 +517,7 @@ describe("SmartPDF Command Architecture & History Lifecycle", () => {
         DeleteAnnotationCommand,
       } = await import("./annotation-commands");
 
-      const fixturePath = path.resolve(process.cwd(), "test-assets/edit-test.pdf");
+      const fixturePath = resolveRepoPath("test-assets/edit-test.pdf");
       const bytes = fs.readFileSync(fixturePath);
 
       let starDoc = await StarPdfClient.open(bytes);

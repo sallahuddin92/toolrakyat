@@ -312,7 +312,7 @@ export function SmartPdfEditor({
         const pdfjsLib = await getPdfjsLib();
         const loadingTask = pdfjsLib.getDocument({
           data: bytes.slice(0),
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/cmaps/",
+          cMapUrl: "/cmaps/",
           cMapPacked: true,
         });
         const proxy = await loadingTask.promise;
@@ -651,6 +651,7 @@ export function SmartPdfEditor({
     const undone = undoHistory(historyStateRef.current);
     if (!undone) return;
 
+    historyStateRef.current = undone.nextState;
     setHistoryState(undone.nextState);
     await loadDocument(
       undone.entry.bytes,
@@ -659,13 +660,14 @@ export function SmartPdfEditor({
       currentPage,
       true,
     );
-    toast.success(`Undo: ${historyStateRef.current.snapshots[historyStateRef.current.currentIndex].description}`);
+    toast.success(`Undo: ${undone.entry.description}`);
   }, [currentPage, filename, loadDocument]);
 
   const handleRedo = useCallback(async () => {
     const redone = redoHistory(historyStateRef.current);
     if (!redone) return;
 
+    historyStateRef.current = redone.nextState;
     setHistoryState(redone.nextState);
     await loadDocument(
       redone.entry.bytes,

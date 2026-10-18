@@ -3,20 +3,14 @@ import fs from "fs";
 import path from "path";
 import { PDFCheckBox, PDFDocument, PDFTextField } from "pdf-lib";
 import { StarPdfClient } from "./starpdf-client";
+import { loadRepoFixture } from "./test-utils";
 
 function loadTestAsset(filename: string): Uint8Array {
-  const assetPath = path.resolve(process.cwd(), "test-assets", filename);
-  const buffer = fs.readFileSync(assetPath);
-  return new Uint8Array(buffer);
+  return loadRepoFixture("test-assets", filename);
 }
 
 function loadComplexFixture(filename: string): Uint8Array {
-  const fixturePath = path.resolve(
-    process.cwd(),
-    "engine/starpdf/tests/fixtures/v0_11_complex",
-    filename,
-  );
-  return new Uint8Array(fs.readFileSync(fixturePath));
+  return loadRepoFixture("engine/starpdf/tests/fixtures/v0_11_complex", filename);
 }
 
 describe("StarPDF v0.12 WASM Client Runtime & Preservation Engine", () => {

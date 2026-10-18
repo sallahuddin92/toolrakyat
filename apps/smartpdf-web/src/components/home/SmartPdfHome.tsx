@@ -70,7 +70,7 @@ export function SmartPdfHome({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type === "application/pdf") {
+    if (file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
       onOpenFile(file, pendingModeRef.current);
     }
     // reset input
@@ -185,6 +185,7 @@ export function SmartPdfHome({
         ref={fileInputRef}
         type="file"
         accept="application/pdf"
+        data-testid="home-file-input"
         className="hidden"
         onChange={handleFileChange}
       />

@@ -8,10 +8,11 @@ import { createRenderNodeId, createStarNodeId, parseRenderNodeId, parseStarNodeI
 import { canonicalHashBytes, semanticHash, semanticNumberBytes } from "./hash";
 import { createCoordinateTransform } from "./coordinates";
 import { checkEvidence } from "./evidence";
+import { resolveRepoPath } from "../test-utils";
 
 const vector: { document: string; object_number: string; generation: number; occurrence: string; primitive: string;
   star_node: string; render_node: string; hash_fields: Record<string, string>; canonical_hash_input: string; semantic_hash: string } =
-  JSON.parse(readFileSync(resolve("engine/starpdf/tests/contracts_vectors.json"), "utf8"));
+  JSON.parse(readFileSync(resolveRepoPath("engine/starpdf/tests/contracts_vectors.json"), "utf8"));
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
 const hashFields = Object.fromEntries(Object.entries(vector.hash_fields).map(([name, value]) => [name, Uint8Array.from(Buffer.from(value, "hex"))]));
 const sampleNode = () => createStarNodeId(vector.document, { number: vector.object_number, generation: vector.generation }, vector.occurrence);
