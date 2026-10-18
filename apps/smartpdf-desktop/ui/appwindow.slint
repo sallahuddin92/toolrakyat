@@ -69,6 +69,8 @@ export component AppWindow inherits Window {
     in-out property <int> zoom_percent: 100;
     in-out property <length> page_width: 612px;
     in-out property <length> page_height: 792px;
+    in-out property <image> rendered_page_image;
+    in-out property <bool> has_rendered_page_image: false;
 
     // Active Page Extracted Elements
     in-out property <[TextSpanData]> text_spans: [];
@@ -806,7 +808,15 @@ export component AppWindow inherits Window {
                     border-width: 1px;
                     border-color: #CBD5E1;
                     drop-shadow-blur: 16px;
-                    drop-shadow-color: #00000066;
+                    // Native Rasterized PDF Page Image
+                    if root.has_rendered_page_image : Image {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.rendered_page_image;
+                        image-fit: fill;
+                    }
 
                     // Prevent click passing through to clear selection
                     TouchArea {

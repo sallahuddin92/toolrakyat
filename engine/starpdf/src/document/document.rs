@@ -249,6 +249,26 @@ impl<'a> PdfDocument<'a> {
         Ok(results)
     }
 
+    /// Compiles a 0-indexed page into typed Render IR.
+    pub fn compile_render_page(
+        &mut self,
+        page_index: usize,
+    ) -> PdfResult<crate::render::RenderPage> {
+        self.require_unencrypted_inspection()?;
+        crate::render::RenderCompiler::compile_page(self, page_index)
+    }
+
+    /// Renders a 0-indexed page to an RGBA pixmap at the target scale.
+    pub fn render_page(
+        &mut self,
+        page_index: usize,
+        scale: f32,
+    ) -> PdfResult<crate::render::RenderedPage> {
+        let compiled = self.compile_render_page(page_index)?;
+        crate::render::NativeRasterizer::render(&compiled, scale)
+            .ok_or_else(|| PdfError::InvalidOperation("Failed to rasterize page".into()))
+    }
+
     /// Builds a full document search index.
     pub fn build_search_index(&mut self) -> PdfResult<crate::search::DocumentSearchIndex> {
         let pages_text = self.extract_all_text()?;
@@ -959,7 +979,7 @@ impl<'a> PdfDocument<'a> {
         )
     }
 
-    fn decompress_stream_data(
+    pub fn decompress_stream_data(
         &self,
         stream: &crate::syntax::object::StreamObject,
     ) -> PdfResult<Vec<u8>> {

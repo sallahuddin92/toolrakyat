@@ -50,6 +50,7 @@ pub mod image;
 pub mod io;
 pub mod mutation;
 pub mod page_ops;
+pub mod render;
 pub mod search;
 pub mod security;
 pub mod syntax;
@@ -91,6 +92,12 @@ pub use mutation::{
 pub use page_ops::{
     DependencyDisposition, DocumentBuilder, DocumentWriteMode, IncrementalPageEditor, PageEdit,
     PageOperationLimits, PageOperationPlan, PageOperationType, PageRange, PageSource,
+};
+pub use render::{
+    ColorRgba, DifferentialComparator, DifferentialMetrics, FillRule, FillStyle, LineCap,
+    LineJoin, NativeRasterizer, PathVerb, RenderClip, RenderCompiler, RenderGlyph, RenderImage,
+    RenderItem, RenderPage, RenderPath, RenderTextRun, RenderedPage, StrokeStyle, Transform2D,
+    UnsupportedOperatorReport,
 };
 pub use search::{
     DocumentSearchIndex, PageSearchIndex, SearchBoundingBox, SearchOptions, SearchResult,

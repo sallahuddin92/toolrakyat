@@ -677,6 +677,32 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         };
         app.set_security_status(sec_status.into());
 
+        // 1.5. Render Active Page via StarPDF Native Renderer
+        let zoom_scale = (session.zoom.percent / 100.0).clamp(0.2, 4.0);
+        if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
+            let mut pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(
+                rendered.width,
+                rendered.height,
+            );
+            for (src, dst) in rendered
+                .rgba_pixels
+                .chunks_exact(4)
+                .zip(pixel_buffer.make_mut_slice().iter_mut())
+            {
+                dst.r = src[0];
+                dst.g = src[1];
+                dst.b = src[2];
+                dst.a = src[3];
+            }
+            let slint_img = slint::Image::from_rgba8(pixel_buffer);
+            app.set_rendered_page_image(slint_img);
+            app.set_has_rendered_page_image(true);
+            app.set_page_width((rendered.width as f32 / zoom_scale).into());
+            app.set_page_height((rendered.height as f32 / zoom_scale).into());
+        } else {
+            app.set_has_rendered_page_image(false);
+        }
+
         // 2. Build Thumbnails
         let mut thumbs = Vec::new();
         for p in 0..session.total_pages {

@@ -139,6 +139,18 @@ impl DocumentSession {
         PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)
     }
 
+    /// Compiles the specified 0-based page into typed Render IR.
+    pub fn compile_render_page(&self, page: u32) -> AppResult<starpdf::render::RenderPage> {
+        let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
+        doc.compile_render_page(page as usize).map_err(AppCoreError::from)
+    }
+
+    /// Renders the specified 0-based page to an RGBA pixmap at the given scale factor.
+    pub fn render_page(&self, page: u32, scale: f32) -> AppResult<starpdf::render::RenderedPage> {
+        let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
+        doc.render_page(page as usize, scale).map_err(AppCoreError::from)
+    }
+
     /// Whether the document currently has unsaved modifications.
     pub fn is_dirty(&self) -> bool {
         self.history.is_dirty()
@@ -425,5 +437,11 @@ impl SessionManager {
     /// Returns active tab index.
     pub fn active_tab_index(&self) -> Option<usize> {
         self.active_tab_index
+    }
+
+    /// Renders the currently active page of the active session.
+    pub fn render_active_page(&self, scale: f32) -> AppResult<starpdf::render::RenderedPage> {
+        let session = self.active_session().ok_or(AppCoreError::NoActiveSession)?;
+        session.render_page(session.current_page, scale)
     }
 }
