@@ -487,7 +487,16 @@ impl<'a> PdfDocument<'a> {
         let trailer_dict = self.store.trailer().clone();
         let source_bytes = self.source.as_bytes();
 
-        let output = if self.xref_status() == XrefStatus::RecoveredMalformedPrev {
+        let has_compressed_entries = self
+            .store
+            .xref()
+            .entries
+            .values()
+            .any(|e| matches!(e, crate::xref::XrefEntry::Compressed { .. }));
+
+        let output = if self.xref_status() == XrefStatus::RecoveredMalformedPrev
+            || has_compressed_entries
+        {
             self.validate_recovered_compressed_entries(&plan.modified_objects)?;
             crate::writer::incremental::IncrementalWriter::write_recovered_update(
                 source_bytes,
