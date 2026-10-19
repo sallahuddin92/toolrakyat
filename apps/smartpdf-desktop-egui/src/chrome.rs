@@ -1,82 +1,44 @@
-//! Top chrome (two-tier Acrobat bar), floating quick tools pill, and bottom status bar.
+//! Top chrome and window controls directly adopting upstream PdfCraft geometry and styling.
 
 use egui::{
-    Align, Align2, Color32, CornerRadius, Layout, Pos2, Rect, RichText, Sense, Stroke, Ui, Vec2,
+    Align, Align2, CornerRadius, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2,
 };
 use starpdf_app_core::command::AppCommand;
-use starpdf_app_core::export::ExportProfile;
 use starpdf_app_core::session::SessionManager;
 
 use crate::icons;
 use crate::panels::{AcrobatMode, ActiveTool, LeftPanelMode};
-use crate::theme::{DesignTokens, ThemeMode};
+use crate::theme::{self, ThemeKind, Tokens};
+use crate::widgets;
 
-pub fn render_top_tier1(
+pub const MAC_TITLE_BAR: f32 = 28.0;
+pub const MAC_LIGHT: f32 = 12.0;
+pub const MAC_LIGHT_PITCH: f32 = 20.0;
+pub const MAC_LIGHTS_LEFT: f32 = 10.0;
+pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
+
+pub fn render_tab_strip(
     ui: &mut Ui,
-    tokens: &DesignTokens,
     manager: &mut SessionManager,
-    theme_mode: &mut ThemeMode,
-    gpu_enabled: &mut bool,
+    theme_kind: &mut ThemeKind,
 ) {
+    let t = Tokens::get(ui.ctx());
+    let mac = cfg!(target_os = "macos");
+    let left = if mac { MAC_CONTENT_LEFT } else { 8.0 };
+    let tab_h = MAC_TITLE_BAR - 2.0;
+    let button_size = 24.0;
+
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
+        ui.add_space(left);
+        ui.spacing_mut().item_spacing.x = 4.0;
 
-        // SmartPDF Brand Logo
-        ui.label(
-            RichText::new("SmartPDF")
-                .strong()
-                .size(15.0)
-                .color(tokens.accent),
-        );
-
-        ui.separator();
-
-        // Document Tabs
-        let tabs = manager.tabs();
-
-        for tab in tabs {
-            let tab_bg = if tab.is_active { tokens.card_bg } else { Color32::TRANSPARENT };
-            let tab_border = if tab.is_active { tokens.border } else { Color32::TRANSPARENT };
-            let text_color = if tab.is_active { tokens.text_primary } else { tokens.text_secondary };
-
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(140.0, 26.0), Sense::click());
-            if ui.is_rect_visible(rect) {
-                ui.painter().rect_filled(rect, CornerRadius::same(4), tab_bg);
-                if tab.is_active {
-                    ui.painter().rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, tab_border), egui::StrokeKind::Inside);
-                }
-
-                // Title snippet
-                let title_text = if tab.title.len() > 14 {
-                    format!("{}...", &tab.title[..12])
-                } else {
-                    tab.title.clone()
-                };
-
-                ui.painter().text(
-                    egui::pos2(rect.left() + 8.0, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    title_text,
-                    egui::FontId::proportional(12.0),
-                    text_color,
-                );
-
-                // Close tab button on the right
-                let close_rect = Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), Vec2::splat(12.0));
-                let uri = format!("bytes://icons/{:p}", icons::X);
-                let img = egui::Image::from_bytes(uri, icons::X)
-                    .fit_to_exact_size(Vec2::splat(10.0))
-                    .tint(tokens.text_faint);
-                img.paint_at(ui, close_rect);
-            }
-
-            if resp.clicked() {
-                let _ = manager.dispatch(AppCommand::SwitchTab { session_id: tab.session_id });
-            }
+        // Home button
+        if icons::button(ui, "house", button_size, false, "Home").clicked() {
+            // Home view
         }
 
-        // Add Tab (+) button
-        if icons::icon_button(ui, icons::PLUS, tokens, 14.0, false, "Open another document").clicked() {
+        // Open button
+        if widgets::ghost_button_sized(ui, "plus", "Open", tab_h).clicked() {
             if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
                 if let Ok(bytes) = std::fs::read(&path) {
                     let title = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "document.pdf".to_string());
@@ -85,41 +47,132 @@ pub fn render_top_tier1(
             }
         }
 
-        // Global Actions on the right
+        ui.add_space(4.0);
+
+        // Document tabs
+        let tabs = manager.tabs();
+        for tab in tabs {
+            let active = tab.is_active;
+            let tab_width = 180.0;
+            let (rect, resp) = ui.allocate_exact_size(vec2(tab_width, tab_h), Sense::click());
+
+            if ui.is_rect_visible(rect) {
+                let _press = theme::Press::track(ui, &resp);
+                let bg = if active {
+                    t.chrome
+                } else if resp.hovered() {
+                    t.hover
+                } else {
+                    t.titlebar
+                };
+
+                ui.painter().rect_filled(rect, CornerRadius { nw: t.radius, ne: t.radius, sw: 0, se: 0 }, bg);
+                if active {
+                    ui.painter().rect_stroke(
+                        rect,
+                        CornerRadius { nw: t.radius, ne: t.radius, sw: 0, se: 0 },
+                        Stroke::new(1.0, t.border),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+
+                // File icon
+                let icon_rect = Rect::from_min_size(egui::pos2(rect.left() + 8.0, rect.center().y - 7.0), Vec2::splat(14.0));
+                icons::paint(ui, icon_rect, "file-text", 14.0, if active { t.accent } else { t.text_muted });
+
+                // Title label
+                let mut title = tab.title.clone();
+                if title.chars().count() > 18 {
+                    title = format!("{}…", &title.chars().take(17).collect::<String>());
+                }
+                ui.painter().text(
+                    egui::pos2(rect.left() + 26.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    title,
+                    if active { theme::medium(12.5) } else { theme::regular(12.5) },
+                    if active { t.text } else { t.text_muted },
+                );
+
+                // Close button
+                let close_rect = Rect::from_center_size(egui::pos2(rect.right() - 14.0, rect.center().y), Vec2::splat(16.0));
+                let close_resp = ui.interact(close_rect, ui.id().with(("close_tab", &tab.session_id)), Sense::click());
+                if close_resp.hovered() {
+                    ui.painter().rect_filled(close_rect, CornerRadius::same(3), t.hover);
+                }
+                icons::paint(ui, close_rect, "x", 12.0, if close_resp.hovered() { t.text } else { t.text_faint });
+            }
+
+            if resp.clicked() {
+                let _ = manager.dispatch(AppCommand::SwitchTab { session_id: tab.session_id.clone() });
+            }
+        }
+
+        // Right side utilities (Theme toggle, shortcuts)
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // Theme toggle
-            let is_dark = *theme_mode == ThemeMode::Dark;
-            let theme_icon = if is_dark { icons::SUN } else { icons::MOON };
-            if icons::icon_button(ui, theme_icon, tokens, 16.0, false, "Toggle Light / Dark Theme").clicked() {
-                *theme_mode = if is_dark { ThemeMode::Light } else { ThemeMode::Dark };
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let theme_ico = if *theme_kind == ThemeKind::Dark { "sun" } else { "moon" };
+            if icons::button(ui, theme_ico, button_size, false, "Toggle Light/Dark Theme").clicked() {
+                *theme_kind = if *theme_kind == ThemeKind::Dark { ThemeKind::Light } else { ThemeKind::Dark };
             }
 
-            // GPU Acceleration toggle
-            let gpu_icon = icons::CPU;
-            if icons::icon_button(ui, gpu_icon, tokens, 16.0, *gpu_enabled, "Toggle Metal / GPU Acceleration").clicked() {
-                *gpu_enabled = !*gpu_enabled;
-                if let Some(s) = manager.active_session() {
-                    s.invalidate_render_cache();
+            if icons::button(ui, "circle-help", button_size, false, "Keyboard Shortcuts").clicked() {
+                // Dialog
+            }
+        });
+    });
+}
+
+pub fn render_mode_bar(
+    ui: &mut Ui,
+    manager: &mut SessionManager,
+    active_mode: &mut AcrobatMode,
+    left_panel: &mut LeftPanelMode,
+) {
+    let t = Tokens::get(ui.ctx());
+
+    ui.horizontal_centered(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+
+        // Menu button
+        if widgets::ghost_button(ui, "panel-left", "Menu").clicked() {
+            *left_panel = if *left_panel == LeftPanelMode::Closed {
+                LeftPanelMode::AllTools
+            } else {
+                LeftPanelMode::Closed
+            };
+        }
+
+        ui.add_space(6.0);
+        ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(12.0), Stroke::new(1.0, t.divider));
+        ui.add_space(10.0);
+
+        // Acrobat mode tabs
+        let modes = [
+            (AcrobatMode::AllTools, "All tools"),
+            (AcrobatMode::Read, "Read"),
+            (AcrobatMode::Edit, "Edit"),
+            (AcrobatMode::Convert, "Convert"),
+            (AcrobatMode::Sign, "E-Sign"),
+        ];
+
+        for (mode, label) in modes {
+            if widgets::mode_tab(ui, label, *active_mode == mode).clicked() {
+                *active_mode = mode;
+                if mode == AcrobatMode::AllTools {
+                    *left_panel = LeftPanelMode::AllTools;
                 }
             }
+        }
 
-            ui.separator();
+        // Right side quick actions
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
 
-            // Export
-            if icons::icon_button(ui, icons::SHARE, tokens, 16.0, false, "Export Document...").clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name("exported.pdf").save_file() {
-                    if let Ok(res) = manager.dispatch(AppCommand::ExportDocument {
-                        profile: ExportProfile::StandardPdf,
-                    }) {
-                        if let Some(b) = res.exported_bytes {
-                            let _ = std::fs::write(&path, b);
-                        }
-                    }
-                }
+            if icons::button(ui, "printer", 32.0, false, "Print (⌘P)").clicked() {
+                // Print command
             }
 
-            // Save
-            if icons::icon_button(ui, icons::SAVE, tokens, 16.0, false, "Save Document (Cmd+S)").clicked() {
+            if icons::button(ui, "save", 32.0, false, "Save (⌘S)").clicked() {
                 let existing_path = manager.active_session().and_then(|s| s.file_path.clone());
                 let dest = existing_path.or_else(|| {
                     rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name("document.pdf").save_file()
@@ -129,246 +182,149 @@ pub fn render_top_tier1(
                 }
             }
 
-            // Open
-            if icons::icon_button(ui, icons::FOLDER_OPEN, tokens, 16.0, false, "Open PDF Document (Cmd+O)").clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        let title = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "document.pdf".to_string());
-                        let _ = manager.dispatch(AppCommand::OpenDocument { path: Some(path), bytes, title });
-                    }
-                }
+            if icons::button(ui, "info", 32.0, false, "Document Properties (⌘D)").clicked() {
+                // Properties dialog
             }
 
-            // Redo
-            if icons::icon_button(ui, icons::REDO, tokens, 16.0, false, "Redo (Cmd+Shift+Z)").clicked() {
-                let _ = manager.dispatch(AppCommand::Redo);
-            }
-
-            // Undo
-            if icons::icon_button(ui, icons::UNDO, tokens, 16.0, false, "Undo (Cmd+Z)").clicked() {
-                let _ = manager.dispatch(AppCommand::Undo);
+            ui.add_space(8.0);
+            if widgets::search_box(ui, "Find tools and commands", 260.0).clicked() {
+                // Palette
             }
         });
     });
-}
-
-pub fn render_top_tier2(
-    ui: &mut Ui,
-    tokens: &DesignTokens,
-    active_mode: &mut AcrobatMode,
-    left_panel: &mut LeftPanelMode,
-) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-
-        mode_tab(ui, tokens, "All Tools", *active_mode == AcrobatMode::AllTools, || {
-            *active_mode = AcrobatMode::AllTools;
-            *left_panel = LeftPanelMode::AllTools;
-        });
-
-        ui.separator();
-
-        mode_tab(ui, tokens, "Edit", *active_mode == AcrobatMode::Edit, || {
-            *active_mode = AcrobatMode::Edit;
-        });
-
-        mode_tab(ui, tokens, "Comment", *active_mode == AcrobatMode::Comment, || {
-            *active_mode = AcrobatMode::Comment;
-        });
-
-        mode_tab(ui, tokens, "Forms", *active_mode == AcrobatMode::Forms, || {
-            *active_mode = AcrobatMode::Forms;
-        });
-
-        mode_tab(ui, tokens, "Sign", *active_mode == AcrobatMode::Sign, || {
-            *active_mode = AcrobatMode::Sign;
-        });
-
-        mode_tab(ui, tokens, "Organize", *active_mode == AcrobatMode::Organize, || {
-            *active_mode = AcrobatMode::Organize;
-            *left_panel = LeftPanelMode::Thumbnails;
-        });
-    });
-}
-
-fn mode_tab<F: FnOnce()>(ui: &mut Ui, tokens: &DesignTokens, label: &str, is_selected: bool, on_click: F) {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(76.0, 28.0), Sense::click());
-    if ui.is_rect_visible(rect) {
-        let is_hovered = resp.hovered();
-        let bg = if is_selected {
-            tokens.selected_bg
-        } else if is_hovered {
-            tokens.hover_bg
-        } else {
-            Color32::TRANSPARENT
-        };
-
-        let text_color = if is_selected {
-            tokens.accent
-        } else {
-            tokens.text_primary
-        };
-
-        ui.painter().rect_filled(rect, tokens.radius, bg);
-
-        if is_selected {
-            let indicator_rect = Rect::from_min_max(
-                egui::pos2(rect.left() + 6.0, rect.bottom() - 2.0),
-                egui::pos2(rect.right() - 6.0, rect.bottom()),
-            );
-            ui.painter().rect_filled(indicator_rect, CornerRadius::same(1), tokens.accent);
-        }
-
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(12.5),
-            text_color,
-        );
-    }
-
-    if resp.clicked() {
-        on_click();
-    }
 }
 
 pub fn render_floating_quick_pill(
     ui: &mut Ui,
-    tokens: &DesignTokens,
     active_tool: &mut ActiveTool,
-    pill_pos: Pos2,
+    pos: Pos2,
 ) {
-    let pill_rect = Rect::from_min_size(pill_pos, Vec2::new(260.0, 40.0));
-    let painter = ui.painter();
+    let t = Tokens::get(ui.ctx());
+    let pill_rect = Rect::from_min_size(pos, Vec2::new(42.0, 230.0));
 
-    // Drop shadow
-    let shadow_rect = pill_rect.translate(Vec2::new(0.0, 3.0));
-    painter.rect_filled(shadow_rect, CornerRadius::same(20), tokens.page_shadow);
+    // Shadow
+    ui.painter().rect_filled(
+        pill_rect.translate(Vec2::new(2.0, 3.0)),
+        CornerRadius::same(12),
+        t.page_shadow,
+    );
 
     // Pill background
-    painter.rect_filled(pill_rect, CornerRadius::same(20), tokens.card_bg);
-    painter.rect_stroke(pill_rect, CornerRadius::same(20), Stroke::new(1.0, tokens.border), egui::StrokeKind::Inside);
+    ui.painter().rect_filled(pill_rect, CornerRadius::same(12), t.card);
+    ui.painter().rect_stroke(pill_rect, CornerRadius::same(12), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
 
-    // Put buttons inside pill
-    let mut pill_ui = ui.new_child(egui::UiBuilder::new().max_rect(pill_rect));
-    pill_ui.horizontal_centered(|ui| {
-        ui.add_space(8.0);
-        ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+    let tools = [
+        ("mouse-pointer-2", ActiveTool::Select, "Select tool (V)"),
+        ("hand", ActiveTool::Hand, "Hand tool (H)"),
+        ("message-square-plus", ActiveTool::StickyNote, "Add comment"),
+        ("highlighter", ActiveTool::Highlight, "Highlight text (U)"),
+        ("pencil", ActiveTool::DrawShape, "Draw / Markup"),
+        ("sticky-note", ActiveTool::StickyNote, "Sticky note (N)"),
+    ];
 
-        if icons::icon_button(ui, icons::MOUSE_POINTER, tokens, 16.0, *active_tool == ActiveTool::Select, "Select Tool (V)").clicked() {
-            *active_tool = ActiveTool::Select;
+    let mut start_y = pill_rect.top() + 6.0;
+    for (icon, tool, tip) in tools {
+        let is_active = *active_tool == tool;
+        let btn_rect = Rect::from_min_size(
+            Pos2::new(pill_rect.left() + 5.0, start_y),
+            Vec2::splat(32.0),
+        );
+        let resp = ui.interact(btn_rect, ui.id().with(("quick_tool", icon)), Sense::click());
+
+        if is_active {
+            ui.painter().rect_filled(btn_rect, CornerRadius::same(8), t.selected);
+            ui.painter().rect_stroke(btn_rect, CornerRadius::same(8), Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(btn_rect, CornerRadius::same(8), t.hover);
         }
 
-        if icons::icon_button(ui, icons::HAND, tokens, 16.0, *active_tool == ActiveTool::Hand, "Pan / Hand Tool (H)").clicked() {
-            *active_tool = ActiveTool::Hand;
+        let tint = if is_active { t.accent_text } else if resp.hovered() { t.text } else { t.icon };
+        icons::paint(ui, btn_rect, icon, 16.0, tint);
+
+        if resp.clicked() {
+            *active_tool = tool;
         }
 
-        ui.separator();
-
-        if icons::icon_button(ui, icons::HIGHLIGHTER, tokens, 16.0, *active_tool == ActiveTool::Highlight, "Highlight Annotation (U)").clicked() {
-            *active_tool = ActiveTool::Highlight;
-        }
-
-        if icons::icon_button(ui, icons::STICKY_NOTE, tokens, 16.0, *active_tool == ActiveTool::StickyNote, "Sticky Note (N)").clicked() {
-            *active_tool = ActiveTool::StickyNote;
-        }
-
-        if icons::icon_button(ui, icons::TYPE, tokens, 16.0, *active_tool == ActiveTool::AddText || *active_tool == ActiveTool::EditText, "Add / Edit Text (T)").clicked() {
-            *active_tool = ActiveTool::EditText;
-        }
-
-        if icons::icon_button(ui, icons::PEN_TOOL, tokens, 16.0, *active_tool == ActiveTool::Sign, "Fill & Sign (S)").clicked() {
-            *active_tool = ActiveTool::Sign;
-        }
-    });
+        let _ = theme::hand(resp).on_hover_text(tip);
+        start_y += 36.0;
+    }
 }
 
 pub fn render_bottom_status_bar(
     ui: &mut Ui,
-    tokens: &DesignTokens,
     manager: &mut SessionManager,
     zoom_percent: &mut f32,
-    render_telemetry: &str,
-    status_message: &str,
+    telemetry: &str,
+    status_msg: &str,
 ) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+    let t = Tokens::get(ui.ctx());
 
-        // Status message
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+
         ui.label(
-            RichText::new(status_message)
-                .size(11.0)
-                .color(tokens.text_secondary),
+            egui::RichText::new(status_msg)
+                .size(11.5)
+                .color(t.text_muted),
         );
 
-        // Controls on the right
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // Engine badge (e.g. "⚡ Metal GPU (1.2 ms)" or "⚙ CPU (3.4 ms)")
+            ui.spacing_mut().item_spacing.x = 6.0;
+
+            // Telemetry
             ui.label(
-                RichText::new(render_telemetry)
-                    .size(10.5)
-                    .color(tokens.accent_text)
-                    .strong(),
+                egui::RichText::new(telemetry)
+                    .size(11.0)
+                    .color(t.accent_text),
             );
 
             ui.separator();
 
-            // Fit Page
-            if icons::icon_button(ui, icons::SCAN, tokens, 14.0, false, "Fit Entire Page (Cmd+0)").clicked() {
-                *zoom_percent = 100.0;
-                let _ = manager.dispatch(AppCommand::SetZoom { percent: 100.0 });
-            }
-
-            // Fit Width
-            if icons::icon_button(ui, icons::MAXIMIZE, tokens, 14.0, false, "Fit Width (Cmd+1)").clicked() {
-                *zoom_percent = 135.0;
-                let _ = manager.dispatch(AppCommand::SetZoom { percent: 135.0 });
-            }
-
-            // Zoom In (+)
-            if icons::icon_button(ui, icons::PLUS, tokens, 12.0, false, "Zoom In (Cmd++)").clicked() {
+            // Zoom Steppers
+            if icons::button(ui, "plus", 20.0, false, "Zoom In").clicked() {
                 *zoom_percent = (*zoom_percent * 1.25).min(500.0);
                 let _ = manager.dispatch(AppCommand::SetZoom { percent: *zoom_percent });
             }
 
-            // Zoom Percent text
             ui.label(
-                RichText::new(format!("{:.0}%", *zoom_percent))
+                egui::RichText::new(format!("{:.0}%", *zoom_percent))
                     .size(11.5)
-                    .color(tokens.text_primary),
+                    .color(t.text),
             );
 
-            // Zoom Out (-)
-            if icons::icon_button(ui, icons::MINUS, tokens, 12.0, false, "Zoom Out (Cmd+-)").clicked() {
+            if icons::button(ui, "minus", 20.0, false, "Zoom Out").clicked() {
                 *zoom_percent = (*zoom_percent / 1.25).max(25.0);
                 let _ = manager.dispatch(AppCommand::SetZoom { percent: *zoom_percent });
             }
 
             ui.separator();
 
-            // Page Navigation (< Page X of Y >)
-            let (cur_page, total_pages) = if let Some(s) = manager.active_session() {
-                (s.current_page, s.total_pages)
+            // Page Navigation
+            let (cur_p, tot_p) = if let Some(s) = manager.active_session() {
+                (s.current_page + 1, s.total_pages)
             } else {
-                (0, 0)
+                (1, 1)
             };
 
-            if icons::icon_button(ui, icons::CHEVRON_RIGHT, tokens, 14.0, false, "Next Page").clicked() {
-                if cur_page + 1 < total_pages {
-                    let _ = manager.dispatch(AppCommand::SetPage { page_index: cur_page + 1 });
+            if icons::button(ui, "chevron-left", 20.0, false, "Previous Page").clicked() {
+                if let Some(s) = manager.active_session() {
+                    if s.current_page > 0 {
+                        let _ = manager.dispatch(AppCommand::SetPage { page_index: s.current_page - 1 });
+                    }
                 }
             }
 
             ui.label(
-                RichText::new(format!("Page {} of {}", cur_page + 1, total_pages.max(1)))
+                egui::RichText::new(format!("Page {cur_p} of {tot_p}"))
                     .size(11.5)
-                    .color(tokens.text_primary),
+                    .color(t.text),
             );
 
-            if icons::icon_button(ui, icons::CHEVRON_LEFT, tokens, 14.0, false, "Previous Page").clicked() {
-                if cur_page > 0 {
-                    let _ = manager.dispatch(AppCommand::SetPage { page_index: cur_page - 1 });
+            if icons::button(ui, "chevron-right", 20.0, false, "Next Page").clicked() {
+                if let Some(s) = manager.active_session() {
+                    if s.current_page + 1 < s.total_pages {
+                        let _ = manager.dispatch(AppCommand::SetPage { page_index: s.current_page + 1 });
+                    }
                 }
             }
         });

@@ -4,9 +4,11 @@
 mod app;
 mod canvas;
 mod chrome;
+mod icon_data;
 mod icons;
 mod panels;
 mod theme;
+mod widgets;
 
 use std::path::PathBuf;
 use app::SmartPdfEguiApp;
@@ -28,9 +30,71 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
-    let initial_path = args.iter().skip(1).find(|a| !a.starts_with('-')).map(PathBuf::from);
+    let mut screenshot_out: Option<PathBuf> = None;
+    let mut initial_mode = panels::AcrobatMode::AllTools;
+    let mut initial_panel = panels::LeftPanelMode::AllTools;
+    let mut initial_theme = theme::ThemeKind::Light;
+    let mut window_width = 1440.0;
+    let mut window_height = 900.0;
+    let mut file_arg: Option<PathBuf> = None;
 
-    let (bytes, title, path_opt) = if let Some(path) = initial_path {
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--screenshot" if i + 1 < args.len() => {
+                i += 1;
+                screenshot_out = Some(PathBuf::from(&args[i]));
+            }
+            "--mode" if i + 1 < args.len() => {
+                i += 1;
+                match args[i].as_str() {
+                    "edit" => {
+                        initial_mode = panels::AcrobatMode::Edit;
+                        initial_panel = panels::LeftPanelMode::Tool("edit");
+                    }
+                    "thumbnails" => {
+                        initial_mode = panels::AcrobatMode::AllTools;
+                        initial_panel = panels::LeftPanelMode::Thumbnails;
+                    }
+                    "organize" => {
+                        initial_mode = panels::AcrobatMode::Organize;
+                        initial_panel = panels::LeftPanelMode::Thumbnails;
+                    }
+                    _ => {
+                        initial_mode = panels::AcrobatMode::AllTools;
+                        initial_panel = panels::LeftPanelMode::AllTools;
+                    }
+                }
+            }
+            "--theme" if i + 1 < args.len() => {
+                i += 1;
+                if args[i] == "dark" {
+                    initial_theme = theme::ThemeKind::Dark;
+                } else {
+                    initial_theme = theme::ThemeKind::Light;
+                }
+            }
+            "--width" if i + 1 < args.len() => {
+                i += 1;
+                if let Ok(w) = args[i].parse::<f32>() {
+                    window_width = w;
+                }
+            }
+            "--height" if i + 1 < args.len() => {
+                i += 1;
+                if let Ok(h) = args[i].parse::<f32>() {
+                    window_height = h;
+                }
+            }
+            arg if !arg.starts_with('-') => {
+                file_arg = Some(PathBuf::from(arg));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let (bytes, title, path_opt) = if let Some(path) = file_arg {
         if let Ok(b) = std::fs::read(&path) {
             let t = path
                 .file_name()
@@ -48,8 +112,8 @@ fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("SmartPDF")
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([800.0, 500.0])
+            .with_inner_size([window_width, window_height])
+            .with_min_inner_size([600.0, 400.0])
             .with_active(true),
         ..Default::default()
     };
@@ -62,6 +126,10 @@ fn main() -> eframe::Result<()> {
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
             let mut app = SmartPdfEguiApp::new(cc);
+            app.active_mode = initial_mode;
+            app.left_panel = initial_panel;
+            app.theme_kind = initial_theme;
+            app.screenshot_target = screenshot_out;
             app.load_document_bytes(path_opt, bytes, title);
             Ok(Box::new(app))
         }),
