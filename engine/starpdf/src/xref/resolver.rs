@@ -322,8 +322,8 @@ impl XrefResolver {
                             None => return Err(PdfError::UnexpectedEof),
                         };
 
-                        let gen_tok = match lexer.next_token()? {
-                            Some(Token::Integer(g)) if g >= 0 => (g.min(u16::MAX as i64)) as u16,
+                        let gen_raw = match lexer.next_token()? {
+                            Some(Token::Integer(g)) => g,
                             Some(other) => {
                                 return Err(PdfError::InvalidXref(format!(
                                     "Expected generation for object {obj_num}, found {other:?}"
@@ -343,13 +343,29 @@ impl XrefResolver {
                         };
 
                         if flag_tok == "n" {
+                            if gen_raw < 0 || gen_raw > u16::MAX as i64 {
+                                return Err(PdfError::InvalidXref(format!(
+                                    "In-use xref entry for object {obj_num} has out-of-range generation {gen_raw}"
+                                )));
+                            }
                             table.entries.entry(obj_num).or_insert(
                                 crate::xref::table::XrefEntry::InUse {
                                     byte_offset: offset_tok,
-                                    generation: gen_tok,
+                                    generation: gen_raw as u16,
                                 },
                             );
                         } else {
+                            let gen_tok = if gen_raw < 0 {
+                                0u16
+                            } else if gen_raw > u16::MAX as i64 {
+                                table.status = crate::xref::table::XrefStatus::RecoveredMalformedPrev;
+                                table.recovery_events.push(format!(
+                                    "Free xref entry for object {obj_num} clamped out-of-range generation {gen_raw} to 65535"
+                                ));
+                                u16::MAX
+                            } else {
+                                gen_raw as u16
+                            };
                             table.entries.entry(obj_num).or_insert(
                                 crate::xref::table::XrefEntry::Free {
                                     next_free_obj: offset_tok,

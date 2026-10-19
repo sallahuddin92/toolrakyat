@@ -162,3 +162,53 @@ fn test_render_caching_and_invalidation() {
         .expect("render after mutation");
     assert_eq!(render3.width, 612);
 }
+
+#[test]
+fn test_ir_and_text_cache_lifecycle() {
+    let mut manager = SessionManager::new();
+    let pdf_bytes = MinimalWriter::create_minimal_pdf("IR and Text Caching Qualification").unwrap();
+
+    let _session_id = manager
+        .create_session(None, pdf_bytes, "ir_cache_test.pdf".to_string())
+        .expect("create session");
+
+    let session = manager.active_session().unwrap();
+
+    // 1. First IR compile (cold)
+    let t0 = std::time::Instant::now();
+    let ir1 = session.compile_render_page(0).expect("compile page IR");
+    let dur_cold = t0.elapsed();
+    assert!(!ir1.items.is_empty());
+
+    // 2. Second IR compile (warm cache hit)
+    let t1 = std::time::Instant::now();
+    let ir2 = session.compile_render_page(0).expect("compile page IR warm");
+    let dur_warm = t1.elapsed();
+    assert_eq!(ir1.items.len(), ir2.items.len());
+    assert!(
+        dur_warm < dur_cold || dur_warm.as_micros() < 200,
+        "Warm IR compile must hit cache (< 200us)"
+    );
+
+    // 3. Text spans caching
+    let spans1 = session.extract_page_text_spans(0).expect("first text extract");
+    let t_text = std::time::Instant::now();
+    let spans2 = session.extract_page_text_spans(0).expect("warm text extract");
+    let dur_text = t_text.elapsed();
+    assert_eq!(spans1.len(), spans2.len());
+    assert!(dur_text.as_micros() < 200, "Warm text extract must hit cache");
+
+    // 4. Mutation invalidates cache and increments revision
+    let initial_rev = session.revision;
+    let new_bytes = MinimalWriter::create_minimal_pdf("Revised IR Content").unwrap();
+    manager
+        .active_session_mut()
+        .unwrap()
+        .commit_bytes("Update", new_bytes)
+        .unwrap();
+
+    let session_after = manager.active_session().unwrap();
+    assert_eq!(session_after.revision, initial_rev + 1);
+    assert!(session_after.ir_cache.borrow().is_none());
+    assert!(session_after.text_cache.borrow().is_none());
+}

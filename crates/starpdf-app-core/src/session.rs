@@ -64,7 +64,12 @@ pub struct DocumentSession {
     pub security_info: Option<StarSecurityInfo>,
     pub capabilities: DocumentCapabilities,
     pub execution_state: StarExecutionState,
-    pub render_cache: std::cell::RefCell<Option<(u32, u32, starpdf::render::RenderedPage)>>,
+    pub revision: u64,
+    pub ir_cache: std::cell::RefCell<Option<(u64, u32, starpdf::render::RenderPage)>>,
+    pub text_cache: std::cell::RefCell<Option<(u64, u32, Vec<starpdf::text::span::TextSpan>)>>,
+    pub render_cache: std::cell::RefCell<Option<(u64, u32, u32, starpdf::render::RenderedPage)>>,
+    #[cfg(feature = "gpu")]
+    pub gpu_render_cache: std::cell::RefCell<Option<(u64, u32, u32, starpdf::render::GpuRenderResult)>>,
 }
 
 impl DocumentSession {
@@ -132,7 +137,12 @@ impl DocumentSession {
             security_info: sec_info,
             capabilities,
             execution_state,
+            revision: 0,
+            ir_cache: std::cell::RefCell::new(None),
+            text_cache: std::cell::RefCell::new(None),
             render_cache: std::cell::RefCell::new(None),
+            #[cfg(feature = "gpu")]
+            gpu_render_cache: std::cell::RefCell::new(None),
         })
     }
 
@@ -141,36 +151,69 @@ impl DocumentSession {
         PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)
     }
 
-    /// Compiles the specified 0-based page into typed Render IR.
+    /// Compiles the specified 0-based page into typed Render IR with session caching.
     pub fn compile_render_page(&self, page: u32) -> AppResult<starpdf::render::RenderPage> {
+        if let Some((rev, cached_page, ref ir)) = *self.ir_cache.borrow() {
+            if rev == self.revision && cached_page == page {
+                return Ok(ir.clone());
+            }
+        }
+
         let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
-        doc.compile_render_page(page as usize)
-            .map_err(AppCoreError::from)
+        let ir = doc
+            .compile_render_page(page as usize)
+            .map_err(AppCoreError::from)?;
+        *self.ir_cache.borrow_mut() = Some((self.revision, page, ir.clone()));
+        Ok(ir)
+    }
+
+    /// Extracts text spans for the specified 0-based page with session caching.
+    pub fn extract_page_text_spans(
+        &self,
+        page: u32,
+    ) -> AppResult<Vec<starpdf::text::span::TextSpan>> {
+        if let Some((rev, cached_page, ref spans)) = *self.text_cache.borrow() {
+            if rev == self.revision && cached_page == page {
+                return Ok(spans.clone());
+            }
+        }
+
+        let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
+        let page_text = doc
+            .extract_page_text(page as usize)
+            .map_err(AppCoreError::from)?;
+        let spans = page_text.spans;
+        *self.text_cache.borrow_mut() = Some((self.revision, page, spans.clone()));
+        Ok(spans)
     }
 
     /// Renders the specified 0-based page to an RGBA pixmap at the given scale factor with session caching.
     pub fn render_page(&self, page: u32, scale: f32) -> AppResult<starpdf::render::RenderedPage> {
         let scale_bits = scale.to_bits();
-        if let Some((cached_page, cached_scale, ref rendered)) = *self.render_cache.borrow() {
-            if cached_page == page && cached_scale == scale_bits {
+        if let Some((rev, cached_page, cached_scale, ref rendered)) = *self.render_cache.borrow() {
+            if rev == self.revision && cached_page == page && cached_scale == scale_bits {
                 return Ok(rendered.clone());
             }
         }
 
-        let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
-        let rendered = doc
-            .render_page(page as usize, scale)
-            .map_err(AppCoreError::from)?;
-        *self.render_cache.borrow_mut() = Some((page, scale_bits, rendered.clone()));
+        let ir = self.compile_render_page(page)?;
+        let rendered = starpdf::render::NativeRasterizer::render(&ir, scale)
+            .ok_or_else(|| AppCoreError::InvalidOperation("Rasterization failed".into()))?;
+        *self.render_cache.borrow_mut() =
+            Some((self.revision, page, scale_bits, rendered.clone()));
         Ok(rendered)
     }
 
-    /// Explicitly invalidates the rendered page cache.
+    /// Explicitly invalidates the rendered page, IR, and text caches.
     pub fn invalidate_render_cache(&self) {
+        self.ir_cache.borrow_mut().take();
+        self.text_cache.borrow_mut().take();
         self.render_cache.borrow_mut().take();
+        #[cfg(feature = "gpu")]
+        self.gpu_render_cache.borrow_mut().take();
     }
 
-    /// Renders the specified 0-based page using GPU acceleration with the provided WgpuRenderer.
+    /// Renders the specified 0-based page using GPU acceleration with the provided WgpuRenderer and session caching.
     #[cfg(feature = "gpu")]
     pub fn render_page_gpu(
         &self,
@@ -178,10 +221,22 @@ impl DocumentSession {
         scale: f32,
         renderer: &starpdf::render::WgpuRenderer,
     ) -> AppResult<starpdf::render::GpuRenderResult> {
-        let render_page = self.compile_render_page(page)?;
-        renderer
-            .render_page(&render_page, scale)
-            .map_err(AppCoreError::PdfError)
+        let scale_bits = scale.to_bits();
+        if let Some((rev, cached_page, cached_scale, ref res)) =
+            *self.gpu_render_cache.borrow()
+        {
+            if rev == self.revision && cached_page == page && cached_scale == scale_bits {
+                return Ok(res.clone());
+            }
+        }
+
+        let ir = self.compile_render_page(page)?;
+        let res = renderer
+            .render_page(&ir, scale)
+            .map_err(AppCoreError::PdfError)?;
+        *self.gpu_render_cache.borrow_mut() =
+            Some((self.revision, page, scale_bits, res.clone()));
+        Ok(res)
     }
 
     /// Whether the document currently has unsaved modifications.
@@ -267,6 +322,7 @@ impl DocumentSession {
         let revision = (self.history.current_index() + 1) as u64;
         self.execution_state = StarExecutionState::from_document(&doc, revision);
 
+        self.revision += 1;
         self.history.push(description, new_bytes.clone());
         self.bytes = new_bytes;
         self.invalidate_render_cache();
@@ -284,6 +340,7 @@ impl DocumentSession {
             if self.current_page >= self.total_pages {
                 self.current_page = self.total_pages.saturating_sub(1);
             }
+            self.revision += 1;
             self.bytes = bytes;
             self.clear_selection();
             self.invalidate_render_cache();
@@ -304,6 +361,7 @@ impl DocumentSession {
             if self.current_page >= self.total_pages {
                 self.current_page = self.total_pages.saturating_sub(1);
             }
+            self.revision += 1;
             self.bytes = bytes;
             self.clear_selection();
             self.invalidate_render_cache();

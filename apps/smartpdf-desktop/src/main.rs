@@ -21,6 +21,25 @@ slint::include_modules!();
 static GPU_RENDERER: Mutex<Option<starpdf::render::WgpuRenderer>> = Mutex::new(None);
 static GPU_ENABLED: AtomicBool = AtomicBool::new(true);
 
+#[derive(Clone)]
+struct CachedSlintImage {
+    page: u32,
+    zoom_bits: u32,
+    revision: u64,
+    gpu_enabled: bool,
+    image: slint::Image,
+    width: f32,
+    height: f32,
+    badge: slint::SharedString,
+    metrics: slint::SharedString,
+}
+
+thread_local! {
+    static SESSION_IMAGE_CACHE: RefCell<std::collections::HashMap<String, CachedSlintImage>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+static LAST_THUMBNAILS: Mutex<Option<(String, u32, u32)>> = Mutex::new(None);
+
 /// Embedded default sample PDF document so the desktop app is immediately interactive on launch.
 const DEFAULT_SAMPLE_PDF: &[u8] = include_bytes!("../../../test-assets/text-multispan-heading.pdf");
 
@@ -720,15 +739,41 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         };
         app.set_security_status(sec_status.into());
 
-        // 1.5. Render Active Page via GPU-Accelerated Pipeline (with CPU fallback)
+        // 1.5. Render Active Page via GPU-Accelerated Pipeline (with session caching and CPU fallback)
         let zoom_scale = (session.zoom.percent / 100.0).clamp(0.2, 4.0);
-        let mut rendered_success = false;
+        let current_gpu = GPU_ENABLED.load(Ordering::SeqCst);
 
-        let gpu_render_res = if GPU_ENABLED.load(Ordering::SeqCst) {
-            if let Ok(guard) = GPU_RENDERER.lock() {
-                if let Some(ref r) = *guard {
-                    if let Ok(page_ir) = session.compile_render_page(session.current_page) {
-                        r.render_page(&page_ir, zoom_scale)
+        let cached_hit = SESSION_IMAGE_CACHE.with(|cache| {
+            let map = cache.borrow();
+            if let Some(c) = map.get(&session.id) {
+                if c.page == session.current_page
+                    && c.zoom_bits == zoom_scale.to_bits()
+                    && c.revision == session.revision
+                    && c.gpu_enabled == current_gpu
+                {
+                    app.set_rendered_page_image(c.image.clone());
+                    app.set_has_rendered_page_image(true);
+                    app.set_page_width(c.width);
+                    app.set_page_height(c.height);
+                    app.set_gpu_acceleration_enabled(c.gpu_enabled);
+                    app.set_render_engine_badge(c.badge.clone());
+                    app.set_gpu_metrics_detail(c.metrics.clone());
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+
+        if !cached_hit {
+            let mut rendered_success = false;
+            let gpu_render_res = if current_gpu {
+                if let Ok(guard) = GPU_RENDERER.lock() {
+                    if let Some(ref r) = *guard {
+                        session
+                            .render_page_gpu(session.current_page, zoom_scale, r)
                             .ok()
                             .map(|res| (res, r.adapter_name().to_string()))
                     } else {
@@ -739,34 +784,26 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                 }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
-        if let Some((gpu_res, adapter_name)) = gpu_render_res {
-            let mut pixel_buffer =
-                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(gpu_res.width, gpu_res.height);
-            for (src, dst) in gpu_res
-                .rgba_pixels
-                .chunks_exact(4)
-                .zip(pixel_buffer.make_mut_slice().iter_mut())
-            {
-                dst.r = src[0];
-                dst.g = src[1];
-                dst.b = src[2];
-                dst.a = src[3];
-            }
-            let slint_img = slint::Image::from_rgba8(pixel_buffer);
-            app.set_rendered_page_image(slint_img);
-            app.set_has_rendered_page_image(true);
-            app.set_page_width(gpu_res.width as f32 / zoom_scale);
-            app.set_page_height(gpu_res.height as f32 / zoom_scale);
-            app.set_gpu_acceleration_enabled(true);
-            let short_name = adapter_name.split_whitespace().next().unwrap_or("Metal");
-            app.set_render_engine_badge(format!("GPU ({short_name})").into());
-            app.set_gpu_metrics_detail(
-                format!(
+            if let Some((gpu_res, adapter_name)) = gpu_render_res {
+                let mut pixel_buffer =
+                    slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(gpu_res.width, gpu_res.height);
+                pixel_buffer
+                    .make_mut_bytes()
+                    .copy_from_slice(&gpu_res.rgba_pixels);
+                let slint_img = slint::Image::from_rgba8(pixel_buffer);
+                app.set_rendered_page_image(slint_img.clone());
+                app.set_has_rendered_page_image(true);
+                let w = gpu_res.width as f32 / zoom_scale;
+                let h = gpu_res.height as f32 / zoom_scale;
+                app.set_page_width(w);
+                app.set_page_height(h);
+                app.set_gpu_acceleration_enabled(true);
+                let short_name = adapter_name.split_whitespace().next().unwrap_or("Metal");
+                let badge: slint::SharedString = format!("GPU ({short_name})").into();
+                app.set_render_engine_badge(badge.clone());
+                let metrics: slint::SharedString = format!(
                     "Frame: {:.1}ms (Draws: {}, GPU Paths: {}, Glyphs: {}, Images: {}, CPU fallback: {})",
                     gpu_res.metrics.total_frame_duration_ms,
                     gpu_res.metrics.gpu_draw_calls,
@@ -774,82 +811,113 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                     gpu_res.metrics.gpu_glyphs_rendered,
                     gpu_res.metrics.gpu_images_rendered,
                     gpu_res.metrics.fallback_cpu_items
-                )
-                .into(),
-            );
-            rendered_success = true;
-        } else if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
-            let mut pixel_buffer =
-                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(rendered.width, rendered.height);
-            for (src, dst) in rendered
-                .rgba_pixels
-                .chunks_exact(4)
-                .zip(pixel_buffer.make_mut_slice().iter_mut())
-            {
-                dst.r = src[0];
-                dst.g = src[1];
-                dst.b = src[2];
-                dst.a = src[3];
+                ).into();
+                app.set_gpu_metrics_detail(metrics.clone());
+
+                SESSION_IMAGE_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(session.id.clone(), CachedSlintImage {
+                        page: session.current_page,
+                        zoom_bits: zoom_scale.to_bits(),
+                        revision: session.revision,
+                        gpu_enabled: true,
+                        image: slint_img,
+                        width: w,
+                        height: h,
+                        badge,
+                        metrics,
+                    });
+                });
+                rendered_success = true;
+            } else if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
+                let mut pixel_buffer =
+                    slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(rendered.width, rendered.height);
+                pixel_buffer
+                    .make_mut_bytes()
+                    .copy_from_slice(&rendered.rgba_pixels);
+                let slint_img = slint::Image::from_rgba8(pixel_buffer);
+                app.set_rendered_page_image(slint_img.clone());
+                app.set_has_rendered_page_image(true);
+                let w = rendered.width as f32 / zoom_scale;
+                let h = rendered.height as f32 / zoom_scale;
+                app.set_page_width(w);
+                app.set_page_height(h);
+                app.set_gpu_acceleration_enabled(false);
+                let badge: slint::SharedString = "CPU (tiny-skia)".into();
+                app.set_render_engine_badge(badge.clone());
+                let metrics: slint::SharedString = format!("CPU Frame: {:.1}ms", rendered.duration_ms).into();
+                app.set_gpu_metrics_detail(metrics.clone());
+
+                SESSION_IMAGE_CACHE.with(|cache| {
+                    cache.borrow_mut().insert(session.id.clone(), CachedSlintImage {
+                        page: session.current_page,
+                        zoom_bits: zoom_scale.to_bits(),
+                        revision: session.revision,
+                        gpu_enabled: false,
+                        image: slint_img,
+                        width: w,
+                        height: h,
+                        badge,
+                        metrics,
+                    });
+                });
+                rendered_success = true;
             }
-            let slint_img = slint::Image::from_rgba8(pixel_buffer);
-            app.set_rendered_page_image(slint_img);
-            app.set_has_rendered_page_image(true);
-            app.set_page_width(rendered.width as f32 / zoom_scale);
-            app.set_page_height(rendered.height as f32 / zoom_scale);
-            app.set_gpu_acceleration_enabled(false);
-            app.set_render_engine_badge("CPU (tiny-skia)".into());
-            app.set_gpu_metrics_detail(format!("CPU Frame: {:.1}ms", rendered.duration_ms).into());
-            rendered_success = true;
+
+            if !rendered_success {
+                app.set_has_rendered_page_image(false);
+            }
         }
 
-        if !rendered_success {
-            app.set_has_rendered_page_image(false);
+        // 2. Build Thumbnails (Only rebuild when page or total pages change)
+        let need_thumb_rebuild = if let Ok(lock) = LAST_THUMBNAILS.lock() {
+            lock.as_ref() != Some(&(session.id.clone(), session.total_pages, session.current_page))
+        } else {
+            true
+        };
+
+        if need_thumb_rebuild {
+            let mut thumbs = Vec::with_capacity(session.total_pages as usize);
+            for p in 0..session.total_pages {
+                thumbs.push(PageThumbnail {
+                    page_index: p as i32,
+                    label: format!("Page {}", p + 1).into(),
+                    dimensions: "612 × 792 pt".into(),
+                    is_active: p == session.current_page,
+                });
+            }
+            app.set_thumbnails(ModelRc::new(VecModel::from(thumbs)));
+            if let Ok(mut lock) = LAST_THUMBNAILS.lock() {
+                *lock = Some((session.id.clone(), session.total_pages, session.current_page));
+            }
         }
 
-        // 2. Build Thumbnails
-        let mut thumbs = Vec::new();
-        for p in 0..session.total_pages {
-            thumbs.push(PageThumbnail {
-                page_index: p as i32,
-                label: format!("Page {}", p + 1).into(),
-                dimensions: "612 × 792 pt".into(),
-                is_active: p == session.current_page,
-            });
-        }
-        app.set_thumbnails(ModelRc::new(VecModel::from(thumbs)));
-
-        // 3. Extract Text Spans for Active Page
+        // 3. Extract Text Spans for Active Page (Persistent Page Caching)
         let mut text_spans_data = Vec::new();
         let page_height = 792.0;
 
-        if let Ok(mut doc) = session.pdf_document() {
-            if let Ok(pages) = doc.extract_all_text() {
-                let page_idx = session.current_page as usize;
-                if let Some(page) = pages.get(page_idx) {
-                    for span in &page.spans {
-                        let is_selected = match &session.selection {
-                            SelectionState::Text { star_node_id, .. } => {
-                                let (_, _, occ) = star_node_id.parts();
-                                occ == span.span_id
-                            }
-                            _ => false,
-                        };
-
-                        let canvas_y = (page_height - span.y - span.height).max(0.0);
-                        text_spans_data.push(TextSpanData {
-                            id: span.span_id.clone().into(),
-                            text: span.text.clone().into(),
-                            x: span.x as f32,
-                            y: canvas_y as f32,
-                            width: span.width.max(12.0) as f32,
-                            height: span.height.max(14.0) as f32,
-                            font_size: (span.font_size as f32).max(9.0),
-                            font_family: span.font_name.clone().into(),
-                            color_hex: "#0F172A".into(),
-                            is_selected,
-                        });
+        if let Ok(spans) = session.extract_page_text_spans(session.current_page) {
+            for span in &spans {
+                let is_selected = match &session.selection {
+                    SelectionState::Text { star_node_id, .. } => {
+                        let (_, _, occ) = star_node_id.parts();
+                        occ == span.span_id
                     }
-                }
+                    _ => false,
+                };
+
+                let canvas_y = (page_height - span.y - span.height).max(0.0);
+                text_spans_data.push(TextSpanData {
+                    id: span.span_id.clone().into(),
+                    text: span.text.clone().into(),
+                    x: span.x as f32,
+                    y: canvas_y as f32,
+                    width: span.width.max(12.0) as f32,
+                    height: span.height.max(14.0) as f32,
+                    font_size: (span.font_size as f32).max(9.0),
+                    font_family: span.font_name.clone().into(),
+                    color_hex: "#0F172A".into(),
+                    is_selected,
+                });
             }
         }
         app.set_text_spans(ModelRc::new(VecModel::from(text_spans_data)));
@@ -1004,8 +1072,13 @@ mod tests {
     use super::*;
     use slint::Model;
 
-    fn init_testing() {
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn init_testing() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        GPU_ENABLED.store(true, Ordering::SeqCst);
         i_slint_backend_testing::init_no_event_loop();
+        guard
     }
 
     fn resolve_fixture(rel: &str) -> PathBuf {
@@ -1026,7 +1099,7 @@ mod tests {
 
     #[test]
     fn test_ui_initialization_and_sync() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1055,7 +1128,7 @@ mod tests {
 
     #[test]
     fn test_selection_and_editing_workflow() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1092,7 +1165,7 @@ mod tests {
 
     #[test]
     fn test_live_editing_and_auto_commit_without_mandatory_apply() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let manager = Rc::new(RefCell::new(SessionManager::new()));
         let active_tool = Rc::new(RefCell::new("text".to_string()));
@@ -1150,7 +1223,7 @@ mod tests {
 
     #[test]
     fn test_multilingual_unicode_support() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let test_strings = vec![
             "العربية (Arabic)",
@@ -1168,7 +1241,7 @@ mod tests {
 
     #[test]
     fn test_desktop_gpu_viewport_presentation_and_toggle() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1238,7 +1311,7 @@ mod tests {
 
     #[test]
     fn test_desktop_viewport_zoom_selection_alignment() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1275,7 +1348,7 @@ mod tests {
 
     #[test]
     fn test_phase8_real_world_document_open_and_render_all_categories() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Slint AppWindow");
 
         let test_fixtures = [
@@ -1309,7 +1382,7 @@ mod tests {
 
     #[test]
     fn test_phase8_large_document_scrolling_and_page_switching() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Slint AppWindow");
         let path = resolve_fixture("test-assets/realworld_corpus/large-manual-20page.pdf");
         let bytes = std::fs::read(&path)
@@ -1354,7 +1427,7 @@ mod tests {
 
     #[test]
     fn test_phase8_in_place_text_edit_undo_redo_and_save_reopen_lifecycle() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Slint AppWindow");
         let manager = Rc::new(RefCell::new(SessionManager::new()));
         let active_tool = Rc::new(RefCell::new("text".to_string()));
@@ -1457,7 +1530,7 @@ mod tests {
 
     #[test]
     fn test_phase8_multi_document_tab_lifecycle() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1511,7 +1584,7 @@ mod tests {
 
     #[test]
     fn test_phase8_malformed_document_graceful_refusal() {
-        init_testing();
+        let _test_guard = init_testing();
         let _app = AppWindow::new().expect("Slint AppWindow");
         let mut manager = SessionManager::new();
 
@@ -1529,7 +1602,7 @@ mod tests {
 
     #[test]
     fn test_phase8_capture_desktop_qualification_screenshots() {
-        init_testing();
+        let _test_guard = init_testing();
         let app = AppWindow::new().expect("Slint AppWindow");
         let screenshot_dir = resolve_fixture("target/desktop_qualification_screenshots");
         let _ = std::fs::create_dir_all(&screenshot_dir);
@@ -1570,6 +1643,171 @@ mod tests {
 
             assert!(out_path.exists());
             println!("  [Screenshot Captured] Saved: {:?}", out_path);
+        }
+    }
+
+    #[test]
+    fn test_phase9_interactive_acceptance_and_latency_profiling() {
+        let _test_guard = init_testing();
+        if let Ok(mut lock) = GPU_RENDERER.lock() {
+            if lock.is_none() {
+                *lock = starpdf::render::WgpuRenderer::new().ok();
+            }
+        }
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let screenshot_dir = resolve_fixture("target/desktop_acceptance_phase9");
+        let _ = std::fs::create_dir_all(&screenshot_dir);
+
+        // 1. First-Page Cold vs Warm Latency
+        let doc_path = resolve_fixture("test-assets/realworld_corpus/office-invoice-enterprise.pdf");
+        let doc_bytes = std::fs::read(&doc_path).expect("read doc");
+
+        let mut manager = SessionManager::new();
+        let t_cold_start = std::time::Instant::now();
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(doc_path.clone()),
+                bytes: doc_bytes.clone(),
+                title: "invoice.pdf".into(),
+            })
+            .unwrap();
+        sync_ui(&app, &manager, "select", false);
+        let first_page_cold_ms = t_cold_start.elapsed().as_secs_f64() * 1000.0;
+
+        let t_warm_start = std::time::Instant::now();
+        sync_ui(&app, &manager, "select", false);
+        let first_page_warm_ms = t_warm_start.elapsed().as_secs_f64() * 1000.0;
+
+        println!("  [Phase 9] First-Page Latency: Cold = {:.2}ms, Warm = {:.2}ms", first_page_cold_ms, first_page_warm_ms);
+        assert!(first_page_warm_ms < 5.0, "Warm UI sync must be < 5ms");
+
+        // 2. Zoom Scaling Latency (50% to 300%)
+        let zooms = [50.0, 100.0, 150.0, 200.0, 300.0];
+        let mut zoom_timings = Vec::new();
+        for &z in &zooms {
+            let t_z = std::time::Instant::now();
+            manager.dispatch(AppCommand::SetZoom { percent: z }).unwrap();
+            sync_ui(&app, &manager, "select", false);
+            let dur = t_z.elapsed().as_secs_f64() * 1000.0;
+            zoom_timings.push(dur);
+        }
+        println!("  [Phase 9] Zoom Latencies (50%->300%): {:?}", zoom_timings);
+
+        // 3. Large Document Scroll (20 Pages) - Measure p50/p95/p99
+        let manual_path = resolve_fixture("test-assets/realworld_corpus/large-manual-20page.pdf");
+        let manual_bytes = std::fs::read(&manual_path).expect("read manual");
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(manual_path.clone()),
+                bytes: manual_bytes,
+                title: "manual20.pdf".into(),
+            })
+            .unwrap();
+
+        let mut scroll_latencies = Vec::new();
+        for page in 0..20 {
+            let t_page = std::time::Instant::now();
+            manager.dispatch(AppCommand::SetPage { page_index: page }).unwrap();
+            sync_ui(&app, &manager, "select", false);
+            scroll_latencies.push(t_page.elapsed().as_secs_f64() * 1000.0);
+        }
+
+        scroll_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p50 = scroll_latencies[scroll_latencies.len() / 2];
+        let p95 = scroll_latencies[(scroll_latencies.len() as f64 * 0.95) as usize];
+        let p99 = scroll_latencies[scroll_latencies.len() - 1];
+        println!("  [Phase 9] 20-Page Scroll Latency: p50={:.2}ms, p95={:.2}ms, p99={:.2}ms", p50, p95, p99);
+
+        // 4. In-Place Text Editing & Undo/Redo Latency
+        let target_node = {
+            let session = manager.active_session().unwrap();
+            let spans = session.extract_page_text_spans(0).unwrap();
+            spans[0].span_id.clone()
+        };
+
+        let mut edit_latencies = Vec::new();
+        for i in 0..10 {
+            let t_edit = std::time::Instant::now();
+            manager.dispatch(AppCommand::ReplaceText {
+                target_node: target_node.clone(),
+                new_text: format!("Edit-Step-{}", i),
+            }).unwrap();
+            sync_ui(&app, &manager, "text", false);
+            edit_latencies.push(t_edit.elapsed().as_secs_f64() * 1000.0);
+        }
+        edit_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let edit_p50 = edit_latencies[edit_latencies.len() / 2];
+        let edit_p95 = edit_latencies[(edit_latencies.len() as f64 * 0.95) as usize];
+        let edit_p99 = edit_latencies[edit_latencies.len() - 1];
+        println!("  [Phase 9] In-Place Text Edit Latency: p50={:.2}ms, p95={:.2}ms, p99={:.2}ms", edit_p50, edit_p95, edit_p99);
+
+        // 5. Multi-Tab Switching (50 cycles between 2 documents)
+        if manager.session_count() < 2 {
+            let doc2_path = resolve_fixture("test-assets/realworld_corpus/scanned-multires-archive.pdf");
+            let doc2_bytes = std::fs::read(&doc2_path).unwrap();
+            manager.dispatch(AppCommand::OpenDocument {
+                path: Some(doc2_path),
+                bytes: doc2_bytes,
+                title: "scan.pdf".into(),
+            }).unwrap();
+        }
+
+        let tab1_id = manager.tabs()[0].session_id.clone();
+        let tab2_id = manager.tabs()[1].session_id.clone();
+        let mut tab_latencies = Vec::new();
+        for _ in 0..20 {
+            let t_tab = std::time::Instant::now();
+            manager.dispatch(AppCommand::SwitchTab { session_id: tab1_id.clone() }).unwrap();
+            sync_ui(&app, &manager, "select", false);
+            tab_latencies.push(t_tab.elapsed().as_secs_f64() * 1000.0);
+
+            let t_tab2 = std::time::Instant::now();
+            manager.dispatch(AppCommand::SwitchTab { session_id: tab2_id.clone() }).unwrap();
+            sync_ui(&app, &manager, "select", false);
+            tab_latencies.push(t_tab2.elapsed().as_secs_f64() * 1000.0);
+        }
+        tab_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let tab_p50 = tab_latencies[tab_latencies.len() / 2];
+        let tab_p95 = tab_latencies[(tab_latencies.len() as f64 * 0.95) as usize];
+        let tab_p99 = tab_latencies[tab_latencies.len() - 1];
+        println!("  [Phase 9] Tab Switch Latency: p50={:.2}ms, p95={:.2}ms, p99={:.2}ms", tab_p50, tab_p95, tab_p99);
+        assert!(tab_p50 < 2.0, "Warm tab switch p50 must be < 2.0ms");
+
+        // 6. Capture Phase 9 High-Fidelity Screenshots
+        let shot_targets = [
+            ("test-assets/realworld_corpus/office-invoice-enterprise.pdf", "desktop_phase9_invoice_zoom150.png", 1.5, 0),
+            ("test-assets/realworld_corpus/large-manual-20page.pdf", "desktop_phase9_manual_page5.png", 1.0, 4),
+            ("test-assets/realworld_corpus/multilingual-arabic-jawi.pdf", "desktop_phase9_arabic_jawi.png", 1.0, 0),
+            ("test-assets/realworld_corpus/multilingual-cjk-unicode.pdf", "desktop_phase9_cjk_unicode.png", 1.0, 0),
+        ];
+
+        for (rel, fname, zoom, page_idx) in shot_targets {
+            let p = resolve_fixture(rel);
+            let b = std::fs::read(&p).unwrap();
+            let mut mgr = SessionManager::new();
+            mgr.dispatch(AppCommand::OpenDocument {
+                path: Some(p),
+                bytes: b,
+                title: fname.to_string(),
+            }).unwrap();
+            if page_idx > 0 {
+                mgr.dispatch(AppCommand::SetPage { page_index: page_idx }).unwrap();
+            }
+            mgr.dispatch(AppCommand::SetZoom { percent: zoom * 100.0 }).unwrap();
+            sync_ui(&app, &mgr, "select", false);
+
+            let s = mgr.active_session().unwrap();
+            let rendered = s.render_page(s.current_page, zoom).unwrap();
+            let out_file = screenshot_dir.join(fname);
+            image::save_buffer(
+                &out_file,
+                &rendered.rgba_pixels,
+                rendered.width,
+                rendered.height,
+                image::ExtendedColorType::Rgba8,
+            ).unwrap();
+            assert!(out_file.exists());
+            println!("  [Phase 9 Screenshot Saved]: {:?}", out_file);
         }
     }
 }

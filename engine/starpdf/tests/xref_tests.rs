@@ -117,3 +117,20 @@ fn test_parse_xref_table_out_of_range_generation_resilience() {
         panic!("expected Free entry for object 0");
     }
 }
+
+#[test]
+fn test_parse_xref_table_rejects_out_of_range_in_use_generation() {
+    // In-use entry ('n') with generation > 65535 must fail-closed to prevent ambiguous active references
+    let header = b"%PDF-1.7\n";
+    let xref_offset = header.len();
+    let body = format!(
+        "xref\n0 2\n0000000000 65535 f \n0000000120 65536 n \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF"
+    );
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(header);
+    pdf.extend_from_slice(body.as_bytes());
+
+    let source = ByteSource::new(&pdf);
+    let result = XrefResolver::load_xref_and_trailer(source);
+    assert!(result.is_err(), "in-use entry with generation 65536 must be rejected");
+}

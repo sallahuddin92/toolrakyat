@@ -154,3 +154,20 @@ fn test_parser_indirect_object_definition() {
         Some(&PdfObject::Name("Page".into()))
     );
 }
+
+#[test]
+fn test_parser_rejects_out_of_range_object_definition_generation() {
+    let raw = b"10 65536 obj\n<< /Type /Page >>\nendobj";
+    let mut p = Parser::from_bytes(raw);
+    let res = p.parse_indirect_object();
+    assert!(res.is_err(), "generation 65536 in object definition must be rejected");
+}
+
+#[test]
+fn test_parser_rejects_out_of_range_reference_generation() {
+    let raw = b"10 65536 R";
+    let mut p = Parser::from_bytes(raw);
+    let obj = p.parse_object().unwrap();
+    // 10 65536 R is not a valid reference because gen > 65535, so it must parse as Integer(10) followed by 65536
+    assert_eq!(obj, PdfObject::Integer(10));
+}
