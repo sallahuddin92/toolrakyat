@@ -538,7 +538,11 @@ pub fn register_ui_callbacks(
                 }
 
                 if let Some(span) = span_found {
-                    let page_height = 792.0;
+                    let page_height = mgr
+                        .active_session()
+                        .and_then(|s| s.compile_render_page(s.current_page).ok())
+                        .map(|ir| ir.height as f64)
+                        .unwrap_or(792.0);
                     let canvas_y = (page_height - span.y - span.height).max(0.0);
                     let bounds = Rect::new(
                         span.x,
@@ -590,7 +594,10 @@ pub fn register_ui_callbacks(
                             if let Ok(mut doc) = session.pdf_document() {
                                 if let Ok(annots) = doc.page_annotations(session.current_page as usize) {
                                     if let Some(a) = annots.iter().find(|x| x.object_ref.number == num) {
-                                        let page_h = 792.0;
+                                        let page_h = session
+                                            .compile_render_page(session.current_page)
+                                            .map(|ir| ir.height as f64)
+                                            .unwrap_or(792.0);
                                         let canvas_y = (page_h - a.rect[3]).max(0.0);
                                         let bounds = Rect::new(
                                             a.rect[0],
@@ -649,8 +656,11 @@ pub fn register_ui_callbacks(
                                         starpdf::forms::FieldValue::Choice(v) => v.first().cloned().unwrap_or_default(),
                                         starpdf::forms::FieldValue::None => "".into(),
                                     };
+                                    let page_h = session
+                                        .compile_render_page(session.current_page)
+                                        .map(|ir| ir.height as f64)
+                                        .unwrap_or(792.0);
                                     let bounds = if let Some(w) = f.widgets.first() {
-                                        let page_h = 792.0;
                                         Rect::new(w.rect[0], (page_h - w.rect[3]).max(0.0), (w.rect[2] - w.rect[0]).abs().max(16.0), (w.rect[3] - w.rect[1]).abs().max(16.0))
                                     } else {
                                         Rect::new(50.0, 50.0, 150.0, 30.0)
@@ -672,7 +682,10 @@ pub fn register_ui_callbacks(
                         if let Ok(mut doc) = session.pdf_document() {
                             if let Ok(images) = doc.enumerate_images(session.current_page as usize) {
                                 if let Some(img) = images.iter().find(|x| format!("img_{}", x.object_ref.number) == elem_str || x.image_id == elem_str) {
-                                    let page_h = 792.0;
+                                    let page_h = session
+                                        .compile_render_page(session.current_page)
+                                        .map(|ir| ir.height as f64)
+                                        .unwrap_or(792.0);
                                     let canvas_y = (page_h - img.rect[3]).max(0.0);
                                     let bounds = Rect::new(
                                         img.rect[0],
@@ -1418,7 +1431,12 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
             }
         }
 
-        // 2. Build Thumbnails (Only rebuild when page or total pages change)
+        // 2. Active Page Dimensions (Persistent IR Cache Hit)
+        let (page_width, page_height) = session
+            .compile_render_page(session.current_page)
+            .map(|ir| (ir.width as f64, ir.height as f64))
+            .unwrap_or((612.0, 792.0));
+
         let need_thumb_rebuild = if let Ok(lock) = LAST_THUMBNAILS.lock() {
             lock.as_ref() != Some(&(session.id.clone(), session.total_pages, session.current_page))
         } else {
@@ -1426,12 +1444,18 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         };
 
         if need_thumb_rebuild {
+            let active_dims = format!("{:.0} × {:.0} pt", page_width, page_height);
             let mut thumbs = Vec::with_capacity(session.total_pages as usize);
             for p in 0..session.total_pages {
+                let dims = if p == session.current_page {
+                    active_dims.as_str()
+                } else {
+                    "612 × 792 pt"
+                };
                 thumbs.push(PageThumbnail {
                     page_index: p as i32,
                     label: format!("Page {}", p + 1).into(),
-                    dimensions: "612 × 792 pt".into(),
+                    dimensions: dims.into(),
                     is_active: p == session.current_page,
                 });
             }
@@ -1442,9 +1466,8 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         }
 
         // 3. Extract Text Spans for Active Page (Persistent Page Caching)
-        let mut text_spans_data = Vec::new();
-        let page_height = 792.0;
 
+        let mut text_spans_data = Vec::new();
         if let Ok(spans) = session.extract_page_text_spans(session.current_page) {
             for span in &spans {
                 let is_selected = match &session.selection {
@@ -1474,7 +1497,6 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
 
         // 4. Page Elements (Annotations, Form Fields, and Images)
         let mut page_elements_data = Vec::new();
-        let page_height = 792.0;
 
         if let Ok(mut doc) = session.pdf_document() {
             if let Ok(annots) = doc.page_annotations(session.current_page as usize) {

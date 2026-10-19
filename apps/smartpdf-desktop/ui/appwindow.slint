@@ -1008,16 +1008,16 @@ export component AppWindow inherits Window {
                         y: elem.y * root.zoom_scale;
                         width: elem.width * root.zoom_scale;
                         height: elem.height * root.zoom_scale;
-                        background: elem.kind == "annotation" ? #F59E0B22 : (elem.kind == "form_field" ? #3B82F622 : #F1F5F944);
-                        border-width: elem.is_selected ? 2px : 1px;
-                        border-color: elem.is_selected ? #0EA5E9 : (elem.kind == "annotation" ? #F59E0B : (elem.kind == "form_field" ? #3B82F6 : #CBD5E1));
+                        background: elem.is_selected ? (elem.kind == "annotation" ? #F59E0B22 : (elem.kind == "form_field" ? #3B82F622 : #0EA5E922)) : transparent;
+                        border-width: elem.is_selected ? 2px : 0px;
+                        border-color: elem.is_selected ? #0EA5E9 : transparent;
                         border-radius: 2px;
 
-                        Text {
+                        if elem.is_selected : Text {
                             text: elem.label;
                             font-size: 10px;
                             font-weight: 500;
-                            color: elem.kind == "annotation" ? #D97706 : (elem.kind == "form_field" ? #2563EB : #475569);
+                            color: elem.kind == "annotation" ? #D97706 : (elem.kind == "form_field" ? #2563EB : #0EA5E9);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -1029,7 +1029,7 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Extracted Text Spans
+                    // Extracted Text Spans (Interactive selection hitboxes; text is rendered by native rasterizer)
                     for span in root.text_spans : Rectangle {
                         x: span.x * root.zoom_scale;
                         y: span.y * root.zoom_scale;
@@ -1039,19 +1039,6 @@ export component AppWindow inherits Window {
                         border-width: span.is_selected ? 1.5px : 0px;
                         border-color: #0EA5E9;
                         border-radius: 2px;
-
-                        Text {
-                            x: 0px;
-                            y: 0px;
-                            width: parent.width;
-                            height: parent.height;
-                            text: span.text;
-                            font-size: span.font_size * root.zoom_scale;
-                            font-family: span.font_family;
-                            color: #0F172A; // Crisp Dark Text
-                            vertical-alignment: center;
-                            horizontal-alignment: left;
-                        }
 
                         TouchArea {
                             clicked => {

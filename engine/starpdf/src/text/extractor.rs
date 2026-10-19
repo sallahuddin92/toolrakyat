@@ -329,6 +329,8 @@ impl TextExtractor {
         let is_editable = editability.is_editable();
         let refusal_reason = editability.reason();
 
+        let effective_font_size = (text_state.font_size * scale_y).abs();
+
         page_text.spans.push(TextSpan {
             page_index,
             text: span_text,
@@ -338,7 +340,7 @@ impl TextExtractor {
             height,
             rotation,
             font_name: font.name.clone(),
-            font_size: text_state.font_size,
+            font_size: if effective_font_size > 0.0 { effective_font_size } else { text_state.font_size },
             confidence,
             source_object: None,
             span_id,
