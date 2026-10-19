@@ -8,8 +8,8 @@ description = "Native macOS desktop application for SmartPDF"
 [dependencies]
 slint = "1.18.1"
 rfd = "0.15"
-starpdf = { path = "../../engine/starpdf" }
-starpdf-app-core = { path = "../../crates/starpdf-app-core" }
+starpdf = { path = "../../engine/starpdf", features = ["gpu"] }
+starpdf-app-core = { path = "../../crates/starpdf-app-core", features = ["gpu"] }
 
 [dev-dependencies]
 i-slint-backend-testing = "1.18.1"

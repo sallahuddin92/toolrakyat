@@ -12,6 +12,10 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 uuid = { version = "1.10", features = ["v4"] }
 
+[features]
+default = []
+gpu = ["starpdf/gpu"]
+
 [dev-dependencies]
 tempfile = "3.10"
 serde_json = "1.0"

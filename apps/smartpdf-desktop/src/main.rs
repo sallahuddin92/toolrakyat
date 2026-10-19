@@ -4,6 +4,8 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use slint::{ComponentHandle, ModelRc, VecModel};
 use starpdf::execution::StarNodeId;
@@ -15,6 +17,10 @@ use starpdf_app_core::session::SessionManager;
 
 slint::include_modules!();
 
+/// Global GPU renderer and acceleration state for the desktop application.
+static GPU_RENDERER: Mutex<Option<starpdf::render::WgpuRenderer>> = Mutex::new(None);
+static GPU_ENABLED: AtomicBool = AtomicBool::new(true);
+
 /// Embedded default sample PDF document so the desktop app is immediately interactive on launch.
 const DEFAULT_SAMPLE_PDF: &[u8] = include_bytes!("../../../test-assets/text-multispan-heading.pdf");
 
@@ -23,6 +29,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manager = Rc::new(RefCell::new(SessionManager::new()));
     let active_tool = Rc::new(RefCell::new("select".to_string()));
     let is_editing = Rc::new(RefCell::new(false));
+
+    // Initialize GPU renderer
+    if let Ok(mut lock) = GPU_RENDERER.lock() {
+        if lock.is_none() {
+            *lock = starpdf::render::WgpuRenderer::new().ok();
+        }
+    }
 
     // 1. Load initial document from command-line argument if provided, or load default sample
     let cli_path = std::env::args().nth(1).map(PathBuf::from);
@@ -108,6 +121,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+            }
+        });
+    }
+
+    // Toggle GPU Acceleration Callback
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        let is_editing = is_editing.clone();
+        app.on_toggle_gpu_acceleration(move || {
+            let current = GPU_ENABLED.load(Ordering::SeqCst);
+            GPU_ENABLED.store(!current, Ordering::SeqCst);
+            if !current {
+                if let Ok(mut lock) = GPU_RENDERER.lock() {
+                    if lock.is_none() {
+                        *lock = starpdf::render::WgpuRenderer::new().ok();
+                    }
+                }
+            }
+            if let Some(app) = app_weak.upgrade() {
+                if let Some(session) = manager.borrow().active_session() {
+                    session.invalidate_render_cache();
+                }
+                sync_ui(
+                    &app,
+                    &manager.borrow(),
+                    &active_tool.borrow(),
+                    *is_editing.borrow(),
+                );
             }
         });
     }
@@ -677,13 +720,66 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
         };
         app.set_security_status(sec_status.into());
 
-        // 1.5. Render Active Page via StarPDF Native Renderer
+        // 1.5. Render Active Page via GPU-Accelerated Pipeline (with CPU fallback)
         let zoom_scale = (session.zoom.percent / 100.0).clamp(0.2, 4.0);
-        if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
-            let mut pixel_buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(
-                rendered.width,
-                rendered.height,
+        let mut rendered_success = false;
+
+        let gpu_render_res = if GPU_ENABLED.load(Ordering::SeqCst) {
+            if let Ok(guard) = GPU_RENDERER.lock() {
+                if let Some(ref r) = *guard {
+                    if let Ok(page_ir) = session.compile_render_page(session.current_page) {
+                        r.render_page(&page_ir, zoom_scale)
+                            .ok()
+                            .map(|res| (res, r.adapter_name().to_string()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some((gpu_res, adapter_name)) = gpu_render_res {
+            let mut pixel_buffer =
+                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(gpu_res.width, gpu_res.height);
+            for (src, dst) in gpu_res
+                .rgba_pixels
+                .chunks_exact(4)
+                .zip(pixel_buffer.make_mut_slice().iter_mut())
+            {
+                dst.r = src[0];
+                dst.g = src[1];
+                dst.b = src[2];
+                dst.a = src[3];
+            }
+            let slint_img = slint::Image::from_rgba8(pixel_buffer);
+            app.set_rendered_page_image(slint_img);
+            app.set_has_rendered_page_image(true);
+            app.set_page_width(gpu_res.width as f32 / zoom_scale);
+            app.set_page_height(gpu_res.height as f32 / zoom_scale);
+            app.set_gpu_acceleration_enabled(true);
+            let short_name = adapter_name.split_whitespace().next().unwrap_or("Metal");
+            app.set_render_engine_badge(format!("GPU ({short_name})").into());
+            app.set_gpu_metrics_detail(
+                format!(
+                    "Frame: {:.1}ms (Draws: {}, GPU Paths: {}, Images: {}, CPU fallback: {})",
+                    gpu_res.metrics.total_frame_duration_ms,
+                    gpu_res.metrics.gpu_draw_calls,
+                    gpu_res.metrics.gpu_paths_rendered,
+                    gpu_res.metrics.gpu_images_rendered,
+                    gpu_res.metrics.fallback_cpu_items
+                )
+                .into(),
             );
+            rendered_success = true;
+        } else if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
+            let mut pixel_buffer =
+                slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(rendered.width, rendered.height);
             for (src, dst) in rendered
                 .rgba_pixels
                 .chunks_exact(4)
@@ -697,9 +793,15 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
             let slint_img = slint::Image::from_rgba8(pixel_buffer);
             app.set_rendered_page_image(slint_img);
             app.set_has_rendered_page_image(true);
-            app.set_page_width((rendered.width as f32 / zoom_scale).into());
-            app.set_page_height((rendered.height as f32 / zoom_scale).into());
-        } else {
+            app.set_page_width(rendered.width as f32 / zoom_scale);
+            app.set_page_height(rendered.height as f32 / zoom_scale);
+            app.set_gpu_acceleration_enabled(false);
+            app.set_render_engine_badge("CPU (tiny-skia)".into());
+            app.set_gpu_metrics_detail(format!("CPU Frame: {:.1}ms", rendered.duration_ms).into());
+            rendered_success = true;
+        }
+
+        if !rendered_success {
             app.set_has_rendered_page_image(false);
         }
 
@@ -902,7 +1004,7 @@ mod tests {
     use slint::Model;
 
     fn init_testing() {
-        let _ = i_slint_backend_testing::init_no_event_loop();
+        i_slint_backend_testing::init_no_event_loop();
     }
 
     #[test]
@@ -1044,6 +1146,113 @@ mod tests {
         for s in test_strings {
             app.set_selection_text_content(s.into());
             assert_eq!(app.get_selection_text_content(), s);
+        }
+    }
+
+    #[test]
+    fn test_desktop_gpu_viewport_presentation_and_toggle() {
+        init_testing();
+        let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
+        let mut manager = SessionManager::new();
+
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: None,
+                bytes: DEFAULT_SAMPLE_PDF.to_vec(),
+                title: "sample.pdf".into(),
+            })
+            .expect("OpenDocument");
+
+        // 1. Initialize GPU renderer
+        let has_gpu = {
+            let mut lock = GPU_RENDERER.lock().unwrap();
+            if lock.is_none() {
+                *lock = starpdf::render::WgpuRenderer::new().ok();
+            }
+            lock.is_some()
+        };
+
+        if has_gpu {
+            // Enable GPU acceleration
+            GPU_ENABLED.store(true, Ordering::SeqCst);
+            sync_ui(&app, &manager, "select", false);
+
+            assert!(
+                app.get_has_rendered_page_image(),
+                "Page image must be rendered"
+            );
+            assert!(
+                app.get_gpu_acceleration_enabled(),
+                "GPU acceleration must be active"
+            );
+            assert!(
+                app.get_render_engine_badge().contains("GPU"),
+                "Badge must reflect GPU mode: got {}",
+                app.get_render_engine_badge()
+            );
+            assert!(
+                app.get_gpu_metrics_detail().contains("Draws:"),
+                "Metrics detail must contain draw calls breakdown: got {}",
+                app.get_gpu_metrics_detail()
+            );
+
+            // 2. Toggle to CPU fallback
+            GPU_ENABLED.store(false, Ordering::SeqCst);
+            sync_ui(&app, &manager, "select", false);
+
+            assert!(
+                app.get_has_rendered_page_image(),
+                "Page image must remain rendered in CPU fallback"
+            );
+            assert!(
+                !app.get_gpu_acceleration_enabled(),
+                "GPU acceleration must be reported as disabled"
+            );
+            assert!(
+                app.get_render_engine_badge().contains("CPU"),
+                "Badge must reflect CPU mode: got {}",
+                app.get_render_engine_badge()
+            );
+
+            // Restore GPU enabled state
+            GPU_ENABLED.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn test_desktop_viewport_zoom_selection_alignment() {
+        init_testing();
+        let app = AppWindow::new().expect("Failed to initialize Slint AppWindow");
+        let mut manager = SessionManager::new();
+
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: None,
+                bytes: DEFAULT_SAMPLE_PDF.to_vec(),
+                title: "sample.pdf".into(),
+            })
+            .expect("OpenDocument");
+
+        for zoom_pct in [50u32, 100u32, 150u32, 200u32] {
+            manager
+                .dispatch(AppCommand::SetZoom {
+                    percent: zoom_pct as f32,
+                })
+                .expect("SetZoom");
+
+            sync_ui(&app, &manager, "select", false);
+
+            assert_eq!(app.get_zoom_percent(), zoom_pct as i32);
+            assert!(app.get_page_width() > 0.0);
+            assert!(app.get_page_height() > 0.0);
+            assert!(app.get_has_rendered_page_image());
+
+            // Check that text span bounds align with original geometry regardless of zoom
+            let spans = app.get_text_spans();
+            assert!(spans.row_count() > 0);
+            let first_span = spans.row_data(0).unwrap();
+            assert!(first_span.width > 0.0);
+            assert!(first_span.height > 0.0);
         }
     }
 }

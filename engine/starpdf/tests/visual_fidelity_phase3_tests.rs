@@ -1,9 +1,9 @@
-use std::fs;
 use starpdf::document::PdfDocument;
 use starpdf::render::{
-    BlendMode, ColorRgba, DifferentialComparator, NativeRasterizer, RenderCompiler,
-    RenderItem, RenderPage, RenderShading, ShadingPattern, Transform2D,
+    BlendMode, ColorRgba, DifferentialComparator, NativeRasterizer, RenderCompiler, RenderItem,
+    RenderPage, RenderShading, ShadingPattern, Transform2D,
 };
+use std::fs;
 
 const OUTPUT_DIR: &str = "target/visual_validation_phase3";
 
@@ -81,15 +81,27 @@ fn test_axial_and_radial_shading() {
     let idx_left = ((75 * 300 + 15) * 4) as usize;
     let r_left = rendered.rgba_pixels[idx_left];
     let g_left = rendered.rgba_pixels[idx_left + 1];
-    assert!(r_left > 200, "Left side of axial gradient should be dominant Red: {r_left}");
-    assert!(g_left < 100, "Left side of axial gradient should have low Green: {g_left}");
+    assert!(
+        r_left > 200,
+        "Left side of axial gradient should be dominant Red: {r_left}"
+    );
+    assert!(
+        g_left < 100,
+        "Left side of axial gradient should have low Green: {g_left}"
+    );
 
     // Right side of axial gradient (x=135, y=75)
     let idx_right = ((75 * 300 + 135) * 4) as usize;
     let r_right = rendered.rgba_pixels[idx_right];
     let g_right = rendered.rgba_pixels[idx_right + 1];
-    assert!(r_right > 200, "Right side of axial gradient should be Yellow (high R): {r_right}");
-    assert!(g_right > 200, "Right side of axial gradient should be Yellow (high G): {g_right}");
+    assert!(
+        r_right > 200,
+        "Right side of axial gradient should be Yellow (high R): {r_right}"
+    );
+    assert!(
+        g_right > 200,
+        "Right side of axial gradient should be Yellow (high G): {g_right}"
+    );
 }
 
 #[test]
@@ -113,7 +125,10 @@ fn test_glyph_id_propagation_and_direct_rendering() {
 
     assert!(!text_runs.is_empty(), "Must compile text runs");
     for run in &text_runs {
-        assert!(!run.glyphs.is_empty(), "Text run must contain decoded glyphs");
+        assert!(
+            !run.glyphs.is_empty(),
+            "Text run must contain decoded glyphs"
+        );
     }
 
     let rendered = NativeRasterizer::render(&render_page, 1.0).expect("render");

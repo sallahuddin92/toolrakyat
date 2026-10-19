@@ -1,8 +1,6 @@
-use std::fs;
 use starpdf::document::PdfDocument;
-use starpdf::render::{
-    DifferentialComparator, NativeRasterizer, RenderCompiler,
-};
+use starpdf::render::{DifferentialComparator, NativeRasterizer, RenderCompiler};
+use std::fs;
 
 const OUTPUT_DIR: &str = "target/visual_validation_phase4";
 
@@ -74,7 +72,10 @@ fn test_annotation_freetext_appearance_and_embedded_font() {
             }
         }
     }
-    assert!(found_green, "Rendered page must contain the green FreeText annotation box");
+    assert!(
+        found_green,
+        "Rendered page must contain the green FreeText annotation box"
+    );
 
     // Verify presence of Yellow Highlight (approx RGB: 255, 255, 0 or with Multiply)
     // Annotation Rect: [50, 550, 310, 574] -> Screen y: 792 - 562 = 230, x = 100
@@ -89,7 +90,10 @@ fn test_annotation_freetext_appearance_and_embedded_font() {
             }
         }
     }
-    assert!(found_yellow_highlight, "Rendered page must contain the yellow highlight annotation");
+    assert!(
+        found_yellow_highlight,
+        "Rendered page must contain the yellow highlight annotation"
+    );
 
     // Verify presence of Red Underline/Strikeout (approx RGB: 255, 56, 60)
     // Annotation Rect: [50, 512, 310, 536] -> Screen y: 792 - 524 = 268, x = 100
@@ -104,7 +108,10 @@ fn test_annotation_freetext_appearance_and_embedded_font() {
             }
         }
     }
-    assert!(found_red_stroke, "Rendered page must contain red stroke/underline annotation");
+    assert!(
+        found_red_stroke,
+        "Rendered page must contain red stroke/underline annotation"
+    );
 }
 
 #[test]

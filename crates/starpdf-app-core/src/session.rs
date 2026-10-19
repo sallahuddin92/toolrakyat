@@ -144,7 +144,8 @@ impl DocumentSession {
     /// Compiles the specified 0-based page into typed Render IR.
     pub fn compile_render_page(&self, page: u32) -> AppResult<starpdf::render::RenderPage> {
         let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
-        doc.compile_render_page(page as usize).map_err(AppCoreError::from)
+        doc.compile_render_page(page as usize)
+            .map_err(AppCoreError::from)
     }
 
     /// Renders the specified 0-based page to an RGBA pixmap at the given scale factor with session caching.
@@ -157,7 +158,9 @@ impl DocumentSession {
         }
 
         let mut doc = PdfDocument::from_bytes(&self.bytes).map_err(AppCoreError::from)?;
-        let rendered = doc.render_page(page as usize, scale).map_err(AppCoreError::from)?;
+        let rendered = doc
+            .render_page(page as usize, scale)
+            .map_err(AppCoreError::from)?;
         *self.render_cache.borrow_mut() = Some((page, scale_bits, rendered.clone()));
         Ok(rendered)
     }
@@ -165,6 +168,20 @@ impl DocumentSession {
     /// Explicitly invalidates the rendered page cache.
     pub fn invalidate_render_cache(&self) {
         self.render_cache.borrow_mut().take();
+    }
+
+    /// Renders the specified 0-based page using GPU acceleration with the provided WgpuRenderer.
+    #[cfg(feature = "gpu")]
+    pub fn render_page_gpu(
+        &self,
+        page: u32,
+        scale: f32,
+        renderer: &starpdf::render::WgpuRenderer,
+    ) -> AppResult<starpdf::render::GpuRenderResult> {
+        let render_page = self.compile_render_page(page)?;
+        renderer
+            .render_page(&render_page, scale)
+            .map_err(AppCoreError::PdfError)
     }
 
     /// Whether the document currently has unsaved modifications.

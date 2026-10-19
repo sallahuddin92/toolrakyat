@@ -15,4 +15,3 @@ pub use ir::{
 pub use rasterizer::{NativeRasterizer, RenderedPage};
 #[cfg(feature = "gpu")]
 pub use wgpu_backend::{GpuPerformanceMetrics, GpuRenderResult, WgpuRenderer};
-

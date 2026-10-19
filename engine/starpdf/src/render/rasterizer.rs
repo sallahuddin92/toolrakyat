@@ -125,8 +125,17 @@ impl FallbackFontCache {
 pub struct NativeRasterizer;
 
 impl NativeRasterizer {
-    /// Renders a compiled `RenderPage` into an RGBA pixmap at the given scale factor.
+    /// Renders a compiled `RenderPage` into an RGBA pixmap at the given scale factor with white background.
     pub fn render(page: &RenderPage, scale: f32) -> Option<RenderedPage> {
+        Self::render_with_background(page, scale, tiny_skia::Color::WHITE)
+    }
+
+    /// Renders a compiled `RenderPage` into an RGBA pixmap with a specified background color.
+    pub fn render_with_background(
+        page: &RenderPage,
+        scale: f32,
+        background: tiny_skia::Color,
+    ) -> Option<RenderedPage> {
         let start_time = Instant::now();
         let scale = scale.max(0.1);
 
@@ -188,7 +197,7 @@ impl NativeRasterizer {
         };
 
         let mut pixmap = tiny_skia::Pixmap::new(target_width, target_height)?;
-        pixmap.fill(tiny_skia::Color::WHITE);
+        pixmap.fill(background);
 
         let mut mask_stack: Vec<tiny_skia::Mask> = Vec::new();
         let fallback_fonts = FallbackFontCache::new();
@@ -203,12 +212,7 @@ impl NativeRasterizer {
                         if let Some(mut new_mask) =
                             tiny_skia::Mask::new(target_width, target_height)
                         {
-                            new_mask.fill_path(
-                                &path,
-                                clip.rule.to_tiny_skia(),
-                                true,
-                                combined_tf,
-                            );
+                            new_mask.fill_path(&path, clip.rule.to_tiny_skia(), true, combined_tf);
                             if let Some(prev) = mask_stack.last() {
                                 for (curr, p) in new_mask.data_mut().iter_mut().zip(prev.data()) {
                                     *curr = ((*curr as u16 * *p as u16) / 255) as u8;
@@ -477,8 +481,7 @@ impl NativeRasterizer {
                                     .glyph_id
                                     .map(|g| skrifa::GlyphId::new(g as u32))
                                     .or_else(|| {
-                                        char::from_u32(glyph.codepoint)
-                                            .and_then(|c| charmap.map(c))
+                                        char::from_u32(glyph.codepoint).and_then(|c| charmap.map(c))
                                     });
 
                                 if let Some(gid) = gid {
@@ -492,12 +495,7 @@ impl NativeRasterizer {
                                         if outline_glyph.draw(draw_settings, &mut pen).is_ok() {
                                             if let Some(path) = pb.finish() {
                                                 let glyph_tf = Transform2D::new(
-                                                    1.0,
-                                                    0.0,
-                                                    0.0,
-                                                    1.0,
-                                                    glyph.x,
-                                                    glyph.y,
+                                                    1.0, 0.0, 0.0, 1.0, glyph.x, glyph.y,
                                                 );
                                                 let combined = glyph_tf
                                                     .multiply(&text_run.transform)
@@ -548,7 +546,10 @@ impl NativeRasterizer {
                                                             combined,
                                                         );
                                                     } else if let Some(mut new_mask) =
-                                                        tiny_skia::Mask::new(target_width, target_height)
+                                                        tiny_skia::Mask::new(
+                                                            target_width,
+                                                            target_height,
+                                                        )
                                                     {
                                                         new_mask.fill_path(
                                                             &path,

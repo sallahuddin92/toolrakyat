@@ -136,7 +136,10 @@ fn test_render_caching_and_invalidation() {
     assert_eq!(render2.width, 612);
     assert_eq!(render2.height, 792);
     assert_eq!(render1.rgba_pixels.len(), render2.rgba_pixels.len());
-    assert!(dur2 < dur1 || dur2.as_micros() < 500, "Cache hit must be significantly faster");
+    assert!(
+        dur2 < dur1 || dur2.as_micros() < 500,
+        "Cache hit must be significantly faster"
+    );
 
     // 3. Render at different scale (2.0): cache miss, re-renders
     let render_2x = session.render_page(0, 2.0).expect("2x render");

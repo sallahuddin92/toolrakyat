@@ -1,6 +1,6 @@
-use std::fs;
 use starpdf::document::PdfDocument;
 use starpdf::render::{DifferentialComparator, NativeRasterizer, RenderCompiler, RenderItem};
+use std::fs;
 
 const OUTPUT_DIR: &str = "../../target/render_qualification";
 

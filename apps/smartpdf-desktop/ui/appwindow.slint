@@ -71,6 +71,10 @@ export component AppWindow inherits Window {
     in-out property <length> page_height: 792px;
     in-out property <image> rendered_page_image;
     in-out property <bool> has_rendered_page_image: false;
+    in-out property <bool> gpu_acceleration_enabled: true;
+    in-out property <string> render_engine_badge: "GPU (Metal)";
+    in-out property <string> gpu_metrics_detail: "GPU: ready";
+    callback toggle_gpu_acceleration();
 
     // Active Page Extracted Elements
     in-out property <[TextSpanData]> text_spans: [];
@@ -324,6 +328,30 @@ export component AppWindow inherits Window {
 
                         // Right-aligned header actions
                         Rectangle { horizontal-stretch: 1; }
+
+                        // GPU Acceleration Badge/Toggle
+                        Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: gpu-btn-ta.has-hover ? #334155 : (root.gpu_acceleration_enabled ? #0369A1 : #1E293B);
+                            border-width: 1px;
+                            border-color: root.gpu_acceleration_enabled ? #38BDF8 : #475569;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 4px;
+                                Text {
+                                    text: "⚡ " + root.render_engine_badge;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: root.gpu_acceleration_enabled ? #FFFFFF : #94A3B8;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            gpu-btn-ta := TouchArea {
+                                clicked => { root.toggle_gpu_acceleration(); }
+                            }
+                        }
 
                         // Panel toggle buttons
                         Rectangle {

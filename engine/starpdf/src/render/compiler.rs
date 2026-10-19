@@ -104,8 +104,8 @@ impl RenderCompiler {
         let doc_id = format!("doc_{}", doc.catalog_ref().number);
 
         // 1. Resolve MediaBox and CropBox
-        let media_box = Self::resolve_box(&page_dict, "MediaBox")
-            .unwrap_or([0.0, 0.0, 612.0, 792.0]);
+        let media_box =
+            Self::resolve_box(&page_dict, "MediaBox").unwrap_or([0.0, 0.0, 612.0, 792.0]);
         let crop_box = Self::resolve_box(&page_dict, "CropBox").unwrap_or(media_box);
         let rotate = page_dict
             .get("Rotate")
@@ -393,9 +393,9 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 self.page_index, stream_index, self.recursion_depth, inst_idx
             );
             let star_node_id = StarNodeId::new(&self.doc_id, self.page_ref, &occurrence).ok();
-            let render_node_id = star_node_id
-                .as_ref()
-                .and_then(|sn| RenderNodeId::new(sn, &format!("op_{}", inst.operator.as_str())).ok());
+            let render_node_id = star_node_id.as_ref().and_then(|sn| {
+                RenderNodeId::new(sn, &format!("op_{}", inst.operator.as_str())).ok()
+            });
 
             match inst.operator {
                 ContentOperator::Q => {
@@ -403,7 +403,10 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 }
                 ContentOperator::QEnd => {
                     if let Some(prev) = self.graphics_stack.pop() {
-                        let diff = self.current_graphics.clip_depth.saturating_sub(prev.clip_depth);
+                        let diff = self
+                            .current_graphics
+                            .clip_depth
+                            .saturating_sub(prev.clip_depth);
                         for _ in 0..diff {
                             self.items.push(RenderItem::PopClip);
                         }
@@ -449,7 +452,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let y2 = RenderCompiler::num(&inst.operands[3]);
                         let x3 = RenderCompiler::num(&inst.operands[4]);
                         let y3 = RenderCompiler::num(&inst.operands[5]);
-                        self.current_path.push(PathVerb::CubicTo(x1, y1, x2, y2, x3, y3));
+                        self.current_path
+                            .push(PathVerb::CubicTo(x1, y1, x2, y2, x3, y3));
                         self.current_point = Some((x3, y3));
                     }
                 }
@@ -460,7 +464,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let y2 = RenderCompiler::num(&inst.operands[1]);
                         let x3 = RenderCompiler::num(&inst.operands[2]);
                         let y3 = RenderCompiler::num(&inst.operands[3]);
-                        self.current_path.push(PathVerb::CubicTo(x1, y1, x2, y2, x3, y3));
+                        self.current_path
+                            .push(PathVerb::CubicTo(x1, y1, x2, y2, x3, y3));
                         self.current_point = Some((x3, y3));
                     }
                 }
@@ -470,7 +475,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let y1 = RenderCompiler::num(&inst.operands[1]);
                         let x3 = RenderCompiler::num(&inst.operands[2]);
                         let y3 = RenderCompiler::num(&inst.operands[3]);
-                        self.current_path.push(PathVerb::CubicTo(x1, y1, x3, y3, x3, y3));
+                        self.current_path
+                            .push(PathVerb::CubicTo(x1, y1, x3, y3, x3, y3));
                         self.current_point = Some((x3, y3));
                     }
                 }
@@ -703,8 +709,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 // Text Rendering Mode
                 ContentOperator::Tr => {
                     if let Some(op) = inst.operands.first() {
-                        self.current_graphics.text_render_mode =
-                            RenderCompiler::num(op) as u8;
+                        self.current_graphics.text_render_mode = RenderCompiler::num(op) as u8;
                     }
                 }
 
@@ -719,8 +724,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         if let ContentOperand::Name(name) = &inst.operands[0] {
                             self.text_state.font_name = name.clone();
                         }
-                        self.text_state.font_size =
-                            RenderCompiler::num(&inst.operands[1]).max(0.1);
+                        self.text_state.font_size = RenderCompiler::num(&inst.operands[1]).max(0.1);
                     }
                 }
                 ContentOperator::Tm => {
@@ -741,8 +745,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let tx = RenderCompiler::num(&inst.operands[0]);
                         let ty = RenderCompiler::num(&inst.operands[1]);
                         let translation = Transform2D::translation(tx, ty);
-                        let new_matrix =
-                            translation.multiply(&self.text_state.text_line_matrix);
+                        let new_matrix = translation.multiply(&self.text_state.text_line_matrix);
                         self.text_state.text_matrix = new_matrix;
                         self.text_state.text_line_matrix = new_matrix;
                     }
@@ -753,15 +756,13 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                         let ty = RenderCompiler::num(&inst.operands[1]);
                         self.text_state.leading = -ty;
                         let translation = Transform2D::translation(tx, ty);
-                        let new_matrix =
-                            translation.multiply(&self.text_state.text_line_matrix);
+                        let new_matrix = translation.multiply(&self.text_state.text_line_matrix);
                         self.text_state.text_matrix = new_matrix;
                         self.text_state.text_line_matrix = new_matrix;
                     }
                 }
                 ContentOperator::TStar => {
-                    let translation =
-                        Transform2D::translation(0.0, -self.text_state.leading);
+                    let translation = Transform2D::translation(0.0, -self.text_state.leading);
                     let new_matrix = translation.multiply(&self.text_state.text_line_matrix);
                     self.text_state.text_matrix = new_matrix;
                     self.text_state.text_line_matrix = new_matrix;
@@ -778,8 +779,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 }
                 ContentOperator::Tz => {
                     if !inst.operands.is_empty() {
-                        self.text_state.horizontal_scaling =
-                            RenderCompiler::num(&inst.operands[0]);
+                        self.text_state.horizontal_scaling = RenderCompiler::num(&inst.operands[0]);
                     }
                 }
                 ContentOperator::TL => {
@@ -832,8 +832,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     }
                 }
                 ContentOperator::Quote => {
-                    let translation =
-                        Transform2D::translation(0.0, -self.text_state.leading);
+                    let translation = Transform2D::translation(0.0, -self.text_state.leading);
                     self.text_state.text_matrix =
                         translation.multiply(&self.text_state.text_line_matrix);
                     self.text_state.text_line_matrix = self.text_state.text_matrix;
@@ -845,8 +844,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                     if inst.operands.len() >= 3 {
                         self.text_state.word_spacing = RenderCompiler::num(&inst.operands[0]);
                         self.text_state.char_spacing = RenderCompiler::num(&inst.operands[1]);
-                        let translation =
-                            Transform2D::translation(0.0, -self.text_state.leading);
+                        let translation = Transform2D::translation(0.0, -self.text_state.leading);
                         self.text_state.text_matrix =
                             translation.multiply(&self.text_state.text_line_matrix);
                         self.text_state.text_line_matrix = self.text_state.text_matrix;
@@ -859,24 +857,14 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 // XObject Invocation
                 ContentOperator::Do => {
                     if let Some(ContentOperand::Name(res_name)) = inst.operands.first() {
-                        self.compile_xobject(
-                            res_name,
-                            local_res,
-                            star_node_id,
-                            render_node_id,
-                        );
+                        self.compile_xobject(res_name, local_res, star_node_id, render_node_id);
                     }
                 }
 
                 // Shading Invocation
                 ContentOperator::Sh => {
                     if let Some(ContentOperand::Name(sh_name)) = inst.operands.first() {
-                        self.compile_shading(
-                            sh_name,
-                            local_res,
-                            star_node_id,
-                            render_node_id,
-                        );
+                        self.compile_shading(sh_name, local_res, star_node_id, render_node_id);
                     }
                 }
 
@@ -921,22 +909,48 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                                         _ => None,
                                     };
                                     if let Some(d) = pat_dict {
-                                        let pat_type = d.get("PatternType").and_then(PdfObject::as_i64).unwrap_or(0);
+                                        let pat_type = d
+                                            .get("PatternType")
+                                            .and_then(PdfObject::as_i64)
+                                            .unwrap_or(0);
                                         if pat_type == 1 {
                                             if let PdfObject::Stream(ref s) = pat_obj {
-                                                if let Ok(bytes) = self.doc.decompress_stream_data(s) {
-                                                    let x_step = d.get("XStep").map(RenderCompiler::obj_num).unwrap_or(20.0);
-                                                    let y_step = d.get("YStep").map(RenderCompiler::obj_num).unwrap_or(20.0);
-                                                    let bbox = d.get("BBox").and_then(PdfObject::as_array).map(|arr| {
-                                                        [
-                                                            arr.first().map(RenderCompiler::obj_num).unwrap_or(0.0),
-                                                            arr.get(1).map(RenderCompiler::obj_num).unwrap_or(0.0),
-                                                            arr.get(2).map(RenderCompiler::obj_num).unwrap_or(x_step),
-                                                            arr.get(3).map(RenderCompiler::obj_num).unwrap_or(y_step),
-                                                        ]
-                                                    }).unwrap_or([0.0, 0.0, x_step, y_step]);
+                                                if let Ok(bytes) =
+                                                    self.doc.decompress_stream_data(s)
+                                                {
+                                                    let x_step = d
+                                                        .get("XStep")
+                                                        .map(RenderCompiler::obj_num)
+                                                        .unwrap_or(20.0);
+                                                    let y_step = d
+                                                        .get("YStep")
+                                                        .map(RenderCompiler::obj_num)
+                                                        .unwrap_or(20.0);
+                                                    let bbox = d
+                                                        .get("BBox")
+                                                        .and_then(PdfObject::as_array)
+                                                        .map(|arr| {
+                                                            [
+                                                                arr.first()
+                                                                    .map(RenderCompiler::obj_num)
+                                                                    .unwrap_or(0.0),
+                                                                arr.get(1)
+                                                                    .map(RenderCompiler::obj_num)
+                                                                    .unwrap_or(0.0),
+                                                                arr.get(2)
+                                                                    .map(RenderCompiler::obj_num)
+                                                                    .unwrap_or(x_step),
+                                                                arr.get(3)
+                                                                    .map(RenderCompiler::obj_num)
+                                                                    .unwrap_or(y_step),
+                                                            ]
+                                                        })
+                                                        .unwrap_or([0.0, 0.0, x_step, y_step]);
 
-                                                    let matrix = if let Some(m_arr) = d.get("Matrix").and_then(PdfObject::as_array) {
+                                                    let matrix = if let Some(m_arr) = d
+                                                        .get("Matrix")
+                                                        .and_then(PdfObject::as_array)
+                                                    {
                                                         if m_arr.len() >= 6 {
                                                             Transform2D::new(
                                                                 RenderCompiler::obj_num(&m_arr[0]),
@@ -953,37 +967,51 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                                                         Transform2D::identity()
                                                     };
 
-                                                    let pat_resources = d.get("Resources").and_then(|r| match r {
-                                                        PdfObject::Dictionary(rd) => Some(rd.clone()),
-                                                        PdfObject::Reference(rf) => {
-                                                            self.doc.store_mut().resolve(*rf).ok().and_then(PdfObject::as_dict).cloned()
-                                                        }
-                                                        _ => None,
-                                                    });
+                                                    let pat_resources =
+                                                        d.get("Resources").and_then(|r| match r {
+                                                            PdfObject::Dictionary(rd) => {
+                                                                Some(rd.clone())
+                                                            }
+                                                            PdfObject::Reference(rf) => self
+                                                                .doc
+                                                                .store_mut()
+                                                                .resolve(*rf)
+                                                                .ok()
+                                                                .and_then(PdfObject::as_dict)
+                                                                .cloned(),
+                                                            _ => None,
+                                                        });
 
-                                                    self.current_graphics.tiling_pattern = Some(ActiveTilingPattern {
-                                                        stream_bytes: bytes,
-                                                        _bbox: bbox,
-                                                        x_step,
-                                                        y_step,
-                                                        matrix,
-                                                        resources: pat_resources,
-                                                    });
+                                                    self.current_graphics.tiling_pattern =
+                                                        Some(ActiveTilingPattern {
+                                                            stream_bytes: bytes,
+                                                            _bbox: bbox,
+                                                            x_step,
+                                                            y_step,
+                                                            matrix,
+                                                            resources: pat_resources,
+                                                        });
                                                 }
                                             }
                                         }
 
                                         if let Some(sh_obj) = d.get("Shading") {
-                                            if let Ok(resolved_sh) = self.doc.store_mut().resolve_object(sh_obj) {
+                                            if let Ok(resolved_sh) =
+                                                self.doc.store_mut().resolve_object(sh_obj)
+                                            {
                                                 if let Some(sh_d) = resolved_sh.as_dict() {
                                                     if let Some(func_obj) = sh_d.get("Function") {
-                                                        let (c0, c1) = Self::resolve_gradient_colors(self.doc, func_obj);
-                                                        self.current_graphics.fill_color = ColorRgba::new(
-                                                            (c0.r + c1.r) * 0.5,
-                                                            (c0.g + c1.g) * 0.5,
-                                                            (c0.b + c1.b) * 0.5,
-                                                            1.0,
-                                                        );
+                                                        let (c0, c1) =
+                                                            Self::resolve_gradient_colors(
+                                                                self.doc, func_obj,
+                                                            );
+                                                        self.current_graphics.fill_color =
+                                                            ColorRgba::new(
+                                                                (c0.r + c1.r) * 0.5,
+                                                                (c0.g + c1.g) * 0.5,
+                                                                (c0.b + c1.b) * 0.5,
+                                                                1.0,
+                                                            );
                                                     }
                                                 }
                                             }
@@ -991,7 +1019,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                                         if let PdfObject::Stream(ref s) = pat_obj {
                                             if let Ok(bytes) = self.doc.decompress_stream_data(s) {
                                                 let text = String::from_utf8_lossy(&bytes);
-                                                let tokens: Vec<&str> = text.split_whitespace().collect();
+                                                let tokens: Vec<&str> =
+                                                    text.split_whitespace().collect();
                                                 let mut colors = Vec::new();
                                                 for (i, tok) in tokens.iter().enumerate() {
                                                     if *tok == "rg" && i >= 3 {
@@ -1000,15 +1029,23 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                                                             tokens[i - 2].parse::<f32>(),
                                                             tokens[i - 1].parse::<f32>(),
                                                         ) {
-                                                            colors.push(ColorRgba::from_rgb(r, g, b));
+                                                            colors
+                                                                .push(ColorRgba::from_rgb(r, g, b));
                                                         }
                                                     }
                                                 }
                                                 if !colors.is_empty() {
-                                                    let avg_r = colors.iter().map(|c| c.r).sum::<f32>() / colors.len() as f32;
-                                                    let avg_g = colors.iter().map(|c| c.g).sum::<f32>() / colors.len() as f32;
-                                                    let avg_b = colors.iter().map(|c| c.b).sum::<f32>() / colors.len() as f32;
-                                                    self.current_graphics.fill_color = ColorRgba::from_rgb(avg_r, avg_g, avg_b);
+                                                    let avg_r =
+                                                        colors.iter().map(|c| c.r).sum::<f32>()
+                                                            / colors.len() as f32;
+                                                    let avg_g =
+                                                        colors.iter().map(|c| c.g).sum::<f32>()
+                                                            / colors.len() as f32;
+                                                    let avg_b =
+                                                        colors.iter().map(|c| c.b).sum::<f32>()
+                                                            / colors.len() as f32;
+                                                    self.current_graphics.fill_color =
+                                                        ColorRgba::from_rgb(avg_r, avg_g, avg_b);
                                                 }
                                             }
                                         }
@@ -1354,24 +1391,23 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
 
             let bbox = RenderCompiler::resolve_box(&stream_obj.dict, "BBox")
                 .unwrap_or([0.0, 0.0, 100.0, 100.0]);
-            let form_matrix = if let Some(m_arr) =
-                stream_obj.dict.get("Matrix").and_then(PdfObject::as_array)
-            {
-                if m_arr.len() >= 6 {
-                    Transform2D::new(
-                        RenderCompiler::obj_num(&m_arr[0]),
-                        RenderCompiler::obj_num(&m_arr[1]),
-                        RenderCompiler::obj_num(&m_arr[2]),
-                        RenderCompiler::obj_num(&m_arr[3]),
-                        RenderCompiler::obj_num(&m_arr[4]),
-                        RenderCompiler::obj_num(&m_arr[5]),
-                    )
+            let form_matrix =
+                if let Some(m_arr) = stream_obj.dict.get("Matrix").and_then(PdfObject::as_array) {
+                    if m_arr.len() >= 6 {
+                        Transform2D::new(
+                            RenderCompiler::obj_num(&m_arr[0]),
+                            RenderCompiler::obj_num(&m_arr[1]),
+                            RenderCompiler::obj_num(&m_arr[2]),
+                            RenderCompiler::obj_num(&m_arr[3]),
+                            RenderCompiler::obj_num(&m_arr[4]),
+                            RenderCompiler::obj_num(&m_arr[5]),
+                        )
+                    } else {
+                        Transform2D::identity()
+                    }
                 } else {
                     Transform2D::identity()
-                }
-            } else {
-                Transform2D::identity()
-            };
+                };
 
             let form_resources = if let Some(r_obj) = stream_obj.dict.get("Resources") {
                 self.doc
@@ -1481,8 +1517,7 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 let stride = ((width + 7) / 8) as usize;
                 let [fill_r, fill_g, fill_b, fill_a] =
                     self.current_graphics.fill_color.to_u8_array();
-                let final_alpha =
-                    (fill_a as f32 * self.current_graphics.fill_alpha).round() as u8;
+                let final_alpha = (fill_a as f32 * self.current_graphics.fill_alpha).round() as u8;
 
                 let mut rgba_data = Vec::with_capacity((width * height * 4) as usize);
                 for row in 0..height {
@@ -1700,7 +1735,9 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                 if let Ok(smask_obj) = self.doc.store_mut().resolve_object(smask_ref) {
                     if let Some(smask_stream) = smask_obj.as_stream() {
                         if let Ok(smask_bytes) = self.doc.decompress_stream_data(&smask_stream) {
-                            let decode_invert = if let Some(PdfObject::Array(dec)) = smask_stream.dict.get("Decode") {
+                            let decode_invert = if let Some(PdfObject::Array(dec)) =
+                                smask_stream.dict.get("Decode")
+                            {
                                 if dec.len() >= 2 {
                                     dec[0].as_f64().unwrap_or(0.0) > dec[1].as_f64().unwrap_or(1.0)
                                 } else {
@@ -2030,8 +2067,10 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
         let annots_arr = match self.page_dict.get("Annots") {
             Some(PdfObject::Array(arr)) => arr.clone(),
             Some(PdfObject::Reference(r)) => {
-                if let Ok(PdfObject::Array(arr)) =
-                    self.doc.store_mut().resolve_object(&PdfObject::Reference(*r))
+                if let Ok(PdfObject::Array(arr)) = self
+                    .doc
+                    .store_mut()
+                    .resolve_object(&PdfObject::Reference(*r))
                 {
                     arr
                 } else {
@@ -2092,7 +2131,8 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
                                 PdfObject::Stream(s) => Some(s),
                                 PdfObject::Dictionary(sub_dict) => {
                                     // Check /AS appearance state
-                                    let as_state = annot_dict.get("AS").and_then(PdfObject::as_name);
+                                    let as_state =
+                                        annot_dict.get("AS").and_then(PdfObject::as_name);
                                     let target_ref = if let Some(state) = as_state {
                                         sub_dict.get(state)
                                     } else {
@@ -2137,27 +2177,28 @@ impl<'a, 'doc> CompilationContext<'a, 'doc> {
             let bw = (bx1 - bx0).max(0.001);
             let bh = (by1 - by0).max(0.001);
 
-            let form_matrix = if let Some(m_arr) = form_stream.dict.get("Matrix").and_then(PdfObject::as_array) {
-                if m_arr.len() >= 6 {
-                    let m = Transform2D::new(
-                        RenderCompiler::obj_num(&m_arr[0]),
-                        RenderCompiler::obj_num(&m_arr[1]),
-                        RenderCompiler::obj_num(&m_arr[2]),
-                        RenderCompiler::obj_num(&m_arr[3]),
-                        RenderCompiler::obj_num(&m_arr[4]),
-                        RenderCompiler::obj_num(&m_arr[5]),
-                    );
-                    Transform2D::translation(rx0, ry0).multiply(&m)
+            let form_matrix =
+                if let Some(m_arr) = form_stream.dict.get("Matrix").and_then(PdfObject::as_array) {
+                    if m_arr.len() >= 6 {
+                        let m = Transform2D::new(
+                            RenderCompiler::obj_num(&m_arr[0]),
+                            RenderCompiler::obj_num(&m_arr[1]),
+                            RenderCompiler::obj_num(&m_arr[2]),
+                            RenderCompiler::obj_num(&m_arr[3]),
+                            RenderCompiler::obj_num(&m_arr[4]),
+                            RenderCompiler::obj_num(&m_arr[5]),
+                        );
+                        Transform2D::translation(rx0, ry0).multiply(&m)
+                    } else {
+                        let sx = rect_w / bw;
+                        let sy = rect_h / bh;
+                        Transform2D::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy)
+                    }
                 } else {
                     let sx = rect_w / bw;
                     let sy = rect_h / bh;
                     Transform2D::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy)
-                }
-            } else {
-                let sx = rect_w / bw;
-                let sy = rect_h / bh;
-                Transform2D::new(sx, 0.0, 0.0, sy, rx0 - bx0 * sx, ry0 - by0 * sy)
-            };
+                };
 
             let form_resources = if let Some(r_obj) = form_stream.dict.get("Resources") {
                 self.doc

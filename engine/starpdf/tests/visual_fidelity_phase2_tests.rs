@@ -1,10 +1,10 @@
-use std::fs;
 use starpdf::document::PdfDocument;
 use starpdf::render::{
     BlendMode, ColorRgba, DifferentialComparator, FillRule, NativeRasterizer, PathVerb,
     RenderCompiler, RenderGlyph, RenderImage, RenderItem, RenderPage, RenderPath, RenderTextRun,
     Transform2D,
 };
+use std::fs;
 
 const OUTPUT_DIR: &str = "target/visual_validation_phase2";
 
