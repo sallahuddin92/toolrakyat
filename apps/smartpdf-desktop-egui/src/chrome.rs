@@ -1,8 +1,6 @@
 //! Top chrome and window controls directly adopting upstream PdfCraft geometry and styling.
 
-use egui::{
-    Align, Align2, CornerRadius, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2,
-};
+use egui::{vec2, Align, Align2, CornerRadius, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use starpdf_app_core::command::AppCommand;
 use starpdf_app_core::session::SessionManager;
 
@@ -15,7 +13,8 @@ pub const MAC_TITLE_BAR: f32 = 28.0;
 pub const MAC_LIGHT: f32 = 12.0;
 pub const MAC_LIGHT_PITCH: f32 = 20.0;
 pub const MAC_LIGHTS_LEFT: f32 = 10.0;
-pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
+pub const MAC_CONTENT_LEFT: f32 =
+    MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabStripAction {
@@ -30,6 +29,9 @@ pub enum TabStripAction {
 pub enum ModeBarAction {
     None,
     SaveRequested,
+    ExportRequested,
+    UndoRequested,
+    RedoRequested,
     ToggleLeftPanel,
     SelectMode(AcrobatMode),
 }
@@ -79,40 +81,85 @@ pub fn render_tab_strip(
                     t.titlebar
                 };
 
-                ui.painter().rect_filled(rect, CornerRadius { nw: t.radius, ne: t.radius, sw: 0, se: 0 }, bg);
+                ui.painter().rect_filled(
+                    rect,
+                    CornerRadius {
+                        nw: t.radius,
+                        ne: t.radius,
+                        sw: 0,
+                        se: 0,
+                    },
+                    bg,
+                );
                 if active {
                     ui.painter().rect_stroke(
                         rect,
-                        CornerRadius { nw: t.radius, ne: t.radius, sw: 0, se: 0 },
+                        CornerRadius {
+                            nw: t.radius,
+                            ne: t.radius,
+                            sw: 0,
+                            se: 0,
+                        },
                         Stroke::new(1.0, t.border),
                         egui::StrokeKind::Inside,
                     );
                 }
 
                 // File icon
-                let icon_rect = Rect::from_min_size(egui::pos2(rect.left() + 8.0, rect.center().y - 7.0), Vec2::splat(14.0));
-                icons::paint(ui, icon_rect, "file-text", 14.0, if active { t.accent } else { t.text_muted });
+                let icon_rect = Rect::from_min_size(
+                    egui::pos2(rect.left() + 8.0, rect.center().y - 7.0),
+                    Vec2::splat(14.0),
+                );
+                icons::paint(
+                    ui,
+                    icon_rect,
+                    "file-text",
+                    14.0,
+                    if active { t.accent } else { t.text_muted },
+                );
 
                 // Title label
                 let mut title = tab.title.clone();
                 if title.chars().count() > 18 {
-                    title = format!("{}…", &title.chars().take(17).collect::<String>());
+                    title = format!("{}…", title.chars().take(17).collect::<String>());
                 }
                 ui.painter().text(
                     egui::pos2(rect.left() + 26.0, rect.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    if active { theme::medium(12.5) } else { theme::regular(12.5) },
+                    if active {
+                        theme::medium(12.5)
+                    } else {
+                        theme::regular(12.5)
+                    },
                     if active { t.text } else { t.text_muted },
                 );
 
                 // Close button
-                let close_rect = Rect::from_center_size(egui::pos2(rect.right() - 14.0, rect.center().y), Vec2::splat(16.0));
-                let close_resp = ui.interact(close_rect, ui.id().with(("close_tab", &tab.session_id)), Sense::click());
+                let close_rect = Rect::from_center_size(
+                    egui::pos2(rect.right() - 14.0, rect.center().y),
+                    Vec2::splat(16.0),
+                );
+                let close_resp = ui.interact(
+                    close_rect,
+                    ui.id().with(("close_tab", &tab.session_id)),
+                    Sense::click(),
+                );
                 if close_resp.hovered() {
-                    ui.painter().rect_filled(close_rect, CornerRadius::same(3), t.hover);
+                    ui.painter()
+                        .rect_filled(close_rect, CornerRadius::same(3), t.hover);
                 }
-                icons::paint(ui, close_rect, "x", 12.0, if close_resp.hovered() { t.text } else { t.text_faint });
+                icons::paint(
+                    ui,
+                    close_rect,
+                    "x",
+                    12.0,
+                    if close_resp.hovered() {
+                        t.text
+                    } else {
+                        t.text_faint
+                    },
+                );
 
                 if close_resp.clicked() {
                     action = TabStripAction::CloseTab(tab.session_id.clone());
@@ -127,12 +174,18 @@ pub fn render_tab_strip(
         // Right side utilities (Theme toggle, shortcuts)
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let theme_ico = if *theme_kind == ThemeKind::Dark { "sun" } else { "moon" };
-            if icons::button(ui, theme_ico, button_size, false, "Toggle Light/Dark Theme").clicked() {
+            let theme_ico = if *theme_kind == ThemeKind::Dark {
+                "sun"
+            } else {
+                "moon"
+            };
+            if icons::button(ui, theme_ico, button_size, false, "Toggle Light/Dark Theme").clicked()
+            {
                 action = TabStripAction::ToggleTheme;
             }
 
-            if icons::button(ui, "circle-help", button_size, false, "Keyboard Shortcuts").clicked() {
+            if icons::button(ui, "circle-help", button_size, false, "Keyboard Shortcuts").clicked()
+            {
                 // Dialog
             }
         });
@@ -144,6 +197,8 @@ pub fn render_tab_strip(
 pub fn render_mode_bar(
     ui: &mut Ui,
     active_mode: AcrobatMode,
+    can_undo: bool,
+    can_redo: bool,
 ) -> ModeBarAction {
     let t = Tokens::get(ui.ctx());
     let mut action = ModeBarAction::None;
@@ -157,7 +212,11 @@ pub fn render_mode_bar(
         }
 
         ui.add_space(6.0);
-        ui.painter().vline(ui.cursor().left(), ui.max_rect().y_range().shrink(12.0), Stroke::new(1.0, t.divider));
+        ui.painter().vline(
+            ui.cursor().left(),
+            ui.max_rect().y_range().shrink(12.0),
+            Stroke::new(1.0, t.divider),
+        );
         ui.add_space(10.0);
 
         // Acrobat mode tabs
@@ -165,6 +224,8 @@ pub fn render_mode_bar(
             (AcrobatMode::AllTools, "All tools"),
             (AcrobatMode::Read, "Read"),
             (AcrobatMode::Edit, "Edit"),
+            (AcrobatMode::Organize, "Organize"),
+            (AcrobatMode::Forms, "Forms"),
             (AcrobatMode::Convert, "Convert"),
             (AcrobatMode::Sign, "E-Sign"),
         ];
@@ -179,20 +240,24 @@ pub fn render_mode_bar(
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
 
-            if icons::button(ui, "printer", 32.0, false, "Print (⌘P)").clicked() {
-                // Print command
+            if icons::button(ui, "file-output", 32.0, false, "Export Document...").clicked() {
+                action = ModeBarAction::ExportRequested;
             }
 
-            if icons::button(ui, "save", 32.0, false, "Save (⌘S)").clicked() {
+            if icons::button(ui, "save", 32.0, false, "Save Document (⌘S)").clicked() {
                 action = ModeBarAction::SaveRequested;
             }
 
-            if icons::button(ui, "info", 32.0, false, "Document Properties (⌘D)").clicked() {
-                // Properties dialog
+            if icons::button(ui, "redo-2", 32.0, false, "Redo (⌘⇧Z)").clicked() && can_redo {
+                action = ModeBarAction::RedoRequested;
+            }
+
+            if icons::button(ui, "undo-2", 32.0, false, "Undo (⌘Z)").clicked() && can_undo {
+                action = ModeBarAction::UndoRequested;
             }
 
             ui.add_space(8.0);
-            if widgets::search_box(ui, "Find tools and commands", 260.0).clicked() {
+            if widgets::search_box(ui, "Find tools and commands", 220.0).clicked() {
                 // Palette
             }
         });
@@ -201,11 +266,7 @@ pub fn render_mode_bar(
     action
 }
 
-pub fn render_floating_quick_pill(
-    ui: &mut Ui,
-    active_tool: &mut ActiveTool,
-    pos: Pos2,
-) {
+pub fn render_floating_quick_pill(ui: &mut Ui, active_tool: &mut ActiveTool, pos: Pos2) {
     let t = Tokens::get(ui.ctx());
     let pill_rect = Rect::from_min_size(pos, Vec2::new(42.0, 230.0));
 
@@ -217,8 +278,14 @@ pub fn render_floating_quick_pill(
     );
 
     // Pill background
-    ui.painter().rect_filled(pill_rect, CornerRadius::same(12), t.card);
-    ui.painter().rect_stroke(pill_rect, CornerRadius::same(12), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    ui.painter()
+        .rect_filled(pill_rect, CornerRadius::same(12), t.card);
+    ui.painter().rect_stroke(
+        pill_rect,
+        CornerRadius::same(12),
+        Stroke::new(1.0, t.border),
+        egui::StrokeKind::Inside,
+    );
 
     let tools = [
         ("mouse-pointer-2", ActiveTool::Select, "Select tool (V)"),
@@ -239,13 +306,26 @@ pub fn render_floating_quick_pill(
         let resp = ui.interact(btn_rect, ui.id().with(("quick_tool", icon)), Sense::click());
 
         if is_active {
-            ui.painter().rect_filled(btn_rect, CornerRadius::same(8), t.selected);
-            ui.painter().rect_stroke(btn_rect, CornerRadius::same(8), Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+            ui.painter()
+                .rect_filled(btn_rect, CornerRadius::same(8), t.selected);
+            ui.painter().rect_stroke(
+                btn_rect,
+                CornerRadius::same(8),
+                Stroke::new(1.0, t.accent),
+                egui::StrokeKind::Inside,
+            );
         } else if resp.hovered() {
-            ui.painter().rect_filled(btn_rect, CornerRadius::same(8), t.hover);
+            ui.painter()
+                .rect_filled(btn_rect, CornerRadius::same(8), t.hover);
         }
 
-        let tint = if is_active { t.accent_text } else if resp.hovered() { t.text } else { t.icon };
+        let tint = if is_active {
+            t.accent_text
+        } else if resp.hovered() {
+            t.text
+        } else {
+            t.icon
+        };
         icons::paint(ui, btn_rect, icon, 16.0, tint);
 
         if resp.clicked() {
@@ -290,7 +370,9 @@ pub fn render_bottom_status_bar(
             // Zoom Steppers
             if icons::button(ui, "plus", 20.0, false, "Zoom In").clicked() {
                 *zoom_percent = (*zoom_percent * 1.25).min(500.0);
-                let _ = manager.dispatch(AppCommand::SetZoom { percent: *zoom_percent });
+                let _ = manager.dispatch(AppCommand::SetZoom {
+                    percent: *zoom_percent,
+                });
             }
 
             ui.label(
@@ -301,7 +383,9 @@ pub fn render_bottom_status_bar(
 
             if icons::button(ui, "minus", 20.0, false, "Zoom Out").clicked() {
                 *zoom_percent = (*zoom_percent / 1.25).max(25.0);
-                let _ = manager.dispatch(AppCommand::SetZoom { percent: *zoom_percent });
+                let _ = manager.dispatch(AppCommand::SetZoom {
+                    percent: *zoom_percent,
+                });
             }
 
             ui.separator();
@@ -316,7 +400,9 @@ pub fn render_bottom_status_bar(
             if icons::button(ui, "chevron-left", 20.0, false, "Previous Page").clicked() {
                 if let Some(s) = manager.active_session() {
                     if s.current_page > 0 {
-                        let _ = manager.dispatch(AppCommand::SetPage { page_index: s.current_page - 1 });
+                        let _ = manager.dispatch(AppCommand::SetPage {
+                            page_index: s.current_page - 1,
+                        });
                     }
                 }
             }
@@ -330,7 +416,9 @@ pub fn render_bottom_status_bar(
             if icons::button(ui, "chevron-right", 20.0, false, "Next Page").clicked() {
                 if let Some(s) = manager.active_session() {
                     if s.current_page + 1 < s.total_pages {
-                        let _ = manager.dispatch(AppCommand::SetPage { page_index: s.current_page + 1 });
+                        let _ = manager.dispatch(AppCommand::SetPage {
+                            page_index: s.current_page + 1,
+                        });
                     }
                 }
             }

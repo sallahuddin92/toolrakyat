@@ -1,10 +1,11 @@
 //! Design tokens and egui styling directly adopted from upstream PdfCraft design system.
 //! Follows the Acrobat Pro desktop workspace design grammar.
 
-use std::sync::Arc;
 use egui::{
-    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Rect, Response, Stroke, Vec2, Visuals,
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Rect, Response, Stroke,
+    Vec2, Visuals,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ThemeKind {
@@ -95,7 +96,8 @@ impl Tokens {
     }
 
     pub fn get(ctx: &egui::Context) -> Self {
-        ctx.data(|d| d.get_temp::<Tokens>(egui::Id::new("smartpdf-theme"))).unwrap_or_else(|| Self::for_kind(ThemeKind::Light))
+        ctx.data(|d| d.get_temp::<Tokens>(egui::Id::new("smartpdf-theme")))
+            .unwrap_or_else(|| Self::for_kind(ThemeKind::Light))
     }
 
     pub fn dark(&self) -> bool {
@@ -114,13 +116,24 @@ impl Press {
         let hot = resp.hovered() || resp.is_pointer_button_down_on();
         let ease = egui::emath::easing::quadratic_out;
         Self {
-            hover: ui.ctx().animate_bool_with_time_and_easing(resp.id.with("chrome-hover"), hot, 0.12, ease),
-            down: ui.ctx().animate_bool_with_time_and_easing(resp.id.with("chrome-down"), resp.is_pointer_button_down_on(), 0.06, ease),
+            hover: ui.ctx().animate_bool_with_time_and_easing(
+                resp.id.with("chrome-hover"),
+                hot,
+                0.12,
+                ease,
+            ),
+            down: ui.ctx().animate_bool_with_time_and_easing(
+                resp.id.with("chrome-down"),
+                resp.is_pointer_button_down_on(),
+                0.06,
+                ease,
+            ),
         }
     }
 
     pub fn fill(self, rest: Color32, hover: Color32, pressed: Color32) -> Color32 {
-        rest.lerp_to_gamma(hover, self.hover).lerp_to_gamma(pressed, self.down)
+        rest.lerp_to_gamma(hover, self.hover)
+            .lerp_to_gamma(pressed, self.down)
     }
 
     pub fn offset(self) -> Vec2 {
@@ -129,7 +142,11 @@ impl Press {
 
     pub fn wash_color(self, t: &Tokens, selected: bool) -> Color32 {
         if selected {
-            self.fill(t.accent_soft, t.accent_soft.lerp_to_gamma(t.accent, 0.16), t.selected)
+            self.fill(
+                t.accent_soft,
+                t.accent_soft.lerp_to_gamma(t.accent, 0.16),
+                t.selected,
+            )
         } else {
             self.fill(Color32::TRANSPARENT, t.hover, t.pressed)
         }
@@ -150,17 +167,47 @@ pub fn hand(resp: Response) -> Response {
 pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let add = |fonts: &mut FontDefinitions, name: &str, bytes: &'static [u8]| {
-        fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+        fonts
+            .font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
     };
 
-    add(&mut fonts, "Inter", include_bytes!("../assets/fonts/Inter-Regular.ttf"));
-    add(&mut fonts, "Inter-Medium", include_bytes!("../assets/fonts/Inter-Medium.ttf"));
-    add(&mut fonts, "Inter-SemiBold", include_bytes!("../assets/fonts/Inter-SemiBold.ttf"));
-    add(&mut fonts, "JetBrainsMono", include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"));
+    add(
+        &mut fonts,
+        "Inter",
+        include_bytes!("../assets/fonts/Inter-Regular.ttf"),
+    );
+    add(
+        &mut fonts,
+        "Inter-Medium",
+        include_bytes!("../assets/fonts/Inter-Medium.ttf"),
+    );
+    add(
+        &mut fonts,
+        "Inter-SemiBold",
+        include_bytes!("../assets/fonts/Inter-SemiBold.ttf"),
+    );
+    add(
+        &mut fonts,
+        "JetBrainsMono",
+        include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"),
+    );
 
-    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".to_owned());
-    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "JetBrainsMono".to_owned());
-    fonts.families.entry(FontFamily::Monospace).or_default().insert(1, "Inter".to_owned());
+    fonts
+        .families
+        .entry(FontFamily::Proportional)
+        .or_default()
+        .insert(0, "Inter".to_owned());
+    fonts
+        .families
+        .entry(FontFamily::Monospace)
+        .or_default()
+        .insert(0, "JetBrainsMono".to_owned());
+    fonts
+        .families
+        .entry(FontFamily::Monospace)
+        .or_default()
+        .insert(1, "Inter".to_owned());
 
     let fallback: Vec<String> = fonts.families[&FontFamily::Proportional].clone();
     for (fam, primary) in [("medium", "Inter-Medium"), ("semibold", "Inter-SemiBold")] {
@@ -187,7 +234,11 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind) {
     let t = Tokens::for_kind(kind);
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("smartpdf-theme"), t));
 
-    let mut visuals = if t.dark() { Visuals::dark() } else { Visuals::light() };
+    let mut visuals = if t.dark() {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
     visuals.window_fill = t.panel;
     visuals.panel_fill = t.chrome;
     visuals.window_stroke = Stroke::new(1.0, t.border);

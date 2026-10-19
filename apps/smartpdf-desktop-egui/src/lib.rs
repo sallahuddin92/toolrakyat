@@ -1,6 +1,7 @@
 //! SmartPDF Desktop Application Library (egui Acrobat Pro Edition)
 //! Exposes application state, layout, panels, canvas, and chrome for integration testing and binaries.
 
+pub mod adapter;
 pub mod app;
 pub mod canvas;
 pub mod chrome;

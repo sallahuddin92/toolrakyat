@@ -1,10 +1,10 @@
 //! SmartPDF Desktop Application (egui Acrobat Pro Edition)
 //! Powered by StarPDF App-Core and WGPU / Metal acceleration.
 
-use std::path::PathBuf;
 use smartpdf_desktop_egui::app::SmartPdfEguiApp;
 use smartpdf_desktop_egui::panels;
 use smartpdf_desktop_egui::theme;
+use std::path::PathBuf;
 
 const DEFAULT_SAMPLE_PDF: &[u8] = include_bytes!("../../../test-assets/text-multispan-heading.pdf");
 
@@ -110,7 +110,11 @@ fn main() -> eframe::Result<()> {
             app.screenshot_target = screenshot_out;
 
             if file_args.is_empty() {
-                app.load_document_bytes(None, DEFAULT_SAMPLE_PDF.to_vec(), "sample_contract.pdf".to_string());
+                app.load_document_bytes(
+                    None,
+                    DEFAULT_SAMPLE_PDF.to_vec(),
+                    "sample_contract.pdf".to_string(),
+                );
             } else {
                 for path in file_args {
                     if let Err(e) = app.open_file_path(&path) {

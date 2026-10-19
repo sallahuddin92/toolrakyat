@@ -1,9 +1,9 @@
 //! Vector icons directly embedded from upstream Lucide SVGs.
 //! Fully compliant with upstream icon catalog and tinting mechanics.
 
-use std::sync::OnceLock;
-use std::collections::HashMap;
 use egui::{Color32, Image, Rect, Response, Sense, Stroke, Ui, Vec2};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::icon_data::ICONS;
 use crate::theme::{self, Tokens};
@@ -37,14 +37,19 @@ pub fn exists(name: &str) -> bool {
 }
 
 pub fn get_icon_bytes(name: &str) -> &'static [u8] {
-    catalog().get(name).or_else(|| catalog().get("square")).unwrap_or(&[])
+    catalog()
+        .get(name)
+        .or_else(|| catalog().get("square"))
+        .unwrap_or(&[])
 }
 
 #[allow(dead_code)]
 pub fn image(name: &str, size: f32, tint: Color32) -> Image<'static> {
     let bytes = get_icon_bytes(name);
     let uri = format!("bytes://icons/{name}.svg");
-    Image::from_bytes(uri, bytes).fit_to_exact_size(Vec2::splat(size)).tint(tint)
+    Image::from_bytes(uri, bytes)
+        .fit_to_exact_size(Vec2::splat(size))
+        .tint(tint)
 }
 
 pub fn paint(ui: &Ui, rect: Rect, name: &str, size: f32, tint: Color32) {

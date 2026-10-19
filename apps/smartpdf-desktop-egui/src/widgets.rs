@@ -1,13 +1,21 @@
 //! Small custom widgets built directly on upstream PdfCraft design tokens.
 
-use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, Ui, Vec2, vec2};
-use crate::theme::{self, Tokens};
 use crate::icons;
+use crate::theme::{self, Tokens};
+use egui::{vec2, Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 pub fn mode_tab(ui: &mut Ui, label: &str, active: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let font = if active { theme::semibold(13.0) } else { theme::regular(13.0) };
-    let text_w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE).size().x);
+    let font = if active {
+        theme::semibold(13.0)
+    } else {
+        theme::regular(13.0)
+    };
+    let text_w = ui.fonts_mut(|f| {
+        f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    });
     let width = text_w + 24.0;
     let height = 32.0;
 
@@ -23,11 +31,13 @@ pub fn mode_tab(ui: &mut Ui, label: &str, active: bool) -> Response {
         };
 
         if bg != Color32::TRANSPARENT {
-            ui.painter().rect_filled(rect, CornerRadius::same(t.radius), bg);
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(t.radius), bg);
         }
 
         let fg = if active { t.accent_text } else { t.text };
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, font, fg);
+        ui.painter()
+            .text(rect.center(), Align2::CENTER_CENTER, label, font, fg);
 
         if active {
             // Blue bottom indicator bar
@@ -35,7 +45,8 @@ pub fn mode_tab(ui: &mut Ui, label: &str, active: bool) -> Response {
                 egui::pos2(rect.left() + 6.0, rect.bottom() - 2.0),
                 egui::pos2(rect.right() - 6.0, rect.bottom()),
             );
-            ui.painter().rect_filled(indicator, CornerRadius::same(1), t.accent);
+            ui.painter()
+                .rect_filled(indicator, CornerRadius::same(1), t.accent);
         }
     }
 
@@ -52,7 +63,11 @@ pub fn ghost_button_sized(ui: &mut Ui, icon: &str, label: &str, height: f32) -> 
     let text_w = if label.is_empty() {
         0.0
     } else {
-        ui.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE).size().x) + 8.0
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(label.to_owned(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+        }) + 8.0
     };
     let width = 24.0 + text_w + 12.0;
 
@@ -88,9 +103,17 @@ pub fn search_box(ui: &mut Ui, placeholder: &str, width: f32) -> Response {
         let is_hovered = resp.hovered();
         let bg = if is_hovered { t.hover } else { t.card };
         ui.painter().rect_filled(rect, CornerRadius::same(6), bg);
-        ui.painter().rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(6),
+            Stroke::new(1.0, t.border),
+            egui::StrokeKind::Inside,
+        );
 
-        let icon_rect = Rect::from_min_size(egui::pos2(rect.left() + 8.0, rect.center().y - 7.0), Vec2::splat(14.0));
+        let icon_rect = Rect::from_min_size(
+            egui::pos2(rect.left() + 8.0, rect.center().y - 7.0),
+            Vec2::splat(14.0),
+        );
         icons::paint(ui, icon_rect, "search", 14.0, t.text_faint);
 
         ui.painter().text(
@@ -106,7 +129,8 @@ pub fn search_box(ui: &mut Ui, placeholder: &str, width: f32) -> Response {
             egui::pos2(rect.right() - 20.0, rect.center().y),
             vec2(24.0, 16.0),
         );
-        ui.painter().rect_filled(pill_rect, CornerRadius::same(3), t.divider);
+        ui.painter()
+            .rect_filled(pill_rect, CornerRadius::same(3), t.divider);
         ui.painter().text(
             pill_rect.center(),
             Align2::CENTER_CENTER,

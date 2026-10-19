@@ -1,13 +1,10 @@
 //! Central document canvas: pan/zoom viewport, high-DPI page rendering, interactive selection and overlays.
 //! Adopts upstream PdfCraft canvas metrics (PT: 96/72 dpi scale, drop-shadow, and layout margins).
 
-use egui::{
-    Color32, CornerRadius, Pos2, Rect, Response, Sense, Stroke, TextureHandle, Ui, Vec2,
-};
-use starpdf_app_core::command::AppCommand;
+use egui::{Color32, CornerRadius, Pos2, Rect, Response, Sense, Stroke, TextureHandle, Ui, Vec2};
 use starpdf_app_core::selection::{Rect as CoreRect, SelectionState};
-use starpdf_app_core::session::SessionManager;
 
+use crate::adapter::EguiEngineAdapter;
 use crate::panels::{AcrobatMode, ActiveTool};
 use crate::theme::Tokens;
 
@@ -43,16 +40,16 @@ pub enum CanvasAction {
     OpenRequested,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_document_canvas(
     ui: &mut Ui,
-    manager: &mut SessionManager,
+    adapter: &mut EguiEngineAdapter,
     state: &mut CanvasState,
     active_tool: &mut ActiveTool,
     active_mode: &mut AcrobatMode,
     page_texture: Option<&TextureHandle>,
     page_dims: (f32, f32), // in points (e.g. 595.0, 842.0)
     zoom_percent: f32,
-    editing_text_buffer: &mut String,
 ) -> (Response, CanvasAction) {
     let t = Tokens::get(ui.ctx());
     let available_rect = ui.available_rect_before_wrap();
@@ -61,7 +58,7 @@ pub fn render_document_canvas(
     // Canvas background (Acrobat neutral pasteboard)
     painter.rect_filled(available_rect, CornerRadius::ZERO, t.pasteboard);
 
-    if manager.active_session().is_none() {
+    if adapter.manager.active_session().is_none() {
         let mut action = CanvasAction::None;
         let center = available_rect.center();
         let card_w = 440.0_f32.min(available_rect.width() - 40.0);
@@ -69,9 +66,17 @@ pub fn render_document_canvas(
         let card_rect = Rect::from_center_size(center, Vec2::new(card_w, card_h));
 
         painter.rect_filled(card_rect, CornerRadius::same(12), t.card);
-        painter.rect_stroke(card_rect, CornerRadius::same(12), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            card_rect,
+            CornerRadius::same(12),
+            Stroke::new(1.0, t.border),
+            egui::StrokeKind::Inside,
+        );
 
-        let icon_rect = Rect::from_center_size(Pos2::new(center.x, card_rect.top() + 45.0), Vec2::splat(36.0));
+        let icon_rect = Rect::from_center_size(
+            Pos2::new(center.x, card_rect.top() + 45.0),
+            Vec2::splat(36.0),
+        );
         crate::icons::paint(ui, icon_rect, "file-text", 36.0, t.accent);
 
         painter.text(
@@ -92,12 +97,22 @@ pub fn render_document_canvas(
 
         let btn_w = 160.0;
         let btn_h = 36.0;
-        let btn_rect = Rect::from_center_size(Pos2::new(center.x, card_rect.top() + 165.0), Vec2::new(btn_w, btn_h));
+        let btn_rect = Rect::from_center_size(
+            Pos2::new(center.x, card_rect.top() + 165.0),
+            Vec2::new(btn_w, btn_h),
+        );
         let btn_resp = ui.interact(btn_rect, ui.id().with("empty_open_btn"), Sense::click());
-        let btn_bg = if btn_resp.hovered() { t.accent_soft } else { t.accent };
+        let btn_bg = if btn_resp.hovered() {
+            t.accent_soft
+        } else {
+            t.accent
+        };
         painter.rect_filled(btn_rect, CornerRadius::same(8), btn_bg);
 
-        let btn_icon_rect = Rect::from_min_size(Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y - 8.0), Vec2::splat(16.0));
+        let btn_icon_rect = Rect::from_min_size(
+            Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y - 8.0),
+            Vec2::splat(16.0),
+        );
         crate::icons::paint(ui, btn_icon_rect, "plus", 16.0, Color32::WHITE);
         painter.text(
             Pos2::new(btn_rect.left() + 44.0, btn_rect.center().y),
@@ -120,7 +135,8 @@ pub fn render_document_canvas(
 
     // Center page on canvas plus user pan offset
     let center_x = available_rect.center().x + state.pan_offset.x;
-    let start_y = (available_rect.top() + MARGIN + state.pan_offset.y).max(available_rect.top() + 10.0);
+    let start_y =
+        (available_rect.top() + MARGIN + state.pan_offset.y).max(available_rect.top() + 10.0);
 
     let page_rect = Rect::from_min_size(
         Pos2::new(center_x - page_width_px / 2.0, start_y),
@@ -160,12 +176,14 @@ pub fn render_document_canvas(
 
     if response.drag_stopped() {
         if state.dragging_selection {
-            if let (Some(start_pt), Some(ptr)) = (state.drag_start_page_pt, response.interact_pointer_pos()) {
+            if let (Some(start_pt), Some(ptr)) =
+                (state.drag_start_page_pt, response.interact_pointer_pos())
+            {
                 let current_page_x = ((ptr.x - page_rect.left()) / scale) as f64;
                 let current_page_y = ((page_rect.bottom() - ptr.y) / scale) as f64;
                 let dx = current_page_x - start_pt[0];
                 let dy = current_page_y - start_pt[1];
-                let _ = manager.dispatch(AppCommand::MoveElement { dx, dy });
+                let _ = adapter.move_selected(dx, dy);
             }
         }
         state.is_panning = false;
@@ -179,7 +197,7 @@ pub fn render_document_canvas(
         if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) && scroll_delta.y.abs() > 0.0 {
             let factor = if scroll_delta.y > 0.0 { 1.1 } else { 0.9 };
             let new_zoom = (zoom_percent * factor).clamp(25.0, 500.0);
-            let _ = manager.dispatch(AppCommand::SetZoom { percent: new_zoom });
+            let _ = adapter.set_zoom(new_zoom);
         } else if scroll_delta.y.abs() > 0.0 || scroll_delta.x.abs() > 0.0 {
             state.pan_offset += scroll_delta;
         }
@@ -202,17 +220,26 @@ pub fn render_document_canvas(
     }
 
     // Draw thin document border
-    painter.rect_stroke(page_rect, CornerRadius::same(2), Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
+    painter.rect_stroke(
+        page_rect,
+        CornerRadius::same(2),
+        Stroke::new(1.0, t.border),
+        egui::StrokeKind::Outside,
+    );
 
     // 3. Interactive Selection Overlays and Handles
-    if let Some(session) = manager.active_session() {
+    if let Some(session) = adapter.manager.active_session() {
         match &session.selection {
-            SelectionState::Text { bounds, .. } => {
+            SelectionState::Text {
+                bounds,
+                is_editable,
+                ..
+            } => {
                 let overlay_rect = to_canvas_rect(bounds, page_rect, scale);
                 draw_selection_box(ui, overlay_rect, true);
 
-                if *active_mode == AcrobatMode::Edit {
-                    let mut text_val = editing_text_buffer.clone();
+                if *active_mode == AcrobatMode::Edit && *is_editable {
+                    let mut text_val = adapter.editing_text_buffer.clone();
                     let edit_resp = ui.put(
                         overlay_rect.expand(2.0),
                         egui::TextEdit::multiline(&mut text_val)
@@ -220,7 +247,55 @@ pub fn render_document_canvas(
                             .text_color(t.text),
                     );
                     if edit_resp.changed() {
-                        *editing_text_buffer = text_val;
+                        adapter.editing_text_buffer = text_val.clone();
+                    }
+
+                    // Mini on-canvas action buttons directly below selection
+                    let commit_rect = Rect::from_min_size(
+                        Pos2::new(overlay_rect.left(), overlay_rect.bottom() + 4.0),
+                        Vec2::new(60.0, 22.0),
+                    );
+                    let cancel_rect = Rect::from_min_size(
+                        Pos2::new(overlay_rect.left() + 66.0, overlay_rect.bottom() + 4.0),
+                        Vec2::new(60.0, 22.0),
+                    );
+
+                    let commit_btn = ui.put(
+                        commit_rect,
+                        egui::Button::new(
+                            egui::RichText::new("Commit")
+                                .size(11.0)
+                                .color(Color32::WHITE),
+                        ),
+                    );
+                    if commit_btn
+                        .on_hover_text("Commit text changes (Enter)")
+                        .clicked()
+                    {
+                        let _ = adapter.commit_text_edit(&text_val);
+                    }
+
+                    let cancel_btn = ui.put(
+                        cancel_rect,
+                        egui::Button::new(egui::RichText::new("Cancel").size(11.0)),
+                    );
+                    if cancel_btn
+                        .on_hover_text("Cancel text changes (Esc)")
+                        .clicked()
+                    {
+                        adapter.cancel_text_edit();
+                    }
+
+                    // Keyboard shortcuts for inline editing: Enter (without Shift) commits, Esc cancels
+                    if edit_resp.has_focus() {
+                        let commit_key =
+                            ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+                        let cancel_key = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                        if commit_key {
+                            let _ = adapter.commit_text_edit(&text_val);
+                        } else if cancel_key {
+                            adapter.cancel_text_edit();
+                        }
                     }
                 }
             }
@@ -241,14 +316,48 @@ pub fn render_document_canvas(
                 let page_x = ((ptr.x - page_rect.left()) / scale) as f64;
                 let page_y = ((page_rect.bottom() - ptr.y) / scale) as f64;
 
-                handle_canvas_click(
-                    manager,
-                    active_tool,
-                    page_x,
-                    page_y,
-                    page_dims.1 as f64,
-                    editing_text_buffer,
-                );
+                if let Some(sel) = adapter.hit_test(page_x, page_y, page_dims.1 as f64) {
+                    let is_checkbox = match &sel {
+                        SelectionState::FormField { field_type, .. } => field_type == "Checkbox",
+                        _ => false,
+                    };
+                    let _ = adapter.select(sel);
+                    if is_checkbox {
+                        let _ = adapter.toggle_selected_form_checkbox();
+                    }
+                } else {
+                    match *active_tool {
+                        ActiveTool::Highlight => {
+                            let _ = adapter.add_annotation(
+                                "Highlight",
+                                [
+                                    page_x,
+                                    (page_dims.1 as f64 - page_y - 16.0).max(0.0),
+                                    page_x + 120.0,
+                                    page_dims.1 as f64 - page_y,
+                                ],
+                                Some("Highlight".to_string()),
+                                Some(vec![1.0, 0.9, 0.2]),
+                            );
+                        }
+                        ActiveTool::StickyNote => {
+                            let _ = adapter.add_annotation(
+                                "FreeText",
+                                [
+                                    page_x,
+                                    (page_dims.1 as f64 - page_y - 24.0).max(0.0),
+                                    page_x + 120.0,
+                                    page_dims.1 as f64 - page_y,
+                                ],
+                                Some("Note".to_string()),
+                                Some(vec![1.0, 0.8, 0.0]),
+                            );
+                        }
+                        _ => {
+                            let _ = adapter.clear_selection();
+                        }
+                    }
+                }
             }
         }
     }
@@ -268,7 +377,11 @@ fn draw_selection_box(ui: &Ui, rect: Rect, with_handles: bool) {
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter();
 
-    painter.rect_filled(rect, CornerRadius::same(2), t.accent_soft.gamma_multiply(0.4));
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(2),
+        t.accent_soft.gamma_multiply(0.4),
+    );
     painter.rect_stroke(
         rect,
         CornerRadius::same(2),
@@ -288,75 +401,12 @@ fn draw_selection_box(ui: &Ui, rect: Rect, with_handles: bool) {
         for c in corners {
             let h_rect = Rect::from_center_size(c, handle_size);
             painter.rect_filled(h_rect, CornerRadius::same(1), Color32::WHITE);
-            painter.rect_stroke(h_rect, CornerRadius::same(1), Stroke::new(1.5, t.accent), egui::StrokeKind::Outside);
-        }
-    }
-}
-
-fn handle_canvas_click(
-    manager: &mut SessionManager,
-    active_tool: &mut ActiveTool,
-    x: f64,
-    y: f64,
-    page_height: f64,
-    editing_text_buffer: &mut String,
-) {
-    let session = match manager.active_session() {
-        Some(s) => s,
-        None => return,
-    };
-
-    let target_page = session.current_page;
-
-    // Check hit elements via text spans
-    if let Ok(spans) = session.extract_page_text_spans(target_page) {
-        if let Some(span) = spans.iter().find(|s| {
-            x >= s.x && x <= s.x + s.width &&
-            y >= s.y && y <= s.y + s.height
-        }) {
-            *editing_text_buffer = span.text.clone();
-            if let Ok(node_id) = starpdf::execution::StarNodeId::new(
-                "doc",
-                starpdf::syntax::object::ObjectRef::new(target_page as u64 + 1, 0),
-                &format!("span-{}", span.text),
-            ) {
-                let _ = manager.dispatch(AppCommand::SetSelection {
-                    selection: SelectionState::Text {
-                        star_node_id: node_id,
-                        render_node_id: None,
-                        text: span.text.clone(),
-                        bounds: CoreRect::new(span.x, span.y, span.width, span.height),
-                        font_info: None,
-                        is_editable: true,
-                    },
-                });
-            }
-            return;
-        }
-    }
-
-    match *active_tool {
-        ActiveTool::Highlight => {
-            let _ = manager.dispatch(AppCommand::AddAnnotation {
-                page_index: target_page,
-                subtype: "Highlight".to_string(),
-                rect: [x, page_height - y - 16.0, x + 120.0, page_height - y],
-                contents: Some("Highlight".to_string()),
-                color: Some(vec![1.0, 0.9, 0.2]),
-            });
-        }
-        ActiveTool::StickyNote => {
-            let _ = manager.dispatch(AppCommand::AddAnnotation {
-                page_index: target_page,
-                subtype: "Text".to_string(),
-                rect: [x, page_height - y - 24.0, x + 24.0, page_height - y],
-                contents: Some("Note".to_string()),
-                color: Some(vec![1.0, 0.8, 0.0]),
-            });
-        }
-        _ => {
-            let _ = manager.dispatch(AppCommand::ClearSelection);
-            editing_text_buffer.clear();
+            painter.rect_stroke(
+                h_rect,
+                CornerRadius::same(1),
+                Stroke::new(1.5, t.accent),
+                egui::StrokeKind::Outside,
+            );
         }
     }
 }
