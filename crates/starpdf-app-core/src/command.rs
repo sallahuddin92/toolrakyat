@@ -597,9 +597,13 @@ pub fn dispatch_command(
                     value: value.clone(),
                 },
                 starpdf::forms::FieldType::Checkbox => {
-                    let checked = value.eq_ignore_ascii_case("true")
-                        || value.eq_ignore_ascii_case("yes")
-                        || value == "1";
+                    let checked = if value.eq_ignore_ascii_case("toggle") {
+                        !matches!(&field.value, starpdf::forms::FieldValue::Boolean(true))
+                    } else {
+                        value.eq_ignore_ascii_case("true")
+                            || value.eq_ignore_ascii_case("yes")
+                            || value == "1"
+                    };
                     let widget_refs = field.widgets.iter().map(|w| w.object_ref).collect();
                     starpdf::mutation::PdfChange::SetCheckbox {
                         field_ref: field.object_ref,
