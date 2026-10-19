@@ -1,0 +1,11 @@
+SmartPDF Desktop (egui frontend)
+Copyright (c) 2026 ToolRakyat Engineering
+
+This component incorporates design patterns, token structures, and icon mappings
+adapted from PdfCraft (https://github.com/storytold/pdfcraft):
+Copyright (c) 2026 ArtCraft Team & PdfCraft contributors
+Licensed under the Apache License, Version 2.0 or the MIT License.
+
+This component includes icons from the Lucide project (https://lucide.dev):
+Copyright (c) 2026 Lucide Icons and Contributors
+Licensed under the ISC License.

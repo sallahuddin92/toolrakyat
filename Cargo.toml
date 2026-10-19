@@ -3,5 +3,6 @@ members = [
     "engine/starpdf",
     "crates/starpdf-app-core",
     "apps/smartpdf-desktop",
+    "apps/smartpdf-desktop-egui",
 ]
 resolver = "2"
