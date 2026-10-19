@@ -1304,6 +1304,7 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
 
         // 1.5. Render Active Page via GPU-Accelerated Pipeline (with session caching and CPU fallback)
         let zoom_scale = (session.zoom.percent / 100.0).clamp(0.2, 4.0);
+        let render_scale = (zoom_scale * 2.0).clamp(0.4, 8.0); // 144 DPI (Retina 2x high-fidelity sampling)
         let current_gpu = GPU_ENABLED.load(Ordering::SeqCst);
 
         let cached_hit = SESSION_IMAGE_CACHE.with(|cache| {
@@ -1336,7 +1337,7 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                 if let Ok(guard) = GPU_RENDERER.lock() {
                     if let Some(ref r) = *guard {
                         session
-                            .render_page_gpu(session.current_page, zoom_scale, r)
+                            .render_page_gpu(session.current_page, render_scale, r)
                             .ok()
                             .map(|res| (res, r.adapter_name().to_string()))
                     } else {
@@ -1358,8 +1359,8 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                 let slint_img = slint::Image::from_rgba8(pixel_buffer);
                 app.set_rendered_page_image(slint_img.clone());
                 app.set_has_rendered_page_image(true);
-                let w = gpu_res.width as f32 / zoom_scale;
-                let h = gpu_res.height as f32 / zoom_scale;
+                let w = gpu_res.width as f32 / render_scale;
+                let h = gpu_res.height as f32 / render_scale;
                 app.set_page_width(w);
                 app.set_page_height(h);
                 app.set_gpu_acceleration_enabled(true);
@@ -1391,7 +1392,7 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                     });
                 });
                 rendered_success = true;
-            } else if let Ok(rendered) = session.render_page(session.current_page, zoom_scale) {
+            } else if let Ok(rendered) = session.render_page(session.current_page, render_scale) {
                 let mut pixel_buffer =
                     slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(rendered.width, rendered.height);
                 pixel_buffer
@@ -1400,8 +1401,8 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                 let slint_img = slint::Image::from_rgba8(pixel_buffer);
                 app.set_rendered_page_image(slint_img.clone());
                 app.set_has_rendered_page_image(true);
-                let w = rendered.width as f32 / zoom_scale;
-                let h = rendered.height as f32 / zoom_scale;
+                let w = rendered.width as f32 / render_scale;
+                let h = rendered.height as f32 / render_scale;
                 app.set_page_width(w);
                 app.set_page_height(h);
                 app.set_gpu_acceleration_enabled(false);

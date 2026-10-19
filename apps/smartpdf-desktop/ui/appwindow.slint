@@ -1,6 +1,8 @@
 // SmartPDF Slint UI Specification
 // Built for high-performance, precision document engineering matching SmartPDF Design Brief
 
+import { ScrollView } from "std-widgets.slint";
+
 export struct TabItem {
     id: string,
     title: string,
@@ -290,7 +292,8 @@ export component AppWindow inherits Window {
                             alignment: start;
 
                             for tab in root.tabs : Rectangle {
-                                width: 180px;
+                                min-width: 120px;
+                                max-width: 200px;
                                 height: 32px;
                                 background: tab.is_active ? #1E293B : #0F172A;
                                 border-radius: 4px;
@@ -298,12 +301,13 @@ export component AppWindow inherits Window {
                                 border-color: tab.is_active ? #0EA5E9 : #334155;
 
                                 HorizontalLayout {
-                                    padding-left: 8px;
+                                    padding-left: 10px;
                                     padding-right: 6px;
-                                    spacing: 4px;
+                                    spacing: 6px;
                                     alignment: center;
 
                                     Text {
+                                        horizontal-stretch: 1;
                                         text: tab.is_dirty ? tab.title + " *" : tab.title;
                                         font-size: 12px;
                                         font-weight: tab.is_active ? 600 : 400;
@@ -870,56 +874,58 @@ export component AppWindow inherits Window {
                         }
 
                         // Thumbnails list
-                        VerticalLayout {
-                            spacing: 8px;
+                        ScrollView {
                             vertical-stretch: 1;
 
-                            for thumb in root.thumbnails : Rectangle {
-                                height: 110px;
-                                background: thumb.is_active ? #0F172A : #151F2E;
-                                border-radius: 6px;
-                                border-width: thumb.is_active ? 2px : 1px;
-                                border-color: thumb.is_active ? #0EA5E9 : #334155;
+                            VerticalLayout {
+                                spacing: 8px;
+                                padding-right: 4px;
 
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    alignment: center;
+                                for thumb in root.thumbnails : Rectangle {
+                                    height: 110px;
+                                    background: thumb.is_active ? #0F172A : #151F2E;
+                                    border-radius: 6px;
+                                    border-width: thumb.is_active ? 2px : 1px;
+                                    border-color: thumb.is_active ? #0EA5E9 : #334155;
 
-                                    // Thumbnail preview box (Paper silhouette)
-                                    Rectangle {
-                                        width: 60px;
-                                        height: 75px;
-                                        background: #FFFFFF;
-                                        border-radius: 2px;
-                                        border-width: 1px;
-                                        border-color: #CBD5E1;
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        alignment: center;
+
+                                        // Thumbnail preview box (Paper silhouette with authentic document proportions)
+                                        Rectangle {
+                                            width: 56px;
+                                            height: 78px;
+                                            background: #FFFFFF;
+                                            border-radius: 2px;
+                                            border-width: 1px;
+                                            border-color: #CBD5E1;
+
+                                            Text {
+                                                text: thumb.label;
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: #64748B;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
 
                                         Text {
-                                            text: thumb.label;
-                                            font-size: 11px;
-                                            font-weight: 600;
-                                            color: #64748B;
+                                            text: thumb.label + " (" + thumb.dimensions + ")";
+                                            font-size: 10px;
+                                            color: thumb.is_active ? #F8FAFC : #94A3B8;
                                             horizontal-alignment: center;
-                                            vertical-alignment: center;
                                         }
                                     }
 
-                                    Text {
-                                        text: thumb.label + " (" + thumb.dimensions + ")";
-                                        font-size: 10px;
-                                        color: thumb.is_active ? #F8FAFC : #94A3B8;
-                                        horizontal-alignment: center;
-                                    }
-                                }
-
-                                TouchArea {
-                                    clicked => {
-                                        root.page_selected(thumb.page_index);
+                                    TouchArea {
+                                        clicked => {
+                                            root.page_selected(thumb.page_index);
+                                        }
                                     }
                                 }
                             }
-
-                            Rectangle { vertical-stretch: 1; }
                         }
 
                         // Metadata Accordion Section
@@ -966,25 +972,36 @@ export component AppWindow inherits Window {
             Rectangle {
                 horizontal-stretch: 1;
                 background: #0B1120; // Deepest dark slate viewport
+                clip: true; // Strict boundary clipping: prevents canvas bleeding over tabs/toolbars
 
-                // Canvas Background click to clear selection
-                TouchArea {
-                    clicked => {
-                        root.canvas_background_clicked();
-                    }
-                }
+                viewport_scroll := ScrollView {
+                    width: 100%;
+                    height: 100%;
 
-                // Centered Document Canvas
-                canvas_paper := Rectangle {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    width: root.page_width * root.zoom_scale;
-                    height: root.page_height * root.zoom_scale;
-                    background: #FFFFFF; // Pure White Paper
-                    border-radius: 2px;
-                    border-width: 1px;
-                    border-color: #CBD5E1;
-                    drop-shadow-blur: 16px;
+                    Rectangle {
+                        width: Math.max(viewport_scroll.width, canvas_paper.width + 48px);
+                        height: Math.max(viewport_scroll.height, canvas_paper.height + 48px);
+
+                        // Canvas Background click to clear selection
+                        TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            clicked => {
+                                root.canvas_background_clicked();
+                            }
+                        }
+
+                        // Centered Document Canvas
+                        canvas_paper := Rectangle {
+                            x: Math.max(24px, (parent.width - self.width) / 2);
+                            y: Math.max(24px, (parent.height - self.height) / 2);
+                            width: root.page_width * root.zoom_scale;
+                            height: root.page_height * root.zoom_scale;
+                            background: #FFFFFF; // Pure White Paper
+                            border-radius: 2px;
+                            border-width: 1px;
+                            border-color: #CBD5E1;
+                            drop-shadow-blur: 16px;
                     // Native Rasterized PDF Page Image
                     if root.has_rendered_page_image : Image {
                         x: 0px;
@@ -1131,6 +1148,8 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
 
             // ----------------------------------------------------------------
             // 2C. RIGHT CONTEXTUAL PROPERTIES PANEL (Collapsible, ~250px)
