@@ -59,6 +59,25 @@ pub enum AppCommand {
         width: f64,
         height: f64,
     },
+    AddAnnotation {
+        page_index: u32,
+        subtype: String,
+        rect: [f64; 4],
+        contents: Option<String>,
+        color: Option<Vec<f64>>,
+    },
+    SetFormField {
+        field_name: String,
+        value: String,
+    },
+    AddImage {
+        page_index: u32,
+        image_bytes: Vec<u8>,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
     Undo,
     Redo,
     ExportDocument {
@@ -278,6 +297,17 @@ pub fn dispatch_command(
                 }
                 SelectionState::Image { image_ref, .. } => {
                     session.require_can_edit()?;
+                    let page_idx = session.current_page as usize;
+                    let mut doc = session.pdf_document()?;
+                    let spec = starpdf::image::RemoveImageSpec {
+                        page_index: page_idx,
+                        image_id: image_ref.clone(),
+                    };
+                    if let Ok(plan) = doc.remove_image(&spec) {
+                        if let Ok(new_bytes) = doc.export_incremental(&plan) {
+                            session.commit_bytes(format!("Delete image {image_ref}"), new_bytes)?;
+                        }
+                    }
                     session.clear_selection();
                     Ok(CommandResult::ok(format!("Deleted image {image_ref}"))
                         .with_session(session_id))
@@ -292,6 +322,19 @@ pub fn dispatch_command(
                 }
                 SelectionState::Annotation { annot_ref, .. } => {
                     session.require_can_edit()?;
+                    let page_idx = session.current_page as usize;
+                    if let Some(target_ref) = parse_obj_ref(&annot_ref) {
+                        let mut doc = session.pdf_document()?;
+                        let change = starpdf::mutation::PdfChange::RemoveAnnotation {
+                            page_index: page_idx,
+                            annot_ref: target_ref,
+                        };
+                        if let Ok(plan) = doc.apply_mutation(&[change]) {
+                            if let Ok(new_bytes) = doc.export_incremental(&plan) {
+                                session.commit_bytes(format!("Delete annotation {annot_ref}"), new_bytes)?;
+                            }
+                        }
+                    }
                     session.clear_selection();
                     Ok(CommandResult::ok(format!("Deleted annotation {annot_ref}"))
                         .with_session(session_id))
@@ -386,6 +429,138 @@ pub fn dispatch_command(
                 CommandResult::ok(format!("Inserted blank page after {after_index}"))
                     .with_session(session_id),
             )
+        }
+
+        AppCommand::AddAnnotation {
+            page_index,
+            subtype,
+            rect,
+            contents,
+            color,
+        } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let spec = match subtype.as_str() {
+                "FreeText" => starpdf::annotation::types::AnnotationSpec::FreeText {
+                    rect,
+                    text: contents.clone().unwrap_or_default(),
+                    font_size: Some(12.0),
+                    color,
+                },
+                "Highlight" => starpdf::annotation::types::AnnotationSpec::Highlight {
+                    rect,
+                    quad_points: vec![rect[0], rect[3], rect[2], rect[3], rect[0], rect[1], rect[2], rect[1]],
+                    color,
+                },
+                "Underline" => starpdf::annotation::types::AnnotationSpec::Underline {
+                    rect,
+                    quad_points: vec![rect[0], rect[3], rect[2], rect[3], rect[0], rect[1], rect[2], rect[1]],
+                    color,
+                },
+                _ => starpdf::annotation::types::AnnotationSpec::Square {
+                    rect,
+                    stroke_color: color,
+                    fill_color: None,
+                    border_width: Some(1.5),
+                },
+            };
+
+            let mut doc = session.pdf_document()?;
+            let change = starpdf::mutation::PdfChange::AddAnnotation {
+                page_index: page_index as usize,
+                spec,
+            };
+            let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
+            let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+            session.commit_bytes(format!("Add {subtype} annotation to page {page_index}"), new_bytes)?;
+            Ok(CommandResult::ok(format!("{subtype} annotation added to page {page_index}"))
+                .with_session(session_id))
+        }
+
+        AppCommand::SetFormField { field_name, value } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let mut doc = session.pdf_document()?;
+            let fields = doc.form_fields().map_err(AppCoreError::from)?;
+            let field = fields
+                .iter()
+                .find(|f| f.fully_qualified_name == field_name || f.partial_name == field_name)
+                .ok_or_else(|| {
+                    AppCoreError::InvalidOperation(format!("Field \"{field_name}\" not found"))
+                })?;
+
+            let change = match &field.field_type {
+                starpdf::forms::FieldType::Text { .. } => starpdf::mutation::PdfChange::SetTextField {
+                    field_ref: field.object_ref,
+                    value: value.clone(),
+                },
+                starpdf::forms::FieldType::Checkbox => {
+                    let checked = value.eq_ignore_ascii_case("true")
+                        || value.eq_ignore_ascii_case("yes")
+                        || value == "1";
+                    let widget_refs = field.widgets.iter().map(|w| w.object_ref).collect();
+                    starpdf::mutation::PdfChange::SetCheckbox {
+                        field_ref: field.object_ref,
+                        widget_refs,
+                        checked,
+                    }
+                }
+                starpdf::forms::FieldType::Choice { .. } => starpdf::mutation::PdfChange::SetChoice {
+                    field_ref: field.object_ref,
+                    value: value.clone(),
+                },
+                _ => {
+                    return Err(AppCoreError::InvalidOperation(format!(
+                        "Field type {:?} is not directly mutable",
+                        field.field_type
+                    )))
+                }
+            };
+
+            let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
+            let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+            session.commit_bytes(format!("Set field {field_name} = \"{value}\""), new_bytes)?;
+            Ok(CommandResult::ok(format!("Field \"{field_name}\" updated successfully"))
+                .with_session(session_id))
+        }
+
+        AppCommand::AddImage {
+            page_index,
+            image_bytes,
+            x,
+            y,
+            width,
+            height,
+        } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let spec = starpdf::image::AddImageSpec {
+                page_index: page_index as usize,
+                image_bytes,
+                format: starpdf::image::ImageFormat::AutoDetect,
+                x,
+                y,
+                width,
+                height,
+            };
+
+            let mut doc = session.pdf_document()?;
+            let plan = doc.add_image(&spec).map_err(AppCoreError::from)?;
+            let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+            session.commit_bytes(format!("Add image to page {page_index}"), new_bytes)?;
+            Ok(CommandResult::ok(format!("Image added to page {page_index}")).with_session(session_id))
         }
 
         AppCommand::Undo => {
@@ -516,3 +691,19 @@ fn resolve_text_target(
     // Fallback: assume current page and target string
     Ok((current_page, target.to_string()))
 }
+
+/// Parses an ObjectRef from string representation (e.g., "12 0 R", "12 0", or "12").
+fn parse_obj_ref(s: &str) -> Option<starpdf::syntax::object::ObjectRef> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() >= 2 {
+        let num: u64 = parts[0].parse().ok()?;
+        let gen: u16 = parts[1].parse().ok()?;
+        Some(starpdf::syntax::object::ObjectRef::new(num, gen))
+    } else if parts.len() == 1 {
+        let num: u64 = parts[0].parse().ok()?;
+        Some(starpdf::syntax::object::ObjectRef::new(num, 0))
+    } else {
+        None
+    }
+}
+

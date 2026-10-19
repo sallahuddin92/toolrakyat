@@ -1810,5 +1810,131 @@ mod tests {
             println!("  [Phase 9 Screenshot Saved]: {:?}", out_file);
         }
     }
+
+    #[test]
+    fn test_phase10_desktop_product_acceptance_and_qualification() {
+        let _test_guard = init_testing();
+        if let Ok(mut lock) = GPU_RENDERER.lock() {
+            if lock.is_none() {
+                *lock = starpdf::render::WgpuRenderer::new().ok();
+            }
+        }
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let screenshot_dir = resolve_fixture("target/desktop_acceptance_phase10");
+        let _ = std::fs::create_dir_all(&screenshot_dir);
+
+        // 1. Workflow A: Interactive Form Field Editing in Desktop GUI
+        let form_path = resolve_fixture("test-assets/realworld_corpus/forms-employment-application.pdf");
+        let form_bytes = std::fs::read(&form_path).expect("read form");
+        let mut manager = SessionManager::new();
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(form_path.clone()),
+                bytes: form_bytes,
+                title: "forms-employment-application.pdf".into(),
+            })
+            .expect("OpenDocument");
+
+        sync_ui(&app, &manager, "forms", false);
+        assert_eq!(app.get_active_tool(), "forms");
+        assert!(app.get_has_rendered_page_image());
+
+        // Mutate form fields
+        manager
+            .dispatch(AppCommand::SetFormField {
+                field_name: "name_field".into(),
+                value: "Senior Systems Engineer".into(),
+            })
+            .expect("SetFormField name");
+        manager
+            .dispatch(AppCommand::SetFormField {
+                field_name: "rust_cb".into(),
+                value: "false".into(),
+            })
+            .expect("SetFormField checkbox");
+        sync_ui(&app, &manager, "forms", false);
+
+        // Save & Reopen Verification
+        let form_saved_path = std::env::temp_dir().join(format!("phase10_desktop_form_{}.pdf", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        manager
+            .dispatch(AppCommand::SaveDocument {
+                destination_path: Some(form_saved_path.clone()),
+            })
+            .expect("SaveDocument");
+
+        let reopened_bytes = std::fs::read(&form_saved_path).expect("read saved form");
+        let mut reopened_doc = starpdf::document::PdfDocument::from_bytes(&reopened_bytes).expect("parse reopened");
+        let fields = reopened_doc.form_fields().expect("fields");
+        let name_val = fields.iter().find(|f| f.partial_name == "name_field").unwrap();
+        assert_eq!(name_val.value, starpdf::forms::FieldValue::Text("Senior Systems Engineer".into()));
+        let _ = std::fs::remove_file(&form_saved_path);
+
+        // 2. Workflow B: Document Safety & Restrictive Refusal
+        let invoice_path = resolve_fixture("test-assets/realworld_corpus/office-invoice-enterprise.pdf");
+        let inv_bytes = std::fs::read(&invoice_path).expect("read invoice");
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(invoice_path),
+                bytes: inv_bytes,
+                title: "invoice.pdf".into(),
+            })
+            .expect("OpenDocument invoice");
+
+        // Manually lock permissions
+        {
+            let session = manager.active_session_mut().unwrap();
+            session.capabilities.can_edit.allowed = false;
+            session.capabilities.can_edit.reason = "Cryptographic signature protection active".into();
+        }
+        sync_ui(&app, &manager, "text", false);
+        assert_eq!(app.get_security_status(), "Cryptographic signature protection active");
+
+        let bad_edit = manager.dispatch(AppCommand::ReplaceText {
+            target_node: "p0_s0_i0_o0".into(),
+            new_text: "Unauthorized Edit".into(),
+        });
+        assert!(bad_edit.is_err(), "Must refuse editing signed/locked document");
+
+        // 3. Workflow C: Real-World Corpus Rendering & High-Fidelity Qualification Screenshots
+        let shot_targets = [
+            ("test-assets/realworld_corpus/forms-employment-application.pdf", "desktop_phase10_form_editing.png", 1.0, 0),
+            ("test-assets/realworld_corpus/annotations-markup-review.pdf", "desktop_phase10_annotation_review.png", 1.25, 0),
+            ("test-assets/realworld_corpus/complex-infographic-graphics.pdf", "desktop_phase10_infographic_graphics.png", 1.5, 0),
+            ("test-assets/realworld_corpus/scanned-multires-archive.pdf", "desktop_phase10_scanned_multires.png", 1.0, 0),
+            ("test-assets/realworld_corpus/large-manual-20page.pdf", "desktop_phase10_large_manual_page10.png", 1.0, 9),
+            ("test-assets/realworld_corpus/multilingual-arabic-jawi.pdf", "desktop_phase10_arabic_jawi.png", 1.0, 0),
+            ("test-assets/realworld_corpus/multilingual-cjk-unicode.pdf", "desktop_phase10_cjk_unicode.png", 1.0, 0),
+        ];
+
+        for (rel, fname, zoom, page_idx) in shot_targets {
+            let p = resolve_fixture(rel);
+            let b = std::fs::read(&p).unwrap_or_else(|e| panic!("Could not read fixture {:?}: {e}", p));
+            let mut mgr = SessionManager::new();
+            mgr.dispatch(AppCommand::OpenDocument {
+                path: Some(p),
+                bytes: b,
+                title: fname.to_string(),
+            }).unwrap();
+
+            if page_idx > 0 {
+                mgr.dispatch(AppCommand::SetPage { page_index: page_idx }).unwrap();
+            }
+            mgr.dispatch(AppCommand::SetZoom { percent: zoom * 100.0 }).unwrap();
+            sync_ui(&app, &mgr, "select", false);
+
+            let s = mgr.active_session().unwrap();
+            let rendered = s.render_page(s.current_page, zoom).unwrap();
+            let out_file = screenshot_dir.join(fname);
+            image::save_buffer(
+                &out_file,
+                &rendered.rgba_pixels,
+                rendered.width,
+                rendered.height,
+                image::ExtendedColorType::Rgba8,
+            ).unwrap();
+            assert!(out_file.exists());
+            println!("  [Phase 10 Qualification Screenshot Saved]: {:?}", out_file);
+        }
+    }
 }
 
