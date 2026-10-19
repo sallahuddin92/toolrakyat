@@ -6,6 +6,14 @@ authors = ["ToolRakyat Desktop Engineering"]
 description = "Acrobat Pro-class egui desktop frontend for SmartPDF powered by StarPDF engine."
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "smartpdf_desktop_egui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smartpdf-desktop-egui"
+path = "src/main.rs"
+
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "links"] }
 egui = { version = "0.36", features = ["bytemuck"] }

@@ -37,6 +37,12 @@ impl Default for CanvasState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasAction {
+    None,
+    OpenRequested,
+}
+
 pub fn render_document_canvas(
     ui: &mut Ui,
     manager: &mut SessionManager,
@@ -47,13 +53,66 @@ pub fn render_document_canvas(
     page_dims: (f32, f32), // in points (e.g. 595.0, 842.0)
     zoom_percent: f32,
     editing_text_buffer: &mut String,
-) -> Response {
+) -> (Response, CanvasAction) {
     let t = Tokens::get(ui.ctx());
     let available_rect = ui.available_rect_before_wrap();
     let (response, painter) = ui.allocate_painter(available_rect.size(), Sense::click_and_drag());
 
     // Canvas background (Acrobat neutral pasteboard)
     painter.rect_filled(available_rect, CornerRadius::ZERO, t.pasteboard);
+
+    if manager.active_session().is_none() {
+        let mut action = CanvasAction::None;
+        let center = available_rect.center();
+        let card_w = 440.0_f32.min(available_rect.width() - 40.0);
+        let card_h = 240.0;
+        let card_rect = Rect::from_center_size(center, Vec2::new(card_w, card_h));
+
+        painter.rect_filled(card_rect, CornerRadius::same(12), t.card);
+        painter.rect_stroke(card_rect, CornerRadius::same(12), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+
+        let icon_rect = Rect::from_center_size(Pos2::new(center.x, card_rect.top() + 45.0), Vec2::splat(36.0));
+        crate::icons::paint(ui, icon_rect, "file-text", 36.0, t.accent);
+
+        painter.text(
+            Pos2::new(center.x, card_rect.top() + 85.0),
+            egui::Align2::CENTER_CENTER,
+            "No Document Open",
+            crate::theme::semibold(16.0),
+            t.text,
+        );
+
+        painter.text(
+            Pos2::new(center.x, card_rect.top() + 112.0),
+            egui::Align2::CENTER_CENTER,
+            "Open a PDF or drag and drop a file anywhere on this window",
+            crate::theme::regular(13.0),
+            t.text_muted,
+        );
+
+        let btn_w = 160.0;
+        let btn_h = 36.0;
+        let btn_rect = Rect::from_center_size(Pos2::new(center.x, card_rect.top() + 165.0), Vec2::new(btn_w, btn_h));
+        let btn_resp = ui.interact(btn_rect, ui.id().with("empty_open_btn"), Sense::click());
+        let btn_bg = if btn_resp.hovered() { t.accent_soft } else { t.accent };
+        painter.rect_filled(btn_rect, CornerRadius::same(8), btn_bg);
+
+        let btn_icon_rect = Rect::from_min_size(Pos2::new(btn_rect.left() + 20.0, btn_rect.center().y - 8.0), Vec2::splat(16.0));
+        crate::icons::paint(ui, btn_icon_rect, "plus", 16.0, Color32::WHITE);
+        painter.text(
+            Pos2::new(btn_rect.left() + 44.0, btn_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "Open Document",
+            crate::theme::medium(13.5),
+            Color32::WHITE,
+        );
+
+        if btn_resp.clicked() {
+            action = CanvasAction::OpenRequested;
+        }
+
+        return (response, action);
+    }
 
     let scale = (zoom_percent / 100.0) * PT;
     let page_width_px = page_dims.0 * scale;
@@ -194,7 +253,7 @@ pub fn render_document_canvas(
         }
     }
 
-    response
+    (response, CanvasAction::None)
 }
 
 fn to_canvas_rect(core_rect: &CoreRect, page_rect: Rect, scale: f32) -> Rect {

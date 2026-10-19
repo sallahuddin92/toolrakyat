@@ -7,7 +7,7 @@ use starpdf_app_core::command::AppCommand;
 use starpdf_app_core::session::SessionManager;
 
 use crate::icons;
-use crate::panels::{AcrobatMode, ActiveTool, LeftPanelMode};
+use crate::panels::{AcrobatMode, ActiveTool};
 use crate::theme::{self, ThemeKind, Tokens};
 use crate::widgets;
 
@@ -17,16 +17,34 @@ pub const MAC_LIGHT_PITCH: f32 = 20.0;
 pub const MAC_LIGHTS_LEFT: f32 = 10.0;
 pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabStripAction {
+    None,
+    OpenRequested,
+    SwitchTab(String),
+    CloseTab(String),
+    ToggleTheme,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModeBarAction {
+    None,
+    SaveRequested,
+    ToggleLeftPanel,
+    SelectMode(AcrobatMode),
+}
+
 pub fn render_tab_strip(
     ui: &mut Ui,
     manager: &mut SessionManager,
     theme_kind: &mut ThemeKind,
-) {
+) -> TabStripAction {
     let t = Tokens::get(ui.ctx());
     let mac = cfg!(target_os = "macos");
     let left = if mac { MAC_CONTENT_LEFT } else { 8.0 };
     let tab_h = MAC_TITLE_BAR - 2.0;
     let button_size = 24.0;
+    let mut action = TabStripAction::None;
 
     ui.horizontal(|ui| {
         ui.add_space(left);
@@ -39,12 +57,7 @@ pub fn render_tab_strip(
 
         // Open button
         if widgets::ghost_button_sized(ui, "plus", "Open", tab_h).clicked() {
-            if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
-                if let Ok(bytes) = std::fs::read(&path) {
-                    let title = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "document.pdf".to_string());
-                    let _ = manager.dispatch(AppCommand::OpenDocument { path: Some(path), bytes, title });
-                }
-            }
+            action = TabStripAction::OpenRequested;
         }
 
         ui.add_space(4.0);
@@ -100,10 +113,14 @@ pub fn render_tab_strip(
                     ui.painter().rect_filled(close_rect, CornerRadius::same(3), t.hover);
                 }
                 icons::paint(ui, close_rect, "x", 12.0, if close_resp.hovered() { t.text } else { t.text_faint });
+
+                if close_resp.clicked() {
+                    action = TabStripAction::CloseTab(tab.session_id.clone());
+                }
             }
 
-            if resp.clicked() {
-                let _ = manager.dispatch(AppCommand::SwitchTab { session_id: tab.session_id.clone() });
+            if action == TabStripAction::None && resp.clicked() {
+                action = TabStripAction::SwitchTab(tab.session_id.clone());
             }
         }
 
@@ -112,7 +129,7 @@ pub fn render_tab_strip(
             ui.spacing_mut().item_spacing.x = 4.0;
             let theme_ico = if *theme_kind == ThemeKind::Dark { "sun" } else { "moon" };
             if icons::button(ui, theme_ico, button_size, false, "Toggle Light/Dark Theme").clicked() {
-                *theme_kind = if *theme_kind == ThemeKind::Dark { ThemeKind::Light } else { ThemeKind::Dark };
+                action = TabStripAction::ToggleTheme;
             }
 
             if icons::button(ui, "circle-help", button_size, false, "Keyboard Shortcuts").clicked() {
@@ -120,26 +137,23 @@ pub fn render_tab_strip(
             }
         });
     });
+
+    action
 }
 
 pub fn render_mode_bar(
     ui: &mut Ui,
-    manager: &mut SessionManager,
-    active_mode: &mut AcrobatMode,
-    left_panel: &mut LeftPanelMode,
-) {
+    active_mode: AcrobatMode,
+) -> ModeBarAction {
     let t = Tokens::get(ui.ctx());
+    let mut action = ModeBarAction::None;
 
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
 
         // Menu button
         if widgets::ghost_button(ui, "panel-left", "Menu").clicked() {
-            *left_panel = if *left_panel == LeftPanelMode::Closed {
-                LeftPanelMode::AllTools
-            } else {
-                LeftPanelMode::Closed
-            };
+            action = ModeBarAction::ToggleLeftPanel;
         }
 
         ui.add_space(6.0);
@@ -156,11 +170,8 @@ pub fn render_mode_bar(
         ];
 
         for (mode, label) in modes {
-            if widgets::mode_tab(ui, label, *active_mode == mode).clicked() {
-                *active_mode = mode;
-                if mode == AcrobatMode::AllTools {
-                    *left_panel = LeftPanelMode::AllTools;
-                }
+            if widgets::mode_tab(ui, label, active_mode == mode).clicked() {
+                action = ModeBarAction::SelectMode(mode);
             }
         }
 
@@ -173,13 +184,7 @@ pub fn render_mode_bar(
             }
 
             if icons::button(ui, "save", 32.0, false, "Save (⌘S)").clicked() {
-                let existing_path = manager.active_session().and_then(|s| s.file_path.clone());
-                let dest = existing_path.or_else(|| {
-                    rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name("document.pdf").save_file()
-                });
-                if let Some(p) = dest {
-                    let _ = manager.dispatch(AppCommand::SaveDocument { destination_path: Some(p) });
-                }
+                action = ModeBarAction::SaveRequested;
             }
 
             if icons::button(ui, "info", 32.0, false, "Document Properties (⌘D)").clicked() {
@@ -192,6 +197,8 @@ pub fn render_mode_bar(
             }
         });
     });
+
+    action
 }
 
 pub fn render_floating_quick_pill(

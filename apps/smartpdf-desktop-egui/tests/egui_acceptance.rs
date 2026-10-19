@@ -1,4 +1,23 @@
-//! Comprehensive Acceptance and Qualification Test Suite for smartpdf-desktop-egui.
+//! StarPDF App-Core Session Integration Tests (Historical Acceptance Suite).
+//!
+//! AUDIT OF TEST COVERAGE AND LAYER DECOUPLING:
+//! -----------------------------------------------------------------------------------------
+//! - What these 4 tests EXERCISE:
+//!   * Core `SessionManager` document ingestion, tab state tracking, and tab metadata vectors.
+//!   * Headless CPU and GPU rasterization pipelines (`session.render_page` / `render_page_gpu`).
+//!   * High-level mutation commands (`AddAnnotation`, `Undo`, `Redo`, `DuplicatePage`, `ExportDocument`).
+//!   * Text extraction and parser stability on complex enterprise and private homestay documents.
+//!
+//! - What these 4 tests BYPASS:
+//!   * The real `SmartPdfEguiApp` eframe/egui frontend state and lifecycle.
+//!   * Native window event polling, drag-and-drop input handling, and keyboard shortcuts.
+//!   * Top chrome `+ Open` and `CloseTab` UI interaction buttons.
+//!   * Asynchronous native file dialog channels (`rfd`).
+//!   * Egui texture generation (`ctx.load_texture`) and session-keyed texture cache invalidation.
+//!   * Interactive canvas pan/zoom, selection handles, and inline text editing buffers.
+//!
+//! NOTE: For genuine end-to-end GUI acceptance testing that exercises the complete desktop UI,
+//! see `tests/real_gui_e2e_acceptance.rs`.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;

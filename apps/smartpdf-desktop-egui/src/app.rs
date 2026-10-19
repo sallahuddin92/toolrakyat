@@ -3,20 +3,24 @@
 //! with StarPDF authoritative document engine.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use egui::{
-    ColorImage, Context, Frame, Key, Panel, Pos2, TextureHandle, TextureOptions, Ui,
+    Align, Color32, ColorImage, Context, Frame, Key, Layout, Panel, Pos2, Rect, TextureHandle,
+    TextureOptions, Ui, Vec2,
 };
 use starpdf_app_core::command::AppCommand;
 use starpdf_app_core::selection::SelectionState;
 use starpdf_app_core::session::SessionManager;
 
-use crate::canvas::{render_document_canvas, CanvasState, PT};
+use crate::canvas::{render_document_canvas, CanvasAction, CanvasState, PT};
 use crate::chrome::{
     render_bottom_status_bar, render_floating_quick_pill, render_mode_bar, render_tab_strip,
-    MAC_TITLE_BAR,
+    ModeBarAction, TabStripAction, MAC_TITLE_BAR,
 };
+use crate::icons;
 use crate::panels::{
     render_left_panel, render_right_rail, AcrobatMode, ActiveTool, LeftPanelMode,
 };
@@ -34,11 +38,16 @@ pub struct SmartPdfEguiApp {
     pub canvas_state: CanvasState,
     pub page_texture: Option<TextureHandle>,
     pub thumbnail_textures: HashMap<u32, TextureHandle>,
-    pub last_rendered_key: Option<(u64, u32, u32, bool)>, // (revision, page, zoom_bits, gpu)
+    pub last_rendered_key: Option<(String, u64, u32, u32, bool)>, // (session_id, revision, page, zoom_bits, gpu)
     pub render_telemetry: String,
     pub status_message: String,
+    pub error_banner: Option<String>,
+    #[allow(dead_code)]
+    pub is_loading: bool,
+    pub open_dialog_rx: Option<Receiver<Option<PathBuf>>>,
+    pub save_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     pub editing_text_buffer: String,
-    pub screenshot_target: Option<std::path::PathBuf>,
+    pub screenshot_target: Option<PathBuf>,
     pub frame_count: u64,
 }
 
@@ -46,7 +55,15 @@ impl SmartPdfEguiApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Install Inter and JetBrainsMono fonts
         cc.egui_ctx.set_fonts(theme::font_definitions());
+        Self::create_internal()
+    }
 
+    #[allow(dead_code)]
+    pub fn new_headless() -> Self {
+        Self::create_internal()
+    }
+
+    fn create_internal() -> Self {
         // Initialize GPU renderer
         let gpu_renderer = starpdf::render::WgpuRenderer::new().ok();
         let telemetry = if let Some(ref r) = gpu_renderer {
@@ -70,13 +87,108 @@ impl SmartPdfEguiApp {
             last_rendered_key: None,
             render_telemetry: telemetry,
             status_message: "Ready".to_string(),
+            error_banner: None,
+            is_loading: false,
+            open_dialog_rx: None,
+            save_dialog_rx: None,
             editing_text_buffer: String::new(),
             screenshot_target: None,
             frame_count: 0,
         }
     }
 
-    pub fn load_document_bytes(&mut self, path: Option<std::path::PathBuf>, bytes: Vec<u8>, title: String) {
+    pub fn open_file_path(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        match std::fs::read(path_ref) {
+            Ok(bytes) => {
+                let title = path_ref
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "document.pdf".to_string());
+                match self.manager.dispatch(AppCommand::OpenDocument {
+                    path: Some(path_ref.to_path_buf()),
+                    bytes,
+                    title: title.clone(),
+                }) {
+                    Ok(_res) => {
+                        self.status_message = format!("Opened {title}");
+                        self.error_banner = None;
+                        self.invalidate_render();
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let err = format!("Failed to parse PDF {:?}: {e}", path_ref.file_name().unwrap_or_default());
+                        self.error_banner = Some(err.clone());
+                        self.status_message = err.clone();
+                        Err(err)
+                    }
+                }
+            }
+            Err(e) => {
+                let err = format!("Cannot read file {:?}: {e}", path_ref);
+                self.error_banner = Some(err.clone());
+                self.status_message = err.clone();
+                Err(err)
+            }
+        }
+    }
+
+    pub fn trigger_open_dialog(&mut self) {
+        if self.open_dialog_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.open_dialog_rx = Some(rx);
+        self.status_message = "Waiting for file selection...".to_string();
+        std::thread::spawn(move || {
+            let res = rfd::FileDialog::new()
+                .add_filter("PDF Document (*.pdf)", &["pdf"])
+                .pick_file();
+            let _ = tx.send(res);
+        });
+    }
+
+    pub fn trigger_save_dialog(&mut self) {
+        if self.save_dialog_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.save_dialog_rx = Some(rx);
+        self.status_message = "Waiting for save location...".to_string();
+        std::thread::spawn(move || {
+            let res = rfd::FileDialog::new()
+                .add_filter("PDF Document (*.pdf)", &["pdf"])
+                .set_file_name("document.pdf")
+                .save_file();
+            let _ = tx.send(res);
+        });
+    }
+
+    pub fn save_active_document(&mut self, dest: Option<PathBuf>) -> Result<PathBuf, String> {
+        let path = match dest.or_else(|| self.manager.active_session().and_then(|s| s.file_path.clone())) {
+            Some(p) => p,
+            None => {
+                self.trigger_save_dialog();
+                return Err("No destination path specified; triggered Save dialog".to_string());
+            }
+        };
+
+        match self.manager.dispatch(AppCommand::SaveDocument { destination_path: Some(path.clone()) }) {
+            Ok(res) => {
+                self.status_message = res.message;
+                self.error_banner = None;
+                Ok(path)
+            }
+            Err(e) => {
+                let err = format!("Failed to save: {e}");
+                self.error_banner = Some(err.clone());
+                self.status_message = err.clone();
+                Err(err)
+            }
+        }
+    }
+
+    pub fn load_document_bytes(&mut self, path: Option<PathBuf>, bytes: Vec<u8>, title: String) {
         let res = self.manager.dispatch(AppCommand::OpenDocument { path, bytes, title });
         if let Ok(res) = res {
             self.status_message = res.message;
@@ -93,17 +205,19 @@ impl SmartPdfEguiApp {
         }
     }
 
-    fn check_render_update(&mut self, ctx: &Context) {
-        let (current_page, revision, total_pages) = if let Some(s) = self.manager.active_session() {
-            (s.current_page, s.revision, s.total_pages)
+    pub fn check_render_update(&mut self, ctx: &Context) {
+        let (session_id, current_page, revision, total_pages) = if let Some(s) = self.manager.active_session() {
+            (s.id.clone(), s.current_page, s.revision, s.total_pages)
         } else {
+            self.page_texture = None;
+            self.last_rendered_key = None;
             return;
         };
 
         let zoom_bits = self.zoom_percent.to_bits();
-        let key = (revision, current_page, zoom_bits, self.gpu_enabled);
+        let key = (session_id, revision, current_page, zoom_bits, self.gpu_enabled);
 
-        if self.last_rendered_key != Some(key) {
+        if self.last_rendered_key.as_ref() != Some(&key) {
             let start = Instant::now();
             let ppp = ctx.pixels_per_point();
             // High-DPI supersampling scale
@@ -141,7 +255,7 @@ impl SmartPdfEguiApp {
             );
 
             self.page_texture = Some(ctx.load_texture(
-                format!("page_{}_{}", current_page, revision),
+                format!("page_{}_{}_{}", key.0, current_page, revision),
                 color_image,
                 TextureOptions::LINEAR,
             ));
@@ -177,30 +291,29 @@ impl SmartPdfEguiApp {
     }
 
     fn handle_keyboard_shortcuts(&mut self, ctx: &Context) {
+        let mut trigger_open = false;
+        let mut trigger_save = false;
+        let mut trigger_save_as = false;
+        let mut trigger_close = false;
+
         ctx.input(|i| {
             let cmd = i.modifiers.command || i.modifiers.ctrl;
             let shift = i.modifiers.shift;
 
             if cmd && i.key_pressed(Key::O) {
-                if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).pick_file() {
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        let title = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "document.pdf".to_string());
-                        let _ = self.manager.dispatch(AppCommand::OpenDocument { path: Some(path), bytes, title });
-                        self.invalidate_render();
-                    }
-                }
+                trigger_open = true;
+            } else if cmd && shift && i.key_pressed(Key::S) {
+                trigger_save_as = true;
             } else if cmd && i.key_pressed(Key::S) {
-                let existing_path = self.manager.active_session().and_then(|s| s.file_path.clone());
-                let dest = existing_path.or_else(|| {
-                    rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name("document.pdf").save_file()
-                });
-                if let Some(p) = dest {
-                    let _ = self.manager.dispatch(AppCommand::SaveDocument { destination_path: Some(p) });
-                }
+                trigger_save = true;
+            } else if cmd && i.key_pressed(Key::W) {
+                trigger_close = true;
             } else if cmd && shift && i.key_pressed(Key::Z) {
                 let _ = self.manager.dispatch(AppCommand::Redo);
+                self.invalidate_render();
             } else if cmd && i.key_pressed(Key::Z) {
                 let _ = self.manager.dispatch(AppCommand::Undo);
+                self.invalidate_render();
             } else if cmd && i.key_pressed(Key::Num0) {
                 self.zoom_percent = 100.0;
                 let _ = self.manager.dispatch(AppCommand::SetZoom { percent: 100.0 });
@@ -227,16 +340,71 @@ impl SmartPdfEguiApp {
                 }
             }
         });
-    }
-}
 
-impl eframe::App for SmartPdfEguiApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        if trigger_open {
+            self.trigger_open_dialog();
+        }
+        if trigger_save_as {
+            self.trigger_save_dialog();
+        }
+        if trigger_save {
+            let has_path = self.manager.active_session().and_then(|s| s.file_path.clone()).is_some();
+            if has_path {
+                let _ = self.save_active_document(None);
+            } else {
+                self.trigger_save_dialog();
+            }
+        }
+        if trigger_close {
+            if let Some(s) = self.manager.active_session() {
+                let id = s.id.clone();
+                let _ = self.manager.dispatch(AppCommand::CloseSession { session_id: id });
+                self.invalidate_render();
+            }
+        }
+    }
+
+    pub fn render_frame(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
 
         // Apply theme tokens
         theme::apply(&ctx, self.theme_kind);
         let t = Tokens::get(&ctx);
+
+        // Poll async file open receiver
+        if let Some(ref rx) = self.open_dialog_rx {
+            if let Ok(path_opt) = rx.try_recv() {
+                self.open_dialog_rx = None;
+                if let Some(path) = path_opt {
+                    let _ = self.open_file_path(path);
+                } else {
+                    self.status_message = "Open cancelled".to_string();
+                }
+            }
+        }
+
+        // Poll async file save receiver
+        if let Some(ref rx) = self.save_dialog_rx {
+            if let Ok(path_opt) = rx.try_recv() {
+                self.save_dialog_rx = None;
+                if let Some(path) = path_opt {
+                    let _ = self.save_active_document(Some(path));
+                } else {
+                    self.status_message = "Save cancelled".to_string();
+                }
+            }
+        }
+
+        // Handle native drag and drop
+        let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped_files.is_empty() {
+            for dropped in dropped_files {
+                let p = dropped.path();
+                if !p.as_os_str().is_empty() {
+                    let _ = self.open_file_path(p);
+                }
+            }
+        }
 
         // Handle shortcuts
         self.handle_keyboard_shortcuts(&ctx);
@@ -279,20 +447,83 @@ impl eframe::App for SmartPdfEguiApp {
 
         // 1. Tab Strip (integrated title bar)
         let mac = cfg!(target_os = "macos");
+        let mut tab_action = TabStripAction::None;
         Panel::top("tab_strip")
             .exact_size(if mac { MAC_TITLE_BAR } else { 38.0 })
             .frame(Frame::NONE.fill(t.titlebar).inner_margin(egui::Margin { left: 0, right: 10, top: 0, bottom: 0 }))
             .show(ui, |ui| {
-                render_tab_strip(ui, &mut self.manager, &mut self.theme_kind);
+                tab_action = render_tab_strip(ui, &mut self.manager, &mut self.theme_kind);
             });
 
+        match tab_action {
+            TabStripAction::OpenRequested => {
+                self.trigger_open_dialog();
+            }
+            TabStripAction::SwitchTab(id) => {
+                let _ = self.manager.dispatch(AppCommand::SwitchTab { session_id: id });
+                self.invalidate_render();
+            }
+            TabStripAction::CloseTab(id) => {
+                let _ = self.manager.dispatch(AppCommand::CloseSession { session_id: id });
+                self.invalidate_render();
+            }
+            TabStripAction::ToggleTheme => {
+                self.theme_kind = if self.theme_kind == ThemeKind::Dark { ThemeKind::Light } else { ThemeKind::Dark };
+            }
+            TabStripAction::None => {}
+        }
+
         // 2. Mode Bar
+        let mut mode_action = ModeBarAction::None;
         Panel::top("mode_bar")
             .exact_size(48.0)
             .frame(Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)).stroke(egui::Stroke::new(1.0, t.divider)))
             .show(ui, |ui| {
-                render_mode_bar(ui, &mut self.manager, &mut self.active_mode, &mut self.left_panel);
+                mode_action = render_mode_bar(ui, self.active_mode);
             });
+
+        match mode_action {
+            ModeBarAction::SaveRequested => {
+                let _ = self.save_active_document(None);
+            }
+            ModeBarAction::ToggleLeftPanel => {
+                self.left_panel = if self.left_panel == LeftPanelMode::Closed {
+                    LeftPanelMode::AllTools
+                } else {
+                    LeftPanelMode::Closed
+                };
+            }
+            ModeBarAction::SelectMode(mode) => {
+                self.active_mode = mode;
+                if mode == AcrobatMode::AllTools {
+                    self.left_panel = LeftPanelMode::AllTools;
+                }
+            }
+            ModeBarAction::None => {}
+        }
+
+        // 2.5 Error Banner (if present)
+        let mut dismiss_error = false;
+        if let Some(ref err) = self.error_banner {
+            Panel::top("error_banner")
+                .exact_size(32.0)
+                .frame(Frame::NONE.fill(Color32::from_rgb(195, 42, 42)).inner_margin(egui::Margin::symmetric(14, 6)))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        icons::paint(ui, Rect::from_min_size(ui.cursor().min, Vec2::splat(16.0)), "triangle-alert", 16.0, Color32::WHITE);
+                        ui.add_space(20.0);
+                        ui.label(egui::RichText::new(err).color(Color32::WHITE).size(12.0));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button(egui::RichText::new("Dismiss").color(Color32::WHITE).size(11.0)).clicked() {
+                                dismiss_error = true;
+                            }
+                        });
+                    });
+                });
+        }
+        if dismiss_error {
+            self.error_banner = None;
+        }
 
         // 3. Bottom Status Bar
         Panel::bottom("bottom_status")
@@ -347,7 +578,7 @@ impl eframe::App for SmartPdfEguiApp {
                     (595.0, 842.0)
                 };
 
-                let canvas_resp = render_document_canvas(
+                let (canvas_resp, canvas_action) = render_document_canvas(
                     ui,
                     &mut self.manager,
                     &mut self.canvas_state,
@@ -359,14 +590,26 @@ impl eframe::App for SmartPdfEguiApp {
                     &mut self.editing_text_buffer,
                 );
 
-                // Floating vertical quick tools pill docked to the left of the canvas
-                let pill_x = canvas_resp.rect.left() + 14.0;
-                let pill_y = canvas_resp.rect.top() + 16.0;
-                render_floating_quick_pill(
-                    ui,
-                    &mut self.active_tool,
-                    Pos2::new(pill_x, pill_y),
-                );
+                if canvas_action == CanvasAction::OpenRequested {
+                    self.trigger_open_dialog();
+                }
+
+                // Floating vertical quick tools pill docked to the left of the canvas (only if session active)
+                if self.manager.active_session().is_some() {
+                    let pill_x = canvas_resp.rect.left() + 14.0;
+                    let pill_y = canvas_resp.rect.top() + 16.0;
+                    render_floating_quick_pill(
+                        ui,
+                        &mut self.active_tool,
+                        Pos2::new(pill_x, pill_y),
+                    );
+                }
             });
+    }
+}
+
+impl eframe::App for SmartPdfEguiApp {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        self.render_frame(ui);
     }
 }

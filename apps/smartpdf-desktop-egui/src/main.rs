@@ -1,17 +1,10 @@
 //! SmartPDF Desktop Application (egui Acrobat Pro Edition)
 //! Powered by StarPDF App-Core and WGPU / Metal acceleration.
 
-mod app;
-mod canvas;
-mod chrome;
-mod icon_data;
-mod icons;
-mod panels;
-mod theme;
-mod widgets;
-
 use std::path::PathBuf;
-use app::SmartPdfEguiApp;
+use smartpdf_desktop_egui::app::SmartPdfEguiApp;
+use smartpdf_desktop_egui::panels;
+use smartpdf_desktop_egui::theme;
 
 const DEFAULT_SAMPLE_PDF: &[u8] = include_bytes!("../../../test-assets/text-multispan-heading.pdf");
 
@@ -36,7 +29,7 @@ fn main() -> eframe::Result<()> {
     let mut initial_theme = theme::ThemeKind::Light;
     let mut window_width = 1440.0;
     let mut window_height = 900.0;
-    let mut file_arg: Option<PathBuf> = None;
+    let mut file_args: Vec<PathBuf> = Vec::new();
 
     let mut i = 1;
     while i < args.len() {
@@ -87,27 +80,12 @@ fn main() -> eframe::Result<()> {
                 }
             }
             arg if !arg.starts_with('-') => {
-                file_arg = Some(PathBuf::from(arg));
+                file_args.push(PathBuf::from(arg));
             }
             _ => {}
         }
         i += 1;
     }
-
-    let (bytes, title, path_opt) = if let Some(path) = file_arg {
-        if let Ok(b) = std::fs::read(&path) {
-            let t = path
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "document.pdf".to_string());
-            (b, t, Some(path))
-        } else {
-            eprintln!("Warning: could not read path {:?}, loading sample PDF", path);
-            (DEFAULT_SAMPLE_PDF.to_vec(), "sample_contract.pdf".to_string(), None)
-        }
-    } else {
-        (DEFAULT_SAMPLE_PDF.to_vec(), "sample_contract.pdf".to_string(), None)
-    };
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -130,7 +108,17 @@ fn main() -> eframe::Result<()> {
             app.left_panel = initial_panel;
             app.theme_kind = initial_theme;
             app.screenshot_target = screenshot_out;
-            app.load_document_bytes(path_opt, bytes, title);
+
+            if file_args.is_empty() {
+                app.load_document_bytes(None, DEFAULT_SAMPLE_PDF.to_vec(), "sample_contract.pdf".to_string());
+            } else {
+                for path in file_args {
+                    if let Err(e) = app.open_file_path(&path) {
+                        eprintln!("[ERROR] Failed to open provided file {:?}: {}", path, e);
+                    }
+                }
+            }
+
             Ok(Box::new(app))
         }),
     )
