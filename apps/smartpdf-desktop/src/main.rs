@@ -442,6 +442,20 @@ pub fn register_ui_callbacks(
         });
     }
 
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        let is_editing = is_editing.clone();
+        app.on_fit_width_clicked(move || {
+            let mut mgr = manager.borrow_mut();
+            let _ = mgr.dispatch(AppCommand::SetZoom { percent: 125.0 });
+            if let Some(app) = app_weak.upgrade() {
+                sync_ui(&app, &mgr, &active_tool.borrow(), *is_editing.borrow());
+            }
+        });
+    }
+
     // Undo / Redo
     {
         let app_weak = app.as_weak();
@@ -506,6 +520,26 @@ pub fn register_ui_callbacks(
             if let Some(app) = app_weak.upgrade() {
                 let vis = app.get_right_panel_visible();
                 app.set_right_panel_visible(!vis);
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        app.on_toggle_theme(move || {
+            if let Some(app) = app_weak.upgrade() {
+                let dark = app.get_is_dark_mode();
+                app.set_is_dark_mode(!dark);
+            }
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        app.on_left_rail_tab_selected(move |tab_name| {
+            if let Some(app) = app_weak.upgrade() {
+                app.set_left_rail_tab(tab_name);
+                app.set_left_panel_visible(true);
             }
         });
     }
@@ -3105,6 +3139,83 @@ mod tests {
         assert!(shot_path.exists());
 
         println!("  [Phase 13 RC Closure Acceptance Complete]: Window events, canvas drag/resize, form toggling, multilingual text, and save/reopen verified.");
+    }
+
+    #[test]
+    fn test_acrobat_pro_class_ui_workspace() {
+        let _test_guard = init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let manager = Rc::new(RefCell::new(SessionManager::new()));
+        let active_tool = Rc::new(RefCell::new("select".to_string()));
+        let is_editing = Rc::new(RefCell::new(false));
+
+        // 1. Initial State: Light Theme Default
+        assert!(!app.get_is_dark_mode(), "Acrobat Pro-class workspace should default to Light Theme");
+        assert_eq!(app.get_left_rail_tab(), "pages");
+
+        // 2. Wire and test Theme Toggle
+        {
+            let app_weak = app.as_weak();
+            app.on_toggle_theme(move || {
+                if let Some(app) = app_weak.upgrade() {
+                    let dark = app.get_is_dark_mode();
+                    app.set_is_dark_mode(!dark);
+                }
+            });
+        }
+        app.invoke_toggle_theme();
+        assert!(app.get_is_dark_mode(), "Theme should toggle to Dark Mode");
+        app.invoke_toggle_theme();
+        assert!(!app.get_is_dark_mode(), "Theme should toggle back to Light Mode");
+
+        // 3. Wire and test Left Rail Tab Switching
+        {
+            let app_weak = app.as_weak();
+            app.on_left_rail_tab_selected(move |tab_name| {
+                if let Some(app) = app_weak.upgrade() {
+                    app.set_left_rail_tab(tab_name);
+                    app.set_left_panel_visible(true);
+                }
+            });
+        }
+        app.invoke_left_rail_tab_selected("tools".into());
+        assert_eq!(app.get_left_rail_tab(), "tools");
+        assert!(app.get_left_panel_visible());
+
+        app.invoke_left_rail_tab_selected("bookmarks".into());
+        assert_eq!(app.get_left_rail_tab(), "bookmarks");
+
+        app.invoke_left_rail_tab_selected("pages".into());
+        assert_eq!(app.get_left_rail_tab(), "pages");
+
+        // 4. Open Document and Test Fit Width Command
+        {
+            let mut mgr = manager.borrow_mut();
+            mgr.dispatch(AppCommand::OpenDocument {
+                path: None,
+                bytes: DEFAULT_SAMPLE_PDF.to_vec(),
+                title: "acrobat_workspace_test.pdf".into(),
+            }).expect("Open doc");
+        }
+        sync_ui(&app, &manager.borrow(), &active_tool.borrow(), false);
+
+        {
+            let app_weak = app.as_weak();
+            let mgr = manager.clone();
+            let at = active_tool.clone();
+            let ie = is_editing.clone();
+            app.on_fit_width_clicked(move || {
+                let mut m = mgr.borrow_mut();
+                if let Some(_) = m.active_session() {
+                    let _ = m.dispatch(AppCommand::SetZoom { percent: 125.0 });
+                }
+                if let Some(app) = app_weak.upgrade() {
+                    sync_ui(&app, &m, &at.borrow(), *ie.borrow());
+                }
+            });
+        }
+        app.invoke_fit_width_clicked();
+        assert_eq!(app.get_zoom_percent(), 125, "Fit Width should update zoom percent to 125%");
     }
 }
 

@@ -1,4 +1,5 @@
 // SmartPDF Slint UI Specification
+// Acrobat Pro-Class Desktop Workspace & Design System
 // Built for high-performance, precision document engineering matching SmartPDF Design Brief
 
 import { ScrollView } from "std-widgets.slint";
@@ -42,12 +43,12 @@ export struct ElementItem {
 }
 
 export component AppWindow inherits Window {
-    title: "✦ SmartPDF — Precision Document Engineering";
-    preferred-width: 1280px;
-    preferred-height: 820px;
-    min-width: 960px;
-    min-height: 600px;
-    background: #0F172A; // Base Slate 900
+    title: "✦ SmartPDF Pro — Precision Document Engineering";
+    preferred-width: 1320px;
+    preferred-height: 840px;
+    min-width: 980px;
+    min-height: 620px;
+    background: root.is_dark_mode ? #0B1120 : #F1F5F9;
 
     // ==========================================
     // Properties Bound from Rust Application Core
@@ -122,6 +123,11 @@ export component AppWindow inherits Window {
     in-out property <bool> form_field_checked: false;
     in-out property <string> annotation_subtype: ""; // "Highlight", "FreeText", "Square"
 
+    // Acrobat-Class UI Extensions
+    in-out property <bool> is_dark_mode: false; // Professional Light Theme as Default
+    in-out property <string> left_rail_tab: "pages"; // "pages", "tools", "bookmarks"
+    in-out property <string> tools_search_query: "";
+
     // ==========================================
     // Callbacks to Rust Application Core
     // ==========================================
@@ -136,10 +142,13 @@ export component AppWindow inherits Window {
     callback zoom_in_clicked();
     callback zoom_out_clicked();
     callback zoom_reset_clicked();
+    callback fit_width_clicked();
     callback undo_clicked();
     callback redo_clicked();
     callback toggle_left_panel();
     callback toggle_right_panel();
+    callback toggle_theme();
+    callback left_rail_tab_selected(string);
     callback span_selected(string);
     callback element_selected(string);
     callback canvas_background_clicked();
@@ -190,6 +199,10 @@ export component AppWindow inherits Window {
                     root.zoom_reset_clicked();
                     return accept;
                 }
+                if (event.text == "1") {
+                    root.fit_width_clicked();
+                    return accept;
+                }
                 if (event.text == "=" || event.text == "+") {
                     root.zoom_in_clicked();
                     return accept;
@@ -238,20 +251,22 @@ export component AppWindow inherits Window {
         padding: 0px;
 
         // ====================================================================
-        // 1. TOP GLOBAL APPLICATION BAR (Branding + Tabs + Quick Tools)
+        // 1. TOP GLOBAL APPLICATION CHROME (Acrobat-Class 2-Tier Header)
         // ====================================================================
         Rectangle {
-            height: 82px;
-            background: #1E293B; // Slate 800
+            height: 84px;
+            background: root.is_dark_mode ? #1E293B : #FFFFFF;
 
             VerticalLayout {
                 spacing: 0px;
                 padding: 0px;
 
-                // 1A. Top Header & Document Tabs Rail (42px)
+                // ------------------------------------------------------------
+                // 1A. Top Tab Rail: Branding + Document Tabs + Global Tools
+                // ------------------------------------------------------------
                 Rectangle {
                     height: 42px;
-                    background: #151F2E;
+                    background: root.is_dark_mode ? #151F2E : #F8FAFC;
 
                     HorizontalLayout {
                         padding-left: 14px;
@@ -259,13 +274,13 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         alignment: center;
 
-                        // Branding
+                        // SmartPDF Pro Branding
                         HorizontalLayout {
                             spacing: 6px;
                             alignment: center;
                             Text {
                                 text: "✦";
-                                font-size: 16px;
+                                font-size: 17px;
                                 font-weight: 800;
                                 color: #0EA5E9; // Sky 500
                                 vertical-alignment: center;
@@ -274,8 +289,22 @@ export component AppWindow inherits Window {
                                 text: "SmartPDF";
                                 font-size: 14px;
                                 font-weight: 700;
-                                color: #F8FAFC;
+                                color: root.is_dark_mode ? #F8FAFC : #0F172A;
                                 vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 28px;
+                                height: 16px;
+                                border-radius: 3px;
+                                background: #0EA5E922;
+                                Text {
+                                    text: "PRO";
+                                    font-size: 9px;
+                                    font-weight: 800;
+                                    color: #0EA5E9;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
 
@@ -283,22 +312,22 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: 1px;
                             height: 20px;
-                            background: #475569;
+                            background: root.is_dark_mode ? #334155 : #E2E8F0;
                         }
 
-                        // Document Tabs
+                        // Document Tabs Container
                         HorizontalLayout {
                             spacing: 4px;
                             alignment: start;
 
                             for tab in root.tabs : Rectangle {
-                                min-width: 120px;
-                                max-width: 200px;
+                                min-width: 130px;
+                                max-width: 210px;
                                 height: 32px;
-                                background: tab.is_active ? #1E293B : #0F172A;
-                                border-radius: 4px;
+                                background: tab.is_active ? (root.is_dark_mode ? #1E293B : #FFFFFF) : (root.is_dark_mode ? #0F172A : #F1F5F9);
+                                border-radius: 5px;
                                 border-width: 1px;
-                                border-color: tab.is_active ? #0EA5E9 : #334155;
+                                border-color: tab.is_active ? #0EA5E9 : (root.is_dark_mode ? #334155 : #E2E8F0);
 
                                 HorizontalLayout {
                                     padding-left: 10px;
@@ -307,11 +336,17 @@ export component AppWindow inherits Window {
                                     alignment: center;
 
                                     Text {
+                                        text: "📄";
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
                                         horizontal-stretch: 1;
                                         text: tab.is_dirty ? tab.title + " *" : tab.title;
                                         font-size: 12px;
-                                        font-weight: tab.is_active ? 600 : 400;
-                                        color: tab.is_active ? #F8FAFC : #94A3B8;
+                                        font-weight: tab.is_active ? 600 : 500;
+                                        color: tab.is_active ? (root.is_dark_mode ? #F8FAFC : #0F172A) : (root.is_dark_mode ? #94A3B8 : #64748B);
                                         overflow: elide;
                                         horizontal-alignment: left;
                                         vertical-alignment: center;
@@ -327,7 +362,7 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: "×";
                                             font-size: 14px;
-                                            color: close-ta.has-hover ? #FFFFFF : #64748B;
+                                            color: close-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #64748B : #94A3B8);
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
@@ -352,9 +387,9 @@ export component AppWindow inherits Window {
                                 width: 28px;
                                 height: 28px;
                                 border-radius: 4px;
-                                background: add-ta.has-hover ? #334155 : #1E293B;
+                                background: add-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.is_dark_mode ? #1E293B : #F1F5F9);
                                 border-width: 1px;
-                                border-color: #475569;
+                                border-color: root.is_dark_mode ? #475569 : #CBD5E1;
 
                                 Text {
                                     text: "+";
@@ -373,25 +408,57 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Right-aligned header actions
+                        // Flexible space to right controls
                         Rectangle { horizontal-stretch: 1; }
 
-                        // GPU Acceleration Badge/Toggle
+                        // Theme Switcher (Light / Dark)
                         Rectangle {
                             height: 28px;
-                            border-radius: 4px;
-                            background: gpu-btn-ta.has-hover ? #334155 : (root.gpu_acceleration_enabled ? #0369A1 : #1E293B);
+                            border-radius: 5px;
+                            background: theme-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.is_dark_mode ? #1E293B : #F1F5F9);
                             border-width: 1px;
-                            border-color: root.gpu_acceleration_enabled ? #38BDF8 : #475569;
+                            border-color: root.is_dark_mode ? #475569 : #CBD5E1;
+
                             HorizontalLayout {
                                 padding-left: 8px;
                                 padding-right: 8px;
                                 spacing: 4px;
+                                alignment: center;
+                                Text {
+                                    text: root.is_dark_mode ? "🌙 Dark" : "☀️ Light";
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            theme-ta := TouchArea {
+                                clicked => {
+                                    root.is_dark_mode = !root.is_dark_mode;
+                                    root.toggle_theme();
+                                }
+                            }
+                        }
+
+                        // GPU Acceleration Badge/Toggle
+                        Rectangle {
+                            height: 28px;
+                            border-radius: 5px;
+                            background: gpu-btn-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.gpu_acceleration_enabled ? (root.is_dark_mode ? #0369A1 : #E0F2FE) : (root.is_dark_mode ? #1E293B : #F1F5F9));
+                            border-width: 1px;
+                            border-color: root.gpu_acceleration_enabled ? #0EA5E9 : (root.is_dark_mode ? #475569 : #CBD5E1);
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 4px;
+                                alignment: center;
                                 Text {
                                     text: "⚡ " + root.render_engine_badge;
                                     font-size: 11px;
                                     font-weight: 700;
-                                    color: root.gpu_acceleration_enabled ? #FFFFFF : #94A3B8;
+                                    color: root.gpu_acceleration_enabled ? (root.is_dark_mode ? #FFFFFF : #0284C7) : (root.is_dark_mode ? #94A3B8 : #64748B);
                                     vertical-alignment: center;
                                 }
                             }
@@ -400,18 +467,19 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Panel toggle buttons
+                        // Left Navigation Panel Toggle
                         Rectangle {
                             width: 32px;
                             height: 28px;
-                            border-radius: 4px;
-                            background: lp-ta.has-hover ? #334155 : (root.left_panel_visible ? #0284C7 : #1E293B);
+                            border-radius: 5px;
+                            background: lp-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.left_panel_visible ? (root.is_dark_mode ? #0284C7 : #0EA5E9) : (root.is_dark_mode ? #1E293B : #F1F5F9));
                             border-width: 1px;
-                            border-color: #475569;
+                            border-color: root.left_panel_visible ? #0EA5E9 : (root.is_dark_mode ? #475569 : #CBD5E1);
+
                             Text {
                                 text: "◨";
                                 font-size: 14px;
-                                color: #F8FAFC;
+                                color: root.left_panel_visible ? #FFFFFF : (root.is_dark_mode ? #94A3B8 : #64748B);
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -420,17 +488,19 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        // Right Properties Panel Toggle
                         Rectangle {
                             width: 32px;
                             height: 28px;
-                            border-radius: 4px;
-                            background: rp-ta.has-hover ? #334155 : (root.right_panel_visible ? #0284C7 : #1E293B);
+                            border-radius: 5px;
+                            background: rp-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.right_panel_visible ? (root.is_dark_mode ? #0284C7 : #0EA5E9) : (root.is_dark_mode ? #1E293B : #F1F5F9));
                             border-width: 1px;
-                            border-color: #475569;
+                            border-color: root.right_panel_visible ? #0EA5E9 : (root.is_dark_mode ? #475569 : #CBD5E1);
+
                             Text {
                                 text: "◧";
                                 font-size: 14px;
-                                color: #F8FAFC;
+                                color: root.right_panel_visible ? #FFFFFF : (root.is_dark_mode ? #94A3B8 : #64748B);
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -441,35 +511,37 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Divider line
+                // Header Divider
                 Rectangle {
                     height: 1px;
-                    background: #334155;
+                    background: root.is_dark_mode ? #334155 : #E2E8F0;
                 }
 
-                // 1B. Quick Tools Bar (38px)
+                // ------------------------------------------------------------
+                // 1B. Acrobat-Class Mode Navigation & Workflow Action Bar
+                // ------------------------------------------------------------
                 Rectangle {
-                    height: 38px;
-                    background: #1E293B;
+                    height: 41px;
+                    background: root.is_dark_mode ? #1E293B : #FFFFFF;
 
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
+                        padding-left: 14px;
+                        padding-right: 14px;
                         spacing: 8px;
                         alignment: center;
 
-                        // Open Document Button
+                        // Open Document
                         Rectangle {
-                            width: 104px;
+                            width: 96px;
                             height: 28px;
-                            border-radius: 4px;
+                            border-radius: 5px;
                             background: open-btn-ta.has-hover ? #0284C7 : #0EA5E9;
 
                             HorizontalLayout {
                                 alignment: center;
-                                spacing: 4px;
+                                spacing: 5px;
                                 Text {
-                                    text: "📂 Open PDF";
+                                    text: "📂 Open";
                                     font-size: 12px;
                                     font-weight: 600;
                                     color: #FFFFFF;
@@ -484,120 +556,161 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        Rectangle { width: 1px; height: 18px; background: #475569; }
+                        Rectangle { width: 1px; height: 18px; background: root.is_dark_mode ? #334155 : #E2E8F0; }
 
-                        // Tool Modes Switcher
+                        // Acrobat Workflow Categories
                         HorizontalLayout {
                             spacing: 4px;
 
-                            // Select Mode
+                            // All Tools
                             Rectangle {
-                                width: 74px;
+                                width: 88px;
                                 height: 28px;
-                                border-radius: 4px;
-                                background: root.active_tool == "select" ? #0EA5E9 : (t-sel-ta.has-hover ? #334155 : transparent);
-                                Text {
-                                    text: "↖ Select";
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    color: root.active_tool == "select" ? #FFFFFF : #CBD5E1;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                border-radius: 5px;
+                                background: root.left_rail_tab == "tools" && root.left_panel_visible ? (root.is_dark_mode ? #0369A1 : #E0F2FE) : (t-all-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                                border-width: root.left_rail_tab == "tools" && root.left_panel_visible ? 1px : 0px;
+                                border-color: #0EA5E9;
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "🗂 All Tools";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.left_rail_tab == "tools" && root.left_panel_visible ? (root.is_dark_mode ? #FFFFFF : #0284C7) : (root.is_dark_mode ? #CBD5E1 : #334155);
+                                        vertical-alignment: center;
+                                    }
                                 }
-                                t-sel-ta := TouchArea {
-                                    clicked => { root.tool_changed("select"); }
+
+                                t-all-ta := TouchArea {
+                                    clicked => {
+                                        root.left_rail_tab = "tools";
+                                        root.left_panel_visible = true;
+                                        root.left_rail_tab_selected("tools");
+                                    }
                                 }
                             }
 
-                            // Text Mode
+                            // Edit PDF
                             Rectangle {
-                                width: 68px;
+                                width: 78px;
                                 height: 28px;
-                                border-radius: 4px;
-                                background: root.active_tool == "text" ? #0EA5E9 : (t-txt-ta.has-hover ? #334155 : transparent);
-                                Text {
-                                    text: "T Text";
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    color: root.active_tool == "text" ? #FFFFFF : #CBD5E1;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                border-radius: 5px;
+                                background: root.active_tool == "text" ? #0EA5E9 : (t-edit-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "✎ Edit";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.active_tool == "text" ? #FFFFFF : (root.is_dark_mode ? #CBD5E1 : #334155);
+                                        vertical-alignment: center;
+                                    }
                                 }
-                                t-txt-ta := TouchArea {
-                                    clicked => { root.tool_changed("text"); }
+
+                                t-edit-ta := TouchArea {
+                                    clicked => {
+                                        root.tool_changed("text");
+                                    }
                                 }
                             }
 
-                            // Annotate Mode
+                            // Organize Pages
                             Rectangle {
-                                width: 84px;
+                                width: 92px;
                                 height: 28px;
-                                border-radius: 4px;
-                                background: root.active_tool == "annotate" ? #0EA5E9 : (t-ann-ta.has-hover ? #334155 : transparent);
-                                Text {
-                                    text: "✎ Annotate";
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    color: root.active_tool == "annotate" ? #FFFFFF : #CBD5E1;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                border-radius: 5px;
+                                background: root.active_tool == "pages" ? #0EA5E9 : (t-org-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "☷ Organize";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.active_tool == "pages" ? #FFFFFF : (root.is_dark_mode ? #CBD5E1 : #334155);
+                                        vertical-alignment: center;
+                                    }
                                 }
-                                t-ann-ta := TouchArea {
-                                    clicked => { root.tool_changed("annotate"); }
+
+                                t-org-ta := TouchArea {
+                                    clicked => {
+                                        root.tool_changed("pages");
+                                        root.left_rail_tab = "pages";
+                                        root.left_panel_visible = true;
+                                    }
                                 }
                             }
 
-                            // Forms Mode
+                            // Forms & Fill
                             Rectangle {
-                                width: 72px;
+                                width: 78px;
                                 height: 28px;
-                                border-radius: 4px;
-                                background: root.active_tool == "forms" ? #0EA5E9 : (t-frm-ta.has-hover ? #334155 : transparent);
-                                Text {
-                                    text: "☑ Forms";
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    color: root.active_tool == "forms" ? #FFFFFF : #CBD5E1;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                border-radius: 5px;
+                                background: root.active_tool == "forms" ? #0EA5E9 : (t-frm-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "☑ Forms";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.active_tool == "forms" ? #FFFFFF : (root.is_dark_mode ? #CBD5E1 : #334155);
+                                        vertical-alignment: center;
+                                    }
                                 }
+
                                 t-frm-ta := TouchArea {
-                                    clicked => { root.tool_changed("forms"); }
+                                    clicked => {
+                                        root.tool_changed("forms");
+                                    }
                                 }
                             }
 
-                            // Pages Mode
+                            // Annotate & Review
                             Rectangle {
-                                width: 72px;
+                                width: 92px;
                                 height: 28px;
-                                border-radius: 4px;
-                                background: root.active_tool == "pages" ? #0EA5E9 : (t-pgs-ta.has-hover ? #334155 : transparent);
-                                Text {
-                                    text: "☷ Pages";
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    color: root.active_tool == "pages" ? #FFFFFF : #CBD5E1;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                                border-radius: 5px;
+                                background: root.active_tool == "annotate" ? #0EA5E9 : (t-ann-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "✎ Annotate";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.active_tool == "annotate" ? #FFFFFF : (root.is_dark_mode ? #CBD5E1 : #334155);
+                                        vertical-alignment: center;
+                                    }
                                 }
-                                t-pgs-ta := TouchArea {
-                                    clicked => { root.tool_changed("pages"); }
+
+                                t-ann-ta := TouchArea {
+                                    clicked => {
+                                        root.tool_changed("annotate");
+                                    }
                                 }
                             }
                         }
 
-                        Rectangle { width: 1px; height: 18px; background: #475569; }
+                        Rectangle { width: 1px; height: 18px; background: root.is_dark_mode ? #334155 : #E2E8F0; }
 
-                        // Undo / Redo
+                        // History Undo / Redo
                         Rectangle {
                             width: 32px;
                             height: 28px;
                             border-radius: 4px;
-                            background: undo-ta.has-hover && root.can_undo ? #334155 : transparent;
+                            background: undo-ta.has-hover && root.can_undo ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
                             Text {
                                 text: "↩";
                                 font-size: 15px;
-                                color: root.can_undo ? #F8FAFC : #64748B;
+                                color: root.can_undo ? (root.is_dark_mode ? #F8FAFC : #0F172A) : (root.is_dark_mode ? #475569 : #CBD5E1);
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -610,11 +723,11 @@ export component AppWindow inherits Window {
                             width: 32px;
                             height: 28px;
                             border-radius: 4px;
-                            background: redo-ta.has-hover && root.can_redo ? #334155 : transparent;
+                            background: redo-ta.has-hover && root.can_redo ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
                             Text {
                                 text: "↪";
                                 font-size: 15px;
-                                color: root.can_redo ? #F8FAFC : #64748B;
+                                color: root.can_redo ? (root.is_dark_mode ? #F8FAFC : #0F172A) : (root.is_dark_mode ? #475569 : #CBD5E1);
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -623,162 +736,51 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        Rectangle { width: 1px; height: 18px; background: #475569; }
-
-                        // Zoom Controls
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: zm-out-ta.has-hover ? #334155 : transparent;
-                            Text {
-                                text: "−";
-                                font-size: 16px;
-                                color: #CBD5E1;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            zm-out-ta := TouchArea {
-                                clicked => { root.zoom_out_clicked(); }
-                            }
-                        }
-
-                        Text {
-                            text: root.zoom_percent + "%";
-                            font-size: 12px;
-                            color: #F8FAFC;
-                            vertical-alignment: center;
-                        }
-
-                        Rectangle {
-                            width: 28px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: zm-in-ta.has-hover ? #334155 : transparent;
-                            Text {
-                                text: "+";
-                                font-size: 16px;
-                                color: #CBD5E1;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            zm-in-ta := TouchArea {
-                                clicked => { root.zoom_in_clicked(); }
-                            }
-                        }
-
-                        Rectangle {
-                            width: 64px;
-                            height: 28px;
-                            border-radius: 4px;
-                            background: fit-ta.has-hover ? #334155 : transparent;
-                            Text {
-                                text: "Fit Page";
-                                font-size: 11px;
-                                color: #94A3B8;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            fit-ta := TouchArea {
-                                clicked => { root.zoom_reset_clicked(); }
-                            }
-                        }
-
-                        // Annotate Quick Tools (if annotate mode active)
-                        if root.active_tool == "annotate" : HorizontalLayout {
-                            spacing: 4px;
-                            Rectangle {
-                                width: 78px;
-                                height: 26px;
-                                border-radius: 4px;
-                                background: btn-hl.has-hover ? #F59E0B44 : #F59E0B22;
-                                border-width: 1px;
-                                border-color: #F59E0B;
-                                Text { text: "+ Highlight"; font-size: 11px; font-weight: 600; color: #F59E0B; horizontal-alignment: center; vertical-alignment: center; }
-                                btn-hl := TouchArea { clicked => { root.add_annotation_clicked("Highlight"); } }
-                            }
-                            Rectangle {
-                                width: 72px;
-                                height: 26px;
-                                border-radius: 4px;
-                                background: btn-ft.has-hover ? #0EA5E944 : #0EA5E922;
-                                border-width: 1px;
-                                border-color: #0EA5E9;
-                                Text { text: "+ FreeText"; font-size: 11px; font-weight: 600; color: #0EA5E9; horizontal-alignment: center; vertical-alignment: center; }
-                                btn-ft := TouchArea { clicked => { root.add_annotation_clicked("FreeText"); } }
-                            }
-                            Rectangle {
-                                width: 64px;
-                                height: 26px;
-                                border-radius: 4px;
-                                background: btn-sq.has-hover ? #10B98144 : #10B98122;
-                                border-width: 1px;
-                                border-color: #10B981;
-                                Text { text: "+ Square"; font-size: 11px; font-weight: 600; color: #10B981; horizontal-alignment: center; vertical-alignment: center; }
-                                btn-sq := TouchArea { clicked => { root.add_annotation_clicked("Square"); } }
-                            }
-                        }
-
-                        // Add Image Button
-                        Rectangle {
-                            width: 68px;
-                            height: 26px;
-                            border-radius: 4px;
-                            background: btn-img.has-hover ? #334155 : transparent;
-                            border-width: 1px;
-                            border-color: #475569;
-                            Text { text: "🖼 +Image"; font-size: 11px; font-weight: 500; color: #CBD5E1; horizontal-alignment: center; vertical-alignment: center; }
-                            btn-img := TouchArea { clicked => { root.add_image_clicked(); } }
-                        }
-
-                        // Delete Selected Button
-                        if root.has_selection : Rectangle {
-                            width: 72px;
-                            height: 26px;
-                            border-radius: 4px;
-                            background: btn-del.has-hover ? #DC2626 : #EF444433;
-                            border-width: 1px;
-                            border-color: #EF4444;
-                            Text { text: "🗑 Delete"; font-size: 11px; font-weight: 600; color: #FCA5A5; horizontal-alignment: center; vertical-alignment: center; }
-                            btn-del := TouchArea { clicked => { root.delete_selected_clicked(); } }
-                        }
-
+                        // Right-aligned global actions
                         Rectangle { horizontal-stretch: 1; }
 
-                        // Save Button
+                        // Save Document
                         Rectangle {
                             width: 76px;
                             height: 28px;
-                            border-radius: 4px;
-                            background: sav-ta.has-hover ? #334155 : #1E293B;
+                            border-radius: 5px;
+                            background: sav-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : (root.is_dark_mode ? #1E293B : #F8FAFC);
                             border-width: 1px;
-                            border-color: #475569;
-                            Text {
-                                text: "🖫 Save";
-                                font-size: 12px;
-                                font-weight: 500;
-                                color: #F8FAFC;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            border-color: root.is_dark_mode ? #475569 : #CBD5E1;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                Text {
+                                    text: "🖫 Save";
+                                    font-size: 12px;
+                                    font-weight: 500;
+                                    color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                    vertical-alignment: center;
+                                }
                             }
                             sav-ta := TouchArea {
                                 clicked => { root.save_document_clicked(); }
                             }
                         }
 
-                        // Export Button
+                        // Export Button (Primary Accent)
                         Rectangle {
                             width: 96px;
                             height: 28px;
-                            border-radius: 4px;
+                            border-radius: 5px;
                             background: exp-ta.has-hover ? #0284C7 : #0EA5E9;
-                            Text {
-                                text: "💾 Export ▾";
-                                font-size: 12px;
-                                font-weight: 600;
-                                color: #FFFFFF;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                Text {
+                                    text: "💾 Export ▾";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: #FFFFFF;
+                                    vertical-alignment: center;
+                                }
                             }
                             exp-ta := TouchArea {
                                 clicked => { root.export_document_clicked(); }
@@ -787,172 +789,461 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Bottom divider line of top bar
+                // Chrome Bottom Border
                 Rectangle {
                     height: 1px;
-                    background: #334155;
+                    background: root.is_dark_mode ? #334155 : #CBD5E1;
                 }
             }
         }
 
         // ====================================================================
-        // 2. MAIN THREE-PANEL WORKSPACE (Left Nav + Central Canvas + Right Props)
+        // 2. MAIN THREE-PANEL WORKSPACE (Left Nav + Central Viewport + Right Props)
         // ====================================================================
         HorizontalLayout {
             spacing: 0px;
             vertical-stretch: 1;
 
             // ----------------------------------------------------------------
-            // 2A. LEFT NAVIGATION RAIL (Collapsible, ~220px)
+            // 2A. LEFT NAVIGATION RAIL (Acrobat-Style Navigation ~240px)
             // ----------------------------------------------------------------
             if root.left_panel_visible : HorizontalLayout {
                 spacing: 0px;
                 Rectangle {
-                    width: 220px;
-                    background: #1E293B; // Slate 800
+                    width: 240px;
+                    background: root.is_dark_mode ? #151F2E : #F8FAFC;
 
                     VerticalLayout {
-                        spacing: 8px;
+                        spacing: 0px;
+                        padding: 0px;
 
-                        // Header with Page Controls
+                        // Left Rail Mode Tabs Header (Pages, All Tools, Bookmarks)
                         Rectangle {
-                            height: 28px;
+                            height: 38px;
+                            background: root.is_dark_mode ? #1E293B : #F1F5F9;
+
                             HorizontalLayout {
-                                alignment: space-between;
-                                Text {
-                                    text: "PAGES (" + root.total_pages + ")";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    color: #94A3B8;
-                                    vertical-alignment: center;
-                                }
-                                HorizontalLayout {
-                                    spacing: 4px;
-                                    alignment: center;
-                                    Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 3px;
-                                        background: b-btn.has-hover ? #0284C7 : #334155;
-                                        Text { text: "+"; font-size: 13px; font-weight: 700; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
-                                        b-btn := TouchArea { clicked => { root.insert_blank_page_clicked(); } }
-                                    }
-                                    Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 3px;
-                                        background: d-btn.has-hover ? #0284C7 : #334155;
-                                        Text { text: "⧉"; font-size: 11px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
-                                        d-btn := TouchArea { clicked => { root.duplicate_page_clicked(); } }
-                                    }
-                                    Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 3px;
-                                        background: u-btn.has-hover ? #0284C7 : #334155;
-                                        Text { text: "▲"; font-size: 9px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
-                                        u-btn := TouchArea { clicked => { root.move_page_up_clicked(); } }
-                                    }
-                                    Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 3px;
-                                        background: dn-btn.has-hover ? #0284C7 : #334155;
-                                        Text { text: "▼"; font-size: 9px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
-                                        dn-btn := TouchArea { clicked => { root.move_page_down_clicked(); } }
-                                    }
-                                    Rectangle {
-                                        width: 20px;
-                                        height: 20px;
-                                        border-radius: 3px;
-                                        background: del-btn.has-hover ? #EF4444 : #334155;
-                                        Text { text: "🗑"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
-                                        del-btn := TouchArea { clicked => { root.delete_page_clicked(); } }
-                                    }
-                                }
-                            }
-                        }
+                                spacing: 2px;
+                                padding: 3px;
 
-                        // Thumbnails list
-                        ScrollView {
-                            vertical-stretch: 1;
+                                // Pages Tab
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: root.left_rail_tab == "pages" ? (root.is_dark_mode ? #0F172A : #FFFFFF) : transparent;
+                                    border-width: root.left_rail_tab == "pages" ? 1px : 0px;
+                                    border-color: root.is_dark_mode ? #334155 : #CBD5E1;
 
-                            VerticalLayout {
-                                spacing: 8px;
-                                padding-right: 4px;
-
-                                for thumb in root.thumbnails : Rectangle {
-                                    height: 110px;
-                                    background: thumb.is_active ? #0F172A : #151F2E;
-                                    border-radius: 6px;
-                                    border-width: thumb.is_active ? 2px : 1px;
-                                    border-color: thumb.is_active ? #0EA5E9 : #334155;
-
-                                    VerticalLayout {
-                                        spacing: 4px;
-                                        alignment: center;
-
-                                        // Thumbnail preview box (Paper silhouette with authentic document proportions)
-                                        Rectangle {
-                                            width: 56px;
-                                            height: 78px;
-                                            background: #FFFFFF;
-                                            border-radius: 2px;
-                                            border-width: 1px;
-                                            border-color: #CBD5E1;
-
-                                            Text {
-                                                text: thumb.label;
-                                                font-size: 11px;
-                                                font-weight: 600;
-                                                color: #64748B;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        Text {
-                                            text: thumb.label + " (" + thumb.dimensions + ")";
-                                            font-size: 10px;
-                                            color: thumb.is_active ? #F8FAFC : #94A3B8;
-                                            horizontal-alignment: center;
-                                        }
+                                    Text {
+                                        text: "☷ Pages";
+                                        font-size: 11px;
+                                        font-weight: root.left_rail_tab == "pages" ? 700 : 500;
+                                        color: root.left_rail_tab == "pages" ? #0EA5E9 : (root.is_dark_mode ? #94A3B8 : #64748B);
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
                                     }
 
                                     TouchArea {
                                         clicked => {
-                                            root.page_selected(thumb.page_index);
+                                            root.left_rail_tab = "pages";
+                                            root.left_rail_tab_selected("pages");
+                                        }
+                                    }
+                                }
+
+                                // All Tools Tab
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: root.left_rail_tab == "tools" ? (root.is_dark_mode ? #0F172A : #FFFFFF) : transparent;
+                                    border-width: root.left_rail_tab == "tools" ? 1px : 0px;
+                                    border-color: root.is_dark_mode ? #334155 : #CBD5E1;
+
+                                    Text {
+                                        text: "🗂 Tools";
+                                        font-size: 11px;
+                                        font-weight: root.left_rail_tab == "tools" ? 700 : 500;
+                                        color: root.left_rail_tab == "tools" ? #0EA5E9 : (root.is_dark_mode ? #94A3B8 : #64748B);
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    TouchArea {
+                                        clicked => {
+                                            root.left_rail_tab = "tools";
+                                            root.left_rail_tab_selected("tools");
+                                        }
+                                    }
+                                }
+
+                                // Bookmarks Tab
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: root.left_rail_tab == "bookmarks" ? (root.is_dark_mode ? #0F172A : #FFFFFF) : transparent;
+                                    border-width: root.left_rail_tab == "bookmarks" ? 1px : 0px;
+                                    border-color: root.is_dark_mode ? #334155 : #CBD5E1;
+
+                                    Text {
+                                        text: "🔖 Outline";
+                                        font-size: 11px;
+                                        font-weight: root.left_rail_tab == "bookmarks" ? 700 : 500;
+                                        color: root.left_rail_tab == "bookmarks" ? #0EA5E9 : (root.is_dark_mode ? #94A3B8 : #64748B);
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    TouchArea {
+                                        clicked => {
+                                            root.left_rail_tab = "bookmarks";
+                                            root.left_rail_tab_selected("bookmarks");
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Metadata Accordion Section
+                        // Sub-header Divider
                         Rectangle {
-                            height: 70px;
-                            background: #0F172A;
-                            border-radius: 6px;
-                            border-width: 1px;
-                            border-color: #334155;
+                            height: 1px;
+                            background: root.is_dark_mode ? #334155 : #E2E8F0;
+                        }
+
+                        // Content Area Based on Mode Tab
+                        // 1. Pages Thumbnails Mode
+                        if root.left_rail_tab == "pages" : VerticalLayout {
+                            vertical-stretch: 1;
+                            spacing: 8px;
+                            padding: 10px;
+
+                            // Page Action Header
+                            Rectangle {
+                                height: 28px;
+                                HorizontalLayout {
+                                    alignment: space-between;
+                                    Text {
+                                        text: "PAGES (" + root.total_pages + ")";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: root.is_dark_mode ? #94A3B8 : #64748B;
+                                        vertical-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        alignment: center;
+                                        // Insert Blank
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 4px;
+                                            background: b-btn.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                            Text { text: "+"; font-size: 13px; font-weight: 700; color: b-btn.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
+                                            b-btn := TouchArea { clicked => { root.insert_blank_page_clicked(); } }
+                                        }
+                                        // Duplicate
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 4px;
+                                            background: d-btn.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                            Text { text: "⧉"; font-size: 11px; color: d-btn.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
+                                            d-btn := TouchArea { clicked => { root.duplicate_page_clicked(); } }
+                                        }
+                                        // Move Up
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 4px;
+                                            background: u-btn.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                            Text { text: "▲"; font-size: 9px; color: u-btn.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
+                                            u-btn := TouchArea { clicked => { root.move_page_up_clicked(); } }
+                                        }
+                                        // Move Down
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 4px;
+                                            background: dn-btn.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                            Text { text: "▼"; font-size: 9px; color: dn-btn.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
+                                            dn-btn := TouchArea { clicked => { root.move_page_down_clicked(); } }
+                                        }
+                                        // Delete Page
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 22px;
+                                            border-radius: 4px;
+                                            background: del-btn.has-hover ? #EF4444 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                            Text { text: "🗑"; font-size: 10px; color: del-btn.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
+                                            del-btn := TouchArea { clicked => { root.delete_page_clicked(); } }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Thumbnails Scrollable List
+                            ScrollView {
+                                vertical-stretch: 1;
+
+                                VerticalLayout {
+                                    spacing: 8px;
+                                    padding-right: 4px;
+
+                                    for thumb in root.thumbnails : Rectangle {
+                                        height: 110px;
+                                        background: thumb.is_active ? (root.is_dark_mode ? #0F172A : #FFFFFF) : (root.is_dark_mode ? #1E293B : #F1F5F9);
+                                        border-radius: 6px;
+                                        border-width: thumb.is_active ? 2px : 1px;
+                                        border-color: thumb.is_active ? #0EA5E9 : (root.is_dark_mode ? #334155 : #E2E8F0);
+
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            alignment: center;
+
+                                            // Thumbnail preview box (Paper silhouette with authentic document proportions)
+                                            Rectangle {
+                                                width: 56px;
+                                                height: 78px;
+                                                background: #FFFFFF;
+                                                border-radius: 2px;
+                                                border-width: 1px;
+                                                border-color: #CBD5E1;
+                                                drop-shadow-blur: 4px;
+
+                                                Text {
+                                                    text: thumb.label;
+                                                    font-size: 11px;
+                                                    font-weight: 600;
+                                                    color: #64748B;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+
+                                            Text {
+                                                text: thumb.label + " (" + thumb.dimensions + ")";
+                                                font-size: 10px;
+                                                color: thumb.is_active ? (root.is_dark_mode ? #F8FAFC : #0F172A) : (root.is_dark_mode ? #94A3B8 : #64748B);
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+
+                                        TouchArea {
+                                            clicked => {
+                                                root.page_selected(thumb.page_index);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. All Tools Catalog Mode
+                        if root.left_rail_tab == "tools" : ScrollView {
+                            vertical-stretch: 1;
 
                             VerticalLayout {
-                                spacing: 3px;
+                                spacing: 10px;
+                                padding: 10px;
+
                                 Text {
-                                    text: "DOCUMENT METADATA";
-                                    font-size: 10px;
+                                    text: "ALL TOOLS CATALOG";
+                                    font-size: 11px;
                                     font-weight: 700;
                                     color: #0EA5E9;
                                 }
+
+                                // Category: Edit PDF
+                                Rectangle {
+                                    background: root.is_dark_mode ? #0F172A : #FFFFFF;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text { text: "EDIT PDF"; font-size: 10px; font-weight: 700; color: root.is_dark_mode ? #94A3B8 : #64748B; }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-e-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "✎ Edit Text & Typography"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-e-ta := TouchArea { clicked => { root.tool_changed("text"); } }
+                                        }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-i-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "🖼 Insert / Replace Image"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-i-ta := TouchArea { clicked => { root.add_image_clicked(); } }
+                                        }
+                                    }
+                                }
+
+                                // Category: Forms & Signatures
+                                Rectangle {
+                                    background: root.is_dark_mode ? #0F172A : #FFFFFF;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text { text: "FORMS & SIGNATURES"; font-size: 10px; font-weight: 700; color: root.is_dark_mode ? #94A3B8 : #64748B; }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-f-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "☑ Interactive Form Fields"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-f-ta := TouchArea { clicked => { root.tool_changed("forms"); } }
+                                        }
+                                    }
+                                }
+
+                                // Category: Markup & Review
+                                Rectangle {
+                                    background: root.is_dark_mode ? #0F172A : #FFFFFF;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text { text: "REVIEW & ANNOTATIONS"; font-size: 10px; font-weight: 700; color: root.is_dark_mode ? #94A3B8 : #64748B; }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-h-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "✎ Text Highlight"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-h-ta := TouchArea { clicked => { root.add_annotation_clicked("Highlight"); } }
+                                        }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-n-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "💬 FreeText Sticky Note"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-n-ta := TouchArea { clicked => { root.add_annotation_clicked("FreeText"); } }
+                                        }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-s-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "▢ Geometric Box / Shape"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-s-ta := TouchArea { clicked => { root.add_annotation_clicked("Square"); } }
+                                        }
+                                    }
+                                }
+
+                                // Category: Convert & Export
+                                Rectangle {
+                                    background: root.is_dark_mode ? #0F172A : #FFFFFF;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text { text: "CONVERT & EXPORT"; font-size: 10px; font-weight: 700; color: root.is_dark_mode ? #94A3B8 : #64748B; }
+
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: tc-x-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                                            HorizontalLayout { padding-left: 6px; spacing: 6px; alignment: center;
+                                                Text { text: "💾 Clean Structural Export"; font-size: 11px; color: root.is_dark_mode ? #F8FAFC : #0F172A; vertical-alignment: center; }
+                                            }
+                                            tc-x-ta := TouchArea { clicked => { root.export_document_clicked(); } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Bookmarks Mode
+                        if root.left_rail_tab == "bookmarks" : VerticalLayout {
+                            vertical-stretch: 1;
+                            spacing: 8px;
+                            padding: 12px;
+
+                            Text {
+                                text: "DOCUMENT OUTLINE";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: #0EA5E9;
+                            }
+
+                            Rectangle {
+                                background: root.is_dark_mode ? #0F172A : #FFFFFF;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "• Document Root Section";
+                                        font-size: 11px;
+                                        color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                    }
+                                    Text {
+                                        text: "  └ Page 1: Overview";
+                                        font-size: 11px;
+                                        color: #0EA5E9;
+                                    }
+                                    if root.total_pages > 1 : Text {
+                                        text: "  └ Page 2: Appendix";
+                                        font-size: 11px;
+                                        color: root.is_dark_mode ? #94A3B8 : #64748B;
+                                    }
+                                }
+                            }
+
+                            Rectangle { vertical-stretch: 1; }
+                        }
+
+                        // Privacy Reassurance Card at bottom of left rail
+                        Rectangle {
+                            height: 60px;
+                            background: root.is_dark_mode ? #0F172A : #F1F5F9;
+                            border-width: 1px;
+                            border-color: root.is_dark_mode ? #334155 : #E2E8F0;
+
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 2px;
+                                alignment: center;
                                 Text {
-                                    text: "Pages: " + root.total_pages;
-                                    font-size: 11px;
-                                    color: #CBD5E1;
+                                    text: "🛡️ 100% Local-First Processing";
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    color: #10B981;
                                 }
                                 Text {
-                                    text: "Security: Local-First / Private";
-                                    font-size: 10px;
-                                    color: #10B981;
+                                    text: "Zero cloud upload • Pure Rust engine";
+                                    font-size: 9px;
+                                    color: root.is_dark_mode ? #94A3B8 : #64748B;
                                 }
                             }
                         }
@@ -962,25 +1253,26 @@ export component AppWindow inherits Window {
                 // Left panel separator
                 Rectangle {
                     width: 1px;
-                    background: #334155;
+                    background: root.is_dark_mode ? #334155 : #E2E8F0;
                 }
             }
 
             // ----------------------------------------------------------------
-            // 2B. CENTRAL PDF VIEWPORT (Main Document Canvas)
+            // 2B. CENTRAL PDF VIEWPORT (Main Document Canvas + Floating Quick Tools)
             // ----------------------------------------------------------------
             Rectangle {
                 horizontal-stretch: 1;
-                background: #0B1120; // Deepest dark slate viewport
+                background: root.is_dark_mode ? #0B1120 : #E2E8F0; // Neutral calm canvas
                 clip: true; // Strict boundary clipping: prevents canvas bleeding over tabs/toolbars
 
+                // Document Viewport ScrollView
                 viewport_scroll := ScrollView {
                     width: 100%;
                     height: 100%;
 
                     Rectangle {
                         width: Math.max(viewport_scroll.width, canvas_paper.width + 48px);
-                        height: Math.max(viewport_scroll.height, canvas_paper.height + 48px);
+                        height: Math.max(viewport_scroll.height, canvas_paper.height + 64px);
 
                         // Canvas Background click to clear selection
                         TouchArea {
@@ -994,152 +1286,151 @@ export component AppWindow inherits Window {
                         // Centered Document Canvas
                         canvas_paper := Rectangle {
                             x: Math.max(24px, (parent.width - self.width) / 2);
-                            y: Math.max(24px, (parent.height - self.height) / 2);
+                            y: Math.max(36px, (parent.height - self.height) / 2);
                             width: root.page_width * root.zoom_scale;
                             height: root.page_height * root.zoom_scale;
                             background: #FFFFFF; // Pure White Paper
                             border-radius: 2px;
                             border-width: 1px;
                             border-color: #CBD5E1;
-                            drop-shadow-blur: 16px;
-                    // Native Rasterized PDF Page Image
-                    if root.has_rendered_page_image : Image {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: parent.height;
-                        source: root.rendered_page_image;
-                        image-fit: fill;
-                    }
+                            drop-shadow-blur: 24px;
 
-                    // Prevent click passing through to clear selection
-                    TouchArea {
-                        clicked => {
-                            root.canvas_background_clicked();
-                        }
-                    }
-
-                    // Extracted Form Fields, Annotations, and Image Elements
-                    for elem in root.page_elements : Rectangle {
-                        x: elem.x * root.zoom_scale;
-                        y: elem.y * root.zoom_scale;
-                        width: elem.width * root.zoom_scale;
-                        height: elem.height * root.zoom_scale;
-                        background: elem.is_selected ? (elem.kind == "annotation" ? #F59E0B22 : (elem.kind == "form_field" ? #3B82F622 : #0EA5E922)) : transparent;
-                        border-width: elem.is_selected ? 2px : 0px;
-                        border-color: elem.is_selected ? #0EA5E9 : transparent;
-                        border-radius: 2px;
-
-                        if elem.is_selected : Text {
-                            text: elem.label;
-                            font-size: 10px;
-                            font-weight: 500;
-                            color: elem.kind == "annotation" ? #D97706 : (elem.kind == "form_field" ? #2563EB : #0EA5E9);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        TouchArea {
-                            clicked => {
-                                root.element_selected(elem.id);
+                            // Native Rasterized PDF Page Image (Retina 144 DPI)
+                            if root.has_rendered_page_image : Image {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                source: root.rendered_page_image;
+                                image-fit: fill;
                             }
-                        }
-                    }
 
-                    // Extracted Text Spans (Interactive selection hitboxes; text is rendered by native rasterizer)
-                    for span in root.text_spans : Rectangle {
-                        x: span.x * root.zoom_scale;
-                        y: span.y * root.zoom_scale;
-                        width: span.width * root.zoom_scale;
-                        height: span.height * root.zoom_scale;
-                        background: span.is_selected ? #0EA5E91A : transparent;
-                        border-width: span.is_selected ? 1.5px : 0px;
-                        border-color: #0EA5E9;
-                        border-radius: 2px;
-
-                        TouchArea {
-                            clicked => {
-                                root.span_selected(span.id);
-                            }
-                        }
-                    }
-
-                    // In-Place Text Editing Field
-                    if root.is_editing_text : Rectangle {
-                        x: root.sel_x * root.zoom_scale;
-                        y: root.sel_y * root.zoom_scale;
-                        width: Math.max(root.sel_w * root.zoom_scale + 40px, 120px);
-                        height: Math.max(root.sel_h * root.zoom_scale + 8px, 26px);
-                        background: #FFFFFF;
-                        border-width: 2px;
-                        border-color: #0EA5E9;
-                        border-radius: 4px;
-
-                        HorizontalLayout {
-                            padding-left: 4px;
-                            padding-right: 4px;
-                            edit_input := TextInput {
-                                text: root.editing_text_buffer;
-                                font-size: 13px;
-                                color: #0F172A;
-                                vertical-alignment: center;
-                                edited => {
-                                    root.editing_text_buffer = self.text;
-                                }
-                                accepted => {
-                                    root.text_edit_committed(self.text);
+                            // Prevent click passing through to clear selection
+                            TouchArea {
+                                clicked => {
+                                    root.canvas_background_clicked();
                                 }
                             }
-                        }
-                    }
 
-                    // Selection Transform Handles Box
-                    if root.has_selection && !root.is_editing_text : Rectangle {
-                        x: root.sel_x * root.zoom_scale;
-                        y: root.sel_y * root.zoom_scale;
-                        width: root.sel_w * root.zoom_scale;
-                        height: root.sel_h * root.zoom_scale;
-                        border-width: 1.5px;
-                        border-color: #0EA5E9;
+                            // Extracted Form Fields, Annotations, and Image Elements
+                            for elem in root.page_elements : Rectangle {
+                                x: elem.x * root.zoom_scale;
+                                y: elem.y * root.zoom_scale;
+                                width: elem.width * root.zoom_scale;
+                                height: elem.height * root.zoom_scale;
+                                background: elem.is_selected ? (elem.kind == "annotation" ? #F59E0B22 : (elem.kind == "form_field" ? #3B82F622 : #0EA5E922)) : transparent;
+                                border-width: elem.is_selected ? 2px : 0px;
+                                border-color: elem.is_selected ? #0EA5E9 : transparent;
+                                border-radius: 2px;
 
-                        // Canvas drag touch area across selection body
-                        TouchArea {
-                            mouse-cursor: move;
-                            pointer-event(event) => {
-                                if (event.kind == PointerEventKind.up) {
-                                    if (Math.abs(self.mouse-x - self.pressed-x) > 4px || Math.abs(self.mouse-y - self.pressed-y) > 4px) {
-                                        root.move_selected_clicked(((self.mouse-x - self.pressed-x) / 1px) / root.zoom_scale, ((self.mouse-y - self.pressed-y) / 1px) / root.zoom_scale);
+                                if elem.is_selected : Text {
+                                    text: elem.label;
+                                    font-size: 10px;
+                                    font-weight: 500;
+                                    color: elem.kind == "annotation" ? #D97706 : (elem.kind == "form_field" ? #2563EB : #0EA5E9);
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea {
+                                    clicked => {
+                                        root.element_selected(elem.id);
                                     }
                                 }
                             }
-                        }
 
-                        // 4 Corner Handles (7x7px white squares with dark borders)
-                        // Top-Left
-                        Rectangle { x: -4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
-                        // Top-Right
-                        Rectangle { x: parent.width - 4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
-                        // Bottom-Left
-                        Rectangle { x: -4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
-                        // Bottom-Right (Interactive Resize Handle)
-                        Rectangle {
-                            x: parent.width - 5px;
-                            y: parent.height - 5px;
-                            width: 12px;
-                            height: 12px;
-                            background: #FFFFFF;
-                            border-width: 1.5px;
-                            border-color: #0EA5E9;
-                            border-radius: 1px;
-                            TouchArea {
-                                mouse-cursor: nwse-resize;
-                                clicked => {
-                                    root.resize_selected_clicked(15.0, 15.0);
+                            // Extracted Text Spans (Interactive selection hitboxes; text is rendered by native rasterizer)
+                            for span in root.text_spans : Rectangle {
+                                x: span.x * root.zoom_scale;
+                                y: span.y * root.zoom_scale;
+                                width: span.width * root.zoom_scale;
+                                height: span.height * root.zoom_scale;
+                                background: span.is_selected ? #0EA5E91A : transparent;
+                                border-width: span.is_selected ? 1.5px : 0px;
+                                border-color: #0EA5E9;
+                                border-radius: 2px;
+
+                                TouchArea {
+                                    clicked => {
+                                        root.span_selected(span.id);
+                                    }
                                 }
-                                pointer-event(event) => {
-                                    if (event.kind == PointerEventKind.up) {
-                                        if (Math.abs(self.mouse-x - self.pressed-x) > 4px || Math.abs(self.mouse-y - self.pressed-y) > 4px) {
-                                            root.resize_selected_clicked(((self.mouse-x - self.pressed-x) / 1px) / root.zoom_scale, ((self.mouse-y - self.pressed-y) / 1px) / root.zoom_scale);
+                            }
+
+                            // In-Place Text Editing Field
+                            if root.is_editing_text : Rectangle {
+                                x: root.sel_x * root.zoom_scale;
+                                y: root.sel_y * root.zoom_scale;
+                                width: Math.max(root.sel_w * root.zoom_scale + 40px, 120px);
+                                height: Math.max(root.sel_h * root.zoom_scale + 8px, 26px);
+                                background: #FFFFFF;
+                                border-width: 2px;
+                                border-color: #0EA5E9;
+                                border-radius: 4px;
+
+                                HorizontalLayout {
+                                    padding-left: 4px;
+                                    padding-right: 4px;
+                                    edit_input := TextInput {
+                                        text: root.editing_text_buffer;
+                                        font-size: 13px;
+                                        color: #0F172A;
+                                        vertical-alignment: center;
+                                        edited => {
+                                            root.editing_text_buffer = self.text;
+                                        }
+                                        accepted => {
+                                            root.text_edit_committed(self.text);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Selection Transform Handles Box
+                            if root.has_selection && !root.is_editing_text : Rectangle {
+                                x: root.sel_x * root.zoom_scale;
+                                y: root.sel_y * root.zoom_scale;
+                                width: root.sel_w * root.zoom_scale;
+                                height: root.sel_h * root.zoom_scale;
+                                border-width: 1.5px;
+                                border-color: #0EA5E9;
+
+                                // Canvas drag touch area across selection body
+                                TouchArea {
+                                    mouse-cursor: move;
+                                    pointer-event(event) => {
+                                        if (event.kind == PointerEventKind.up) {
+                                            if (Math.abs(self.mouse-x - self.pressed-x) > 4px || Math.abs(self.mouse-y - self.pressed-y) > 4px) {
+                                                root.move_selected_clicked(((self.mouse-x - self.pressed-x) / 1px) / root.zoom_scale, ((self.mouse-y - self.pressed-y) / 1px) / root.zoom_scale);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 4 Corner Handles (7x7px white squares with primary accent border)
+                                Rectangle { x: -4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                                Rectangle { x: parent.width - 4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                                Rectangle { x: -4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                                Rectangle {
+                                    x: parent.width - 5px;
+                                    y: parent.height - 5px;
+                                    width: 12px;
+                                    height: 12px;
+                                    background: #FFFFFF;
+                                    border-width: 1.5px;
+                                    border-color: #0EA5E9;
+                                    border-radius: 1px;
+                                    TouchArea {
+                                        mouse-cursor: nwse-resize;
+                                        clicked => {
+                                            root.resize_selected_clicked(15.0, 15.0);
+                                        }
+                                        pointer-event(event) => {
+                                            if (event.kind == PointerEventKind.up) {
+                                                if (Math.abs(self.mouse-x - self.pressed-x) > 4px || Math.abs(self.mouse-y - self.pressed-y) > 4px) {
+                                                    root.resize_selected_clicked(((self.mouse-x - self.pressed-x) / 1px) / root.zoom_scale, ((self.mouse-y - self.pressed-y) / 1px) / root.zoom_scale);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1147,69 +1438,266 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+
+                // ------------------------------------------------------------
+                // Floating Acrobat Quick-Action Pill Toolbar (Docked at Top Center)
+                // ------------------------------------------------------------
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: 12px;
+                    height: 38px;
+                    border-radius: 19px;
+                    background: root.is_dark_mode ? #1E293B : #FFFFFF;
+                    border-width: 1px;
+                    border-color: root.is_dark_mode ? #334155 : #CBD5E1;
+                    drop-shadow-blur: 16px;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 6px;
+                        alignment: center;
+
+                        // Select Tool (Pointer)
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: root.active_tool == "select" ? #0EA5E9 : (ft-sel-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                            Text {
+                                text: "↖";
+                                font-size: 15px;
+                                color: root.active_tool == "select" ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-sel-ta := TouchArea {
+                                clicked => { root.tool_changed("select"); }
+                            }
+                        }
+
+                        // Hand / Pan Tool
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: root.active_tool == "pan" ? #0EA5E9 : (ft-pan-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                            Text {
+                                text: "✋";
+                                font-size: 13px;
+                                color: root.active_tool == "pan" ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-pan-ta := TouchArea {
+                                clicked => { root.tool_changed("pan"); }
+                            }
+                        }
+
+                        // Text Tool
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: root.active_tool == "text" ? #0EA5E9 : (ft-txt-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                            Text {
+                                text: "T";
+                                font-size: 14px;
+                                font-weight: 700;
+                                color: root.active_tool == "text" ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-txt-ta := TouchArea {
+                                clicked => { root.tool_changed("text"); }
+                            }
+                        }
+
+                        // Annotate Tool
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: root.active_tool == "annotate" ? #0EA5E9 : (ft-ann-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                            Text {
+                                text: "✎";
+                                font-size: 14px;
+                                color: root.active_tool == "annotate" ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-ann-ta := TouchArea {
+                                clicked => { root.tool_changed("annotate"); }
+                            }
+                        }
+
+                        // Forms Tool
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: root.active_tool == "forms" ? #0EA5E9 : (ft-frm-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent);
+                            Text {
+                                text: "☑";
+                                font-size: 14px;
+                                color: root.active_tool == "forms" ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-frm-ta := TouchArea {
+                                clicked => { root.tool_changed("forms"); }
+                            }
+                        }
+
+                        // Add Image Button
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: ft-img-ta.has-hover ? (root.is_dark_mode ? #334155 : #F1F5F9) : transparent;
+                            Text {
+                                text: "🖼";
+                                font-size: 13px;
+                                color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            ft-img-ta := TouchArea {
+                                clicked => { root.add_image_clicked(); }
+                            }
+                        }
+
+                        // Dynamic Contextual Actions in Floating Pill
+                        if root.active_tool == "annotate" : Rectangle {
+                            width: 1px;
+                            height: 18px;
+                            background: root.is_dark_mode ? #334155 : #CBD5E1;
+                        }
+
+                        if root.active_tool == "annotate" : Rectangle {
+                            height: 26px;
+                            border-radius: 13px;
+                            background: #F59E0B22;
+                            border-width: 1px;
+                            border-color: #F59E0B;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text { text: "+ Highlight"; font-size: 11px; font-weight: 600; color: #F59E0B; vertical-alignment: center; }
+                            }
+                            TouchArea { clicked => { root.add_annotation_clicked("Highlight"); } }
+                        }
+
+                        if root.active_tool == "annotate" : Rectangle {
+                            height: 26px;
+                            border-radius: 13px;
+                            background: #0EA5E922;
+                            border-width: 1px;
+                            border-color: #0EA5E9;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text { text: "+ FreeText"; font-size: 11px; font-weight: 600; color: #0EA5E9; vertical-alignment: center; }
+                            }
+                            TouchArea { clicked => { root.add_annotation_clicked("FreeText"); } }
+                        }
+
+                        if root.active_tool == "annotate" : Rectangle {
+                            height: 26px;
+                            border-radius: 13px;
+                            background: #10B98122;
+                            border-width: 1px;
+                            border-color: #10B981;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text { text: "+ Square"; font-size: 11px; font-weight: 600; color: #10B981; vertical-alignment: center; }
+                            }
+                            TouchArea { clicked => { root.add_annotation_clicked("Square"); } }
+                        }
+
+                        // Delete Selected
+                        if root.has_selection : Rectangle {
+                            width: 1px;
+                            height: 18px;
+                            background: root.is_dark_mode ? #334155 : #CBD5E1;
+                        }
+
+                        if root.has_selection : Rectangle {
+                            height: 26px;
+                            border-radius: 13px;
+                            background: del-pill-ta.has-hover ? #EF4444 : #EF444422;
+                            border-width: 1px;
+                            border-color: #EF4444;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 4px;
+                                Text { text: "🗑 Delete"; font-size: 11px; font-weight: 600; color: del-pill-ta.has-hover ? #FFFFFF : #EF4444; vertical-alignment: center; }
+                            }
+                            del-pill-ta := TouchArea { clicked => { root.delete_selected_clicked(); } }
+                        }
+                    }
+                }
             }
-        }
-    }
 
             // ----------------------------------------------------------------
-            // 2C. RIGHT CONTEXTUAL PROPERTIES PANEL (Collapsible, ~250px)
+            // 2C. RIGHT CONTEXTUAL PROPERTIES PANEL (Acrobat-Class Inspector ~260px)
             // ----------------------------------------------------------------
             if root.right_panel_visible : HorizontalLayout {
                 spacing: 0px;
-                // Right panel separator
+                // Separator
                 Rectangle {
                     width: 1px;
-                    background: #334155;
+                    background: root.is_dark_mode ? #334155 : #E2E8F0;
                 }
 
                 Rectangle {
-                    width: 250px;
-                    background: #1E293B; // Slate 800
+                    width: 260px;
+                    background: root.is_dark_mode ? #1E293B : #F8FAFC;
 
                     VerticalLayout {
                         padding: 12px;
                         spacing: 12px;
 
-                        // Panel Title
-                        Text {
-                            text: "PROPERTIES";
-                            font-size: 11px;
-                            font-weight: 700;
-                            color: #94A3B8;
+                        // Panel Header
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "PROPERTIES";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: root.is_dark_mode ? #94A3B8 : #64748B;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                height: 20px;
+                                border-radius: 4px;
+                                background: #0EA5E922;
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    Text {
+                                        text: root.selection_type;
+                                        font-size: 10px;
+                                        font-weight: 700;
+                                        color: #0EA5E9;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
 
                         // Selection Properties Card
                         Rectangle {
-                            background: #0F172A;
+                            background: root.is_dark_mode ? #0F172A : #FFFFFF;
                             border-radius: 6px;
                             border-width: 1px;
-                            border-color: #334155;
+                            border-color: root.is_dark_mode ? #334155 : #E2E8F0;
 
                             VerticalLayout {
+                                padding: 10px;
                                 spacing: 8px;
-
-                                HorizontalLayout {
-                                    Text {
-                                        text: "Type:";
-                                        font-size: 11px;
-                                        color: #94A3B8;
-                                        vertical-alignment: center;
-                                    }
-                                    Rectangle {
-                                        width: 60px;
-                                        height: 20px;
-                                        background: #0EA5E933;
-                                        border-radius: 4px;
-                                        Text {
-                                            text: root.selection_type;
-                                            font-size: 10px;
-                                            font-weight: 600;
-                                            color: #0EA5E9;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
 
                                 if root.has_selection : VerticalLayout {
                                     spacing: 6px;
@@ -1217,16 +1705,26 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: "Bounds: " + root.selection_bounds_text;
                                         font-size: 11px;
-                                        color: #CBD5E1;
+                                        color: root.is_dark_mode ? #CBD5E1 : #64748B;
                                     }
 
                                     // 1. Text Selection Properties
                                     if root.selection_type == "Text" : VerticalLayout {
-                                        spacing: 4px;
-                                        if root.selection_font_name != "" : Text {
-                                            text: "Font: " + root.selection_font_name + " (" + root.selection_font_size + ")";
-                                            font-size: 11px;
-                                            color: #CBD5E1;
+                                        spacing: 6px;
+                                        if root.selection_font_name != "" : Rectangle {
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: root.is_dark_mode ? #1E293B : #F1F5F9;
+                                            HorizontalLayout {
+                                                padding-left: 6px;
+                                                padding-right: 6px;
+                                                Text {
+                                                    text: "🔤 " + root.selection_font_name + " • " + root.selection_font_size;
+                                                    font-size: 11px;
+                                                    color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
                                         }
 
                                         if root.selection_is_editable : VerticalLayout {
@@ -1234,17 +1732,29 @@ export component AppWindow inherits Window {
                                             Text {
                                                 text: "Content:";
                                                 font-size: 11px;
-                                                color: #94A3B8;
+                                                font-weight: 600;
+                                                color: root.is_dark_mode ? #94A3B8 : #64748B;
                                             }
-                                            prop_input := TextInput {
-                                                text: root.selection_text_content;
-                                                font-size: 12px;
-                                                color: #F8FAFC;
-                                                edited => {
-                                                    root.property_text_edited(self.text);
-                                                }
-                                                accepted => {
-                                                    root.text_edit_committed(self.text);
+                                            Rectangle {
+                                                background: root.is_dark_mode ? #1E293B : #F8FAFC;
+                                                border-radius: 4px;
+                                                border-width: 1px;
+                                                border-color: root.is_dark_mode ? #475569 : #CBD5E1;
+                                                HorizontalLayout {
+                                                    padding-left: 6px;
+                                                    padding-right: 6px;
+                                                    prop_input := TextInput {
+                                                        text: root.selection_text_content;
+                                                        font-size: 12px;
+                                                        color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                                        vertical-alignment: center;
+                                                        edited => {
+                                                            root.property_text_edited(self.text);
+                                                        }
+                                                        accepted => {
+                                                            root.text_edit_committed(self.text);
+                                                        }
+                                                    }
                                                 }
                                             }
                                             Rectangle {
@@ -1270,28 +1780,28 @@ export component AppWindow inherits Window {
 
                                     // 2. Form Field Selection Properties
                                     if root.selection_type == "FormField" : VerticalLayout {
-                                        spacing: 5px;
+                                        spacing: 6px;
                                         Text {
                                             text: "Field: " + root.form_field_name;
                                             font-size: 11px;
                                             font-weight: 600;
-                                            color: #60A5FA;
+                                            color: #0284C7;
                                         }
                                         Text {
                                             text: "Type: " + root.form_field_type;
                                             font-size: 10px;
-                                            color: #94A3B8;
+                                            color: root.is_dark_mode ? #94A3B8 : #64748B;
                                         }
 
                                         if root.form_field_type == "Checkbox" || root.form_field_type == "RadioButtonGroup" : Rectangle {
                                             height: 28px;
                                             border-radius: 4px;
-                                            background: root.form_field_checked ? #10B981 : #334155;
+                                            background: root.form_field_checked ? #10B981 : (root.is_dark_mode ? #334155 : #E2E8F0);
                                             Text {
                                                 text: root.form_field_checked ? "☑ Checked" : "☐ Unchecked";
                                                 font-size: 11px;
                                                 font-weight: 600;
-                                                color: #FFFFFF;
+                                                color: root.form_field_checked ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A);
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                             }
@@ -1307,17 +1817,28 @@ export component AppWindow inherits Window {
                                             Text {
                                                 text: "Value:";
                                                 font-size: 11px;
-                                                color: #94A3B8;
+                                                color: root.is_dark_mode ? #94A3B8 : #64748B;
                                             }
-                                            ff_input := TextInput {
-                                                text: root.form_field_value;
-                                                font-size: 12px;
-                                                color: #F8FAFC;
-                                                edited => {
-                                                    root.property_text_edited(self.text);
-                                                }
-                                                accepted => {
-                                                    root.form_field_text_committed(root.form_field_name, self.text);
+                                            Rectangle {
+                                                background: root.is_dark_mode ? #1E293B : #F8FAFC;
+                                                border-radius: 4px;
+                                                border-width: 1px;
+                                                border-color: root.is_dark_mode ? #475569 : #CBD5E1;
+                                                HorizontalLayout {
+                                                    padding-left: 6px;
+                                                    padding-right: 6px;
+                                                    ff_input := TextInput {
+                                                        text: root.form_field_value;
+                                                        font-size: 12px;
+                                                        color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                                        vertical-alignment: center;
+                                                        edited => {
+                                                            root.property_text_edited(self.text);
+                                                        }
+                                                        accepted => {
+                                                            root.form_field_text_committed(root.form_field_name, self.text);
+                                                        }
+                                                    }
                                                 }
                                             }
                                             Rectangle {
@@ -1343,7 +1864,7 @@ export component AppWindow inherits Window {
 
                                     // 3. Annotation Selection Properties
                                     if root.selection_type == "Annotation" : VerticalLayout {
-                                        spacing: 5px;
+                                        spacing: 6px;
                                         Text {
                                             text: "Subtype: " + root.annotation_subtype;
                                             font-size: 11px;
@@ -1353,17 +1874,28 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: "Note / Content:";
                                             font-size: 11px;
-                                            color: #94A3B8;
+                                            color: root.is_dark_mode ? #94A3B8 : #64748B;
                                         }
-                                        an_input := TextInput {
-                                            text: root.selection_text_content;
-                                            font-size: 12px;
-                                            color: #F8FAFC;
-                                            edited => {
-                                                root.property_text_edited(self.text);
-                                            }
-                                            accepted => {
-                                                root.update_annotation_text_clicked(self.text);
+                                        Rectangle {
+                                            background: root.is_dark_mode ? #1E293B : #F8FAFC;
+                                            border-radius: 4px;
+                                            border-width: 1px;
+                                            border-color: root.is_dark_mode ? #475569 : #CBD5E1;
+                                            HorizontalLayout {
+                                                padding-left: 6px;
+                                                padding-right: 6px;
+                                                an_input := TextInput {
+                                                    text: root.selection_text_content;
+                                                    font-size: 12px;
+                                                    color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                                                    vertical-alignment: center;
+                                                    edited => {
+                                                        root.property_text_edited(self.text);
+                                                    }
+                                                    accepted => {
+                                                        root.update_annotation_text_clicked(self.text);
+                                                    }
+                                                }
                                             }
                                         }
                                         Rectangle {
@@ -1388,11 +1920,11 @@ export component AppWindow inherits Window {
 
                                     // 4. Image Selection Properties
                                     if root.selection_type == "Image" : VerticalLayout {
-                                        spacing: 4px;
+                                        spacing: 6px;
                                         Text {
                                             text: "Image Ref: " + root.selection_node_id;
                                             font-size: 11px;
-                                            color: #CBD5E1;
+                                            color: root.is_dark_mode ? #CBD5E1 : #64748B;
                                         }
                                         Rectangle {
                                             height: 26px;
@@ -1421,36 +1953,36 @@ export component AppWindow inherits Window {
                                             text: "Position & Size:";
                                             font-size: 11px;
                                             font-weight: 600;
-                                            color: #94A3B8;
+                                            color: root.is_dark_mode ? #94A3B8 : #64748B;
                                         }
                                         HorizontalLayout {
                                             spacing: 4px;
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: mv-l-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "◀"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: mv-l-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "◀"; font-size: 10px; color: mv-l-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 mv-l-ta := TouchArea { clicked => { root.move_selected_clicked(-10.0, 0.0); } }
                                             }
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: mv-r-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "▶"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: mv-r-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "▶"; font-size: 10px; color: mv-r-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 mv-r-ta := TouchArea { clicked => { root.move_selected_clicked(10.0, 0.0); } }
                                             }
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: mv-u-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "▲"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: mv-u-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "▲"; font-size: 10px; color: mv-u-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 mv-u-ta := TouchArea { clicked => { root.move_selected_clicked(0.0, -10.0); } }
                                             }
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: mv-d-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "▼"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: mv-d-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "▼"; font-size: 10px; color: mv-d-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 mv-d-ta := TouchArea { clicked => { root.move_selected_clicked(0.0, 10.0); } }
                                             }
                                         }
@@ -1459,15 +1991,15 @@ export component AppWindow inherits Window {
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: exp-sz-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "＋ Expand"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: exp-sz-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "＋ Expand"; font-size: 10px; color: exp-sz-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 exp-sz-ta := TouchArea { clicked => { root.resize_selected_clicked(15.0, 15.0); } }
                                             }
                                             Rectangle {
                                                 height: 24px;
                                                 border-radius: 4px;
-                                                background: shr-sz-ta.has-hover ? #0284C7 : #334155;
-                                                Text { text: "－ Shrink"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                background: shr-sz-ta.has-hover ? #0284C7 : (root.is_dark_mode ? #334155 : #E2E8F0);
+                                                Text { text: "－ Shrink"; font-size: 10px; color: shr-sz-ta.has-hover ? #FFFFFF : (root.is_dark_mode ? #F8FAFC : #0F172A); horizontal-alignment: center; vertical-alignment: center; }
                                                 shr-sz-ta := TouchArea { clicked => { root.resize_selected_clicked(-15.0, -15.0); } }
                                             }
                                         }
@@ -1477,14 +2009,14 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         height: 26px;
                                         border-radius: 4px;
-                                        background: del-prop-ta.has-hover ? #DC2626 : #EF444433;
+                                        background: del-prop-ta.has-hover ? #DC2626 : #EF444422;
                                         border-width: 1px;
                                         border-color: #EF4444;
                                         Text {
                                             text: "🗑 Delete Selected";
                                             font-size: 11px;
                                             font-weight: 600;
-                                            color: #FCA5A5;
+                                            color: del-prop-ta.has-hover ? #FFFFFF : #EF4444;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
@@ -1497,83 +2029,88 @@ export component AppWindow inherits Window {
                                 }
 
                                 if !root.has_selection : Text {
-                                    text: "Select an element on canvas to view and edit properties.";
+                                    text: "Select any text, image, form field, or annotation on canvas to inspect and edit its properties.";
                                     font-size: 11px;
-                                    color: #64748B;
+                                    color: root.is_dark_mode ? #64748B : #94A3B8;
                                     wrap: word-wrap;
                                 }
                             }
                         }
 
-                        // Security & Evidence Card
+                        // Integrity & Evidence Card
                         Rectangle {
-                            background: #0F172A;
+                            background: root.is_dark_mode ? #0F172A : #FFFFFF;
                             border-radius: 6px;
                             border-width: 1px;
-                            border-color: #334155;
+                            border-color: root.is_dark_mode ? #334155 : #E2E8F0;
 
                             VerticalLayout {
+                                padding: 10px;
                                 spacing: 6px;
                                 Text {
                                     text: "INTEGRITY & SECURITY";
                                     font-size: 10px;
                                     font-weight: 700;
-                                    color: #94A3B8;
+                                    color: root.is_dark_mode ? #94A3B8 : #64748B;
                                 }
                                 HorizontalLayout {
                                     spacing: 4px;
                                     Text {
                                         text: "Evidence:";
                                         font-size: 11px;
-                                        color: #CBD5E1;
+                                        color: root.is_dark_mode ? #CBD5E1 : #334155;
+                                        vertical-alignment: center;
                                     }
                                     Rectangle {
-                                        width: 70px;
                                         height: 18px;
                                         background: #10B98122;
                                         border-radius: 4px;
-                                        Text {
-                                            text: root.evidence_level;
-                                            font-size: 10px;
-                                            font-weight: 700;
-                                            color: #10B981; // Emerald
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                        HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            Text {
+                                                text: root.evidence_level;
+                                                font-size: 10px;
+                                                font-weight: 700;
+                                                color: #10B981; // Emerald
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
                                 Text {
                                     text: root.security_status;
                                     font-size: 10px;
-                                    color: #64748B;
+                                    color: root.is_dark_mode ? #64748B : #94A3B8;
                                 }
                             }
                         }
 
                         // History Stack Depth Card
                         Rectangle {
-                            background: #0F172A;
+                            background: root.is_dark_mode ? #0F172A : #FFFFFF;
                             border-radius: 6px;
                             border-width: 1px;
-                            border-color: #334155;
+                            border-color: root.is_dark_mode ? #334155 : #E2E8F0;
 
                             VerticalLayout {
+                                padding: 10px;
                                 spacing: 4px;
                                 Text {
                                     text: "HISTORY STACK";
                                     font-size: 10px;
                                     font-weight: 700;
-                                    color: #94A3B8;
+                                    color: root.is_dark_mode ? #94A3B8 : #64748B;
                                 }
                                 Text {
                                     text: "Undo Depth: " + root.undo_depth;
                                     font-size: 11px;
-                                    color: #CBD5E1;
+                                    color: root.is_dark_mode ? #CBD5E1 : #334155;
                                 }
                                 Text {
                                     text: "Redo Depth: " + root.redo_depth;
                                     font-size: 11px;
-                                    color: #CBD5E1;
+                                    color: root.is_dark_mode ? #CBD5E1 : #334155;
                                 }
                             }
                         }
@@ -1587,19 +2124,19 @@ export component AppWindow inherits Window {
         // Divider above bottom status bar
         Rectangle {
             height: 1px;
-            background: #334155;
+            background: root.is_dark_mode ? #334155 : #E2E8F0;
         }
 
         // ====================================================================
-        // 3. BOTTOM STATUS BAR (Page Navigation, Zoom, Status, Privacy)
+        // 3. BOTTOM STATUS BAR (Acrobat-Class Page Navigation, Zoom, Security)
         // ====================================================================
         Rectangle {
-            height: 28px;
-            background: #0F172A; // Slate 900
+            height: 30px;
+            background: root.is_dark_mode ? #0F172A : #FFFFFF;
 
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
+                padding-left: 14px;
+                padding-right: 14px;
                 spacing: 12px;
                 alignment: center;
 
@@ -1609,14 +2146,14 @@ export component AppWindow inherits Window {
                     alignment: center;
 
                     Rectangle {
-                        width: 22px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: p-prev-ta.has-hover ? #334155 : transparent;
+                        width: 24px;
+                        height: 22px;
+                        border-radius: 4px;
+                        background: p-prev-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
                         Text {
                             text: "◀";
                             font-size: 10px;
-                            color: #CBD5E1;
+                            color: root.is_dark_mode ? #CBD5E1 : #334155;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -1628,20 +2165,20 @@ export component AppWindow inherits Window {
                     Text {
                         text: root.page_info_text;
                         font-size: 11px;
-                        font-weight: 500;
-                        color: #F8FAFC;
+                        font-weight: 600;
+                        color: root.is_dark_mode ? #F8FAFC : #0F172A;
                         vertical-alignment: center;
                     }
 
                     Rectangle {
-                        width: 22px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: p-next-ta.has-hover ? #334155 : transparent;
+                        width: 24px;
+                        height: 22px;
+                        border-radius: 4px;
+                        background: p-next-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
                         Text {
                             text: "▶";
                             font-size: 10px;
-                            color: #CBD5E1;
+                            color: root.is_dark_mode ? #CBD5E1 : #334155;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -1651,21 +2188,103 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle { width: 1px; height: 14px; background: #475569; }
+                Rectangle { width: 1px; height: 16px; background: root.is_dark_mode ? #334155 : #E2E8F0; }
 
-                // Zoom Display
-                Text {
-                    text: root.zoom_percent + "%";
-                    font-size: 11px;
-                    color: #94A3B8;
-                    vertical-alignment: center;
+                // Zoom Controls
+                HorizontalLayout {
+                    spacing: 4px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 24px;
+                        height: 22px;
+                        border-radius: 4px;
+                        background: zm-out-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
+                        Text {
+                            text: "−";
+                            font-size: 15px;
+                            color: root.is_dark_mode ? #CBD5E1 : #334155;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        zm-out-ta := TouchArea {
+                            clicked => { root.zoom_out_clicked(); }
+                        }
+                    }
+
+                    Text {
+                        text: root.zoom_percent + "%";
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: root.is_dark_mode ? #F8FAFC : #0F172A;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 22px;
+                        border-radius: 4px;
+                        background: zm-in-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
+                        Text {
+                            text: "+";
+                            font-size: 15px;
+                            color: root.is_dark_mode ? #CBD5E1 : #334155;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        zm-in-ta := TouchArea {
+                            clicked => { root.zoom_in_clicked(); }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 22px;
+                        border-radius: 4px;
+                        background: fit-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: "⛶ Fit Page";
+                                font-size: 11px;
+                                font-weight: 500;
+                                color: root.is_dark_mode ? #94A3B8 : #64748B;
+                                vertical-alignment: center;
+                            }
+                        }
+                        fit-ta := TouchArea {
+                            clicked => { root.zoom_reset_clicked(); }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 22px;
+                        border-radius: 4px;
+                        background: fit-w-ta.has-hover ? (root.is_dark_mode ? #334155 : #E2E8F0) : transparent;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: "↔ Fit Width";
+                                font-size: 11px;
+                                font-weight: 500;
+                                color: root.is_dark_mode ? #94A3B8 : #64748B;
+                                vertical-alignment: center;
+                            }
+                        }
+                        fit-w-ta := TouchArea {
+                            clicked => { root.fit_width_clicked(); }
+                        }
+                    }
                 }
+
+                Rectangle { width: 1px; height: 16px; background: root.is_dark_mode ? #334155 : #E2E8F0; }
 
                 // Status message
                 Text {
                     text: root.status_message;
                     font-size: 11px;
-                    color: #64748B;
+                    color: root.is_dark_mode ? #64748B : #94A3B8;
                     vertical-alignment: center;
                 }
 
@@ -1675,11 +2294,11 @@ export component AppWindow inherits Window {
                 Rectangle {
                     height: 18px;
                     background: #10B98122;
-                    border-radius: 3px;
-                    border-width: 1px;
-                    border-color: #10B98144;
+                    border-radius: 4px;
 
                     HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
                         spacing: 4px;
                         alignment: center;
                         Text {
@@ -1700,18 +2319,22 @@ export component AppWindow inherits Window {
 
                 // Privacy Reassurance Badge
                 Rectangle {
-                    height: 18px;
-                    background: #334155;
-                    border-radius: 3px;
+                    height: 20px;
+                    background: root.is_dark_mode ? #1E293B : #F1F5F9;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.is_dark_mode ? #334155 : #CBD5E1;
 
                     HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
                         spacing: 4px;
                         alignment: center;
                         Text {
                             text: "🛡️ Local-First / Private";
                             font-size: 10px;
-                            font-weight: 500;
-                            color: #CBD5E1;
+                            font-weight: 600;
+                            color: root.is_dark_mode ? #CBD5E1 : #334155;
                             vertical-alignment: center;
                         }
                     }
