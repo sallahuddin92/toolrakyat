@@ -113,6 +113,13 @@ export component AppWindow inherits Window {
     // Toast / Feedback message
     in-out property <string> status_message: "Ready";
 
+    // Form field & Annotation properties
+    in-out property <string> form_field_name: "";
+    in-out property <string> form_field_type: ""; // "Text", "Checkbox", "Choice", "Radio"
+    in-out property <string> form_field_value: "";
+    in-out property <bool> form_field_checked: false;
+    in-out property <string> annotation_subtype: ""; // "Highlight", "FreeText", "Square"
+
     // ==========================================
     // Callbacks to Rust Application Core
     // ==========================================
@@ -137,6 +144,17 @@ export component AppWindow inherits Window {
     callback text_edit_committed(string);
     callback property_text_edited(string);
     callback save_document_clicked();
+    callback delete_selected_clicked();
+    callback add_annotation_clicked(string);
+    callback update_annotation_text_clicked(string);
+    callback add_image_clicked();
+    callback form_field_toggled(string, string);
+    callback form_field_text_committed(string, string);
+    callback insert_blank_page_clicked();
+    callback duplicate_page_clicked();
+    callback move_page_up_clicked();
+    callback move_page_down_clicked();
+    callback delete_page_clicked();
 
     // Keyboard shortcut handler
     forward-focus: key-handler;
@@ -175,6 +193,10 @@ export component AppWindow inherits Window {
                     root.zoom_out_clicked();
                     return accept;
                 }
+            }
+            if (event.text == Key.Delete || event.text == Key.Backspace) {
+                root.delete_selected_clicked();
+                return accept;
             }
             if (event.text == Key.PageUp) {
                 root.prev_page_clicked();
@@ -637,6 +659,65 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        // Annotate Quick Tools (if annotate mode active)
+                        if root.active_tool == "annotate" : HorizontalLayout {
+                            spacing: 4px;
+                            Rectangle {
+                                width: 78px;
+                                height: 26px;
+                                border-radius: 4px;
+                                background: btn-hl.has-hover ? #F59E0B44 : #F59E0B22;
+                                border-width: 1px;
+                                border-color: #F59E0B;
+                                Text { text: "+ Highlight"; font-size: 11px; font-weight: 600; color: #F59E0B; horizontal-alignment: center; vertical-alignment: center; }
+                                btn-hl := TouchArea { clicked => { root.add_annotation_clicked("Highlight"); } }
+                            }
+                            Rectangle {
+                                width: 72px;
+                                height: 26px;
+                                border-radius: 4px;
+                                background: btn-ft.has-hover ? #0EA5E944 : #0EA5E922;
+                                border-width: 1px;
+                                border-color: #0EA5E9;
+                                Text { text: "+ FreeText"; font-size: 11px; font-weight: 600; color: #0EA5E9; horizontal-alignment: center; vertical-alignment: center; }
+                                btn-ft := TouchArea { clicked => { root.add_annotation_clicked("FreeText"); } }
+                            }
+                            Rectangle {
+                                width: 64px;
+                                height: 26px;
+                                border-radius: 4px;
+                                background: btn-sq.has-hover ? #10B98144 : #10B98122;
+                                border-width: 1px;
+                                border-color: #10B981;
+                                Text { text: "+ Square"; font-size: 11px; font-weight: 600; color: #10B981; horizontal-alignment: center; vertical-alignment: center; }
+                                btn-sq := TouchArea { clicked => { root.add_annotation_clicked("Square"); } }
+                            }
+                        }
+
+                        // Add Image Button
+                        Rectangle {
+                            width: 68px;
+                            height: 26px;
+                            border-radius: 4px;
+                            background: btn-img.has-hover ? #334155 : transparent;
+                            border-width: 1px;
+                            border-color: #475569;
+                            Text { text: "🖼 +Image"; font-size: 11px; font-weight: 500; color: #CBD5E1; horizontal-alignment: center; vertical-alignment: center; }
+                            btn-img := TouchArea { clicked => { root.add_image_clicked(); } }
+                        }
+
+                        // Delete Selected Button
+                        if root.has_selection : Rectangle {
+                            width: 72px;
+                            height: 26px;
+                            border-radius: 4px;
+                            background: btn-del.has-hover ? #DC2626 : #EF444433;
+                            border-width: 1px;
+                            border-color: #EF4444;
+                            Text { text: "🗑 Delete"; font-size: 11px; font-weight: 600; color: #FCA5A5; horizontal-alignment: center; vertical-alignment: center; }
+                            btn-del := TouchArea { clicked => { root.delete_selected_clicked(); } }
+                        }
+
                         Rectangle { horizontal-stretch: 1; }
 
                         // Save Button
@@ -708,15 +789,62 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 8px;
 
-                        // Header
+                        // Header with Page Controls
                         Rectangle {
                             height: 28px;
-                            Text {
-                                text: "PAGES & THUMBNAILS";
-                                font-size: 11px;
-                                font-weight: 700;
-                                color: #94A3B8;
-                                vertical-alignment: center;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "PAGES (" + root.total_pages + ")";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: #94A3B8;
+                                    vertical-alignment: center;
+                                }
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 3px;
+                                        background: b-btn.has-hover ? #0284C7 : #334155;
+                                        Text { text: "+"; font-size: 13px; font-weight: 700; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                        b-btn := TouchArea { clicked => { root.insert_blank_page_clicked(); } }
+                                    }
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 3px;
+                                        background: d-btn.has-hover ? #0284C7 : #334155;
+                                        Text { text: "⧉"; font-size: 11px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                        d-btn := TouchArea { clicked => { root.duplicate_page_clicked(); } }
+                                    }
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 3px;
+                                        background: u-btn.has-hover ? #0284C7 : #334155;
+                                        Text { text: "▲"; font-size: 9px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                        u-btn := TouchArea { clicked => { root.move_page_up_clicked(); } }
+                                    }
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 3px;
+                                        background: dn-btn.has-hover ? #0284C7 : #334155;
+                                        Text { text: "▼"; font-size: 9px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                        dn-btn := TouchArea { clicked => { root.move_page_down_clicked(); } }
+                                    }
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 20px;
+                                        border-radius: 3px;
+                                        background: del-btn.has-hover ? #EF4444 : #334155;
+                                        Text { text: "🗑"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                        del-btn := TouchArea { clicked => { root.delete_page_clicked(); } }
+                                    }
+                                }
                             }
                         }
 
@@ -853,21 +981,22 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Extracted Vector / Image Elements
+                    // Extracted Form Fields, Annotations, and Image Elements
                     for elem in root.page_elements : Rectangle {
                         x: elem.x * root.zoom_scale;
                         y: elem.y * root.zoom_scale;
                         width: elem.width * root.zoom_scale;
                         height: elem.height * root.zoom_scale;
-                        background: #F1F5F9;
+                        background: elem.kind == "annotation" ? #F59E0B22 : (elem.kind == "form_field" ? #3B82F622 : #F1F5F944);
                         border-width: elem.is_selected ? 2px : 1px;
-                        border-color: elem.is_selected ? #0EA5E9 : #CBD5E1;
+                        border-color: elem.is_selected ? #0EA5E9 : (elem.kind == "annotation" ? #F59E0B : (elem.kind == "form_field" ? #3B82F6 : #CBD5E1));
                         border-radius: 2px;
 
                         Text {
                             text: elem.label;
                             font-size: 10px;
-                            color: #64748B;
+                            font-weight: 500;
+                            color: elem.kind == "annotation" ? #D97706 : (elem.kind == "form_field" ? #2563EB : #475569);
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -1030,20 +1159,142 @@ export component AppWindow inherits Window {
                                         color: #CBD5E1;
                                     }
 
-                                    if root.selection_font_name != "" : Text {
-                                        text: "Font: " + root.selection_font_name + " (" + root.selection_font_size + ")";
-                                        font-size: 11px;
-                                        color: #CBD5E1;
+                                    // 1. Text Selection Properties
+                                    if root.selection_type == "Text" : VerticalLayout {
+                                        spacing: 4px;
+                                        if root.selection_font_name != "" : Text {
+                                            text: "Font: " + root.selection_font_name + " (" + root.selection_font_size + ")";
+                                            font-size: 11px;
+                                            color: #CBD5E1;
+                                        }
+
+                                        if root.selection_is_editable : VerticalLayout {
+                                            spacing: 4px;
+                                            Text {
+                                                text: "Content:";
+                                                font-size: 11px;
+                                                color: #94A3B8;
+                                            }
+                                            prop_input := TextInput {
+                                                text: root.selection_text_content;
+                                                font-size: 12px;
+                                                color: #F8FAFC;
+                                                edited => {
+                                                    root.property_text_edited(self.text);
+                                                }
+                                                accepted => {
+                                                    root.text_edit_committed(self.text);
+                                                }
+                                            }
+                                            Rectangle {
+                                                height: 26px;
+                                                border-radius: 4px;
+                                                background: apply-ta.has-hover ? #0284C7 : #0EA5E9;
+                                                Text {
+                                                    text: "Apply Edit";
+                                                    font-size: 11px;
+                                                    font-weight: 600;
+                                                    color: #FFFFFF;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                                apply-ta := TouchArea {
+                                                    clicked => {
+                                                        root.text_edit_committed(prop_input.text);
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
-                                    if root.selection_is_editable : VerticalLayout {
-                                        spacing: 4px;
+                                    // 2. Form Field Selection Properties
+                                    if root.selection_type == "FormField" : VerticalLayout {
+                                        spacing: 5px;
                                         Text {
-                                            text: "Content:";
+                                            text: "Field: " + root.form_field_name;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #60A5FA;
+                                        }
+                                        Text {
+                                            text: "Type: " + root.form_field_type;
+                                            font-size: 10px;
+                                            color: #94A3B8;
+                                        }
+
+                                        if root.form_field_type == "Checkbox" || root.form_field_type == "RadioButtonGroup" : Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: root.form_field_checked ? #10B981 : #334155;
+                                            Text {
+                                                text: root.form_field_checked ? "☑ Checked" : "☐ Unchecked";
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: #FFFFFF;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            ff-cb-ta := TouchArea {
+                                                clicked => {
+                                                    root.form_field_toggled(root.form_field_name, root.form_field_checked ? "false" : "true");
+                                                }
+                                            }
+                                        }
+
+                                        if root.form_field_type == "Text" || root.form_field_type == "Choice" : VerticalLayout {
+                                            spacing: 4px;
+                                            Text {
+                                                text: "Value:";
+                                                font-size: 11px;
+                                                color: #94A3B8;
+                                            }
+                                            ff_input := TextInput {
+                                                text: root.form_field_value;
+                                                font-size: 12px;
+                                                color: #F8FAFC;
+                                                edited => {
+                                                    root.property_text_edited(self.text);
+                                                }
+                                                accepted => {
+                                                    root.form_field_text_committed(root.form_field_name, self.text);
+                                                }
+                                            }
+                                            Rectangle {
+                                                height: 26px;
+                                                border-radius: 4px;
+                                                background: ff-apply-ta.has-hover ? #0284C7 : #0EA5E9;
+                                                Text {
+                                                    text: "Apply Field Value";
+                                                    font-size: 11px;
+                                                    font-weight: 600;
+                                                    color: #FFFFFF;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                                ff-apply-ta := TouchArea {
+                                                    clicked => {
+                                                        root.form_field_text_committed(root.form_field_name, ff_input.text);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 3. Annotation Selection Properties
+                                    if root.selection_type == "Annotation" : VerticalLayout {
+                                        spacing: 5px;
+                                        Text {
+                                            text: "Subtype: " + root.annotation_subtype;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #F59E0B;
+                                        }
+                                        Text {
+                                            text: "Note / Content:";
                                             font-size: 11px;
                                             color: #94A3B8;
                                         }
-                                        prop_input := TextInput {
+                                        an_input := TextInput {
                                             text: root.selection_text_content;
                                             font-size: 12px;
                                             color: #F8FAFC;
@@ -1051,25 +1302,57 @@ export component AppWindow inherits Window {
                                                 root.property_text_edited(self.text);
                                             }
                                             accepted => {
-                                                root.text_edit_committed(self.text);
+                                                root.update_annotation_text_clicked(self.text);
                                             }
                                         }
                                         Rectangle {
                                             height: 26px;
                                             border-radius: 4px;
-                                            background: apply-ta.has-hover ? #0284C7 : #0EA5E9;
+                                            background: an-apply-ta.has-hover ? #D97706 : #F59E0B;
                                             Text {
-                                                text: "Apply Edit";
+                                                text: "Update Annotation Text";
                                                 font-size: 11px;
                                                 font-weight: 600;
                                                 color: #FFFFFF;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
                                             }
-                                            apply-ta := TouchArea {
+                                            an-apply-ta := TouchArea {
                                                 clicked => {
-                                                    root.text_edit_committed(prop_input.text);
+                                                    root.update_annotation_text_clicked(an_input.text);
                                                 }
+                                            }
+                                        }
+                                    }
+
+                                    // 4. Image Selection Properties
+                                    if root.selection_type == "Image" : VerticalLayout {
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Image Ref: " + root.selection_node_id;
+                                            font-size: 11px;
+                                            color: #CBD5E1;
+                                        }
+                                    }
+
+                                    // Universal Delete Button
+                                    Rectangle {
+                                        height: 26px;
+                                        border-radius: 4px;
+                                        background: del-prop-ta.has-hover ? #DC2626 : #EF444433;
+                                        border-width: 1px;
+                                        border-color: #EF4444;
+                                        Text {
+                                            text: "🗑 Delete Selected";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #FCA5A5;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        del-prop-ta := TouchArea {
+                                            clicked => {
+                                                root.delete_selected_clicked();
                                             }
                                         }
                                     }

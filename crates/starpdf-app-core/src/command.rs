@@ -66,6 +66,11 @@ pub enum AppCommand {
         contents: Option<String>,
         color: Option<Vec<f64>>,
     },
+    UpdateAnnotation {
+        annot_ref: String,
+        contents: Option<String>,
+        rect: Option<[f64; 4]>,
+    },
     SetFormField {
         field_name: String,
         value: String,
@@ -339,6 +344,11 @@ pub fn dispatch_command(
                     Ok(CommandResult::ok(format!("Deleted annotation {annot_ref}"))
                         .with_session(session_id))
                 }
+                SelectionState::FormField { field_name, .. } => {
+                    session.clear_selection();
+                    Ok(CommandResult::ok(format!("Cleared selection for form field {field_name}"))
+                        .with_session(session_id))
+                }
             }
         }
 
@@ -481,6 +491,55 @@ pub fn dispatch_command(
                 .with_session(session_id))
         }
 
+        AppCommand::UpdateAnnotation {
+            annot_ref,
+            contents,
+            rect,
+        } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            if let Some(target_ref) = parse_obj_ref(&annot_ref) {
+                let update = starpdf::annotation::types::AnnotationUpdateSpec {
+                    rect,
+                    contents: contents.clone(),
+                    color: None,
+                    fill_color: None,
+                    border_width: None,
+                    line_points: None,
+                    line_endings: None,
+                    quad_points: None,
+                    ink_list: None,
+                    font_family: None,
+                    font_size: None,
+                    bold: None,
+                    italic: None,
+                    text_color: None,
+                    underline: None,
+                    strikethrough: None,
+                    highlight_enabled: None,
+                    highlight_color: None,
+                };
+                let change = starpdf::mutation::PdfChange::UpdateAnnotation {
+                    annot_ref: target_ref,
+                    update,
+                };
+                let mut doc = session.pdf_document()?;
+                let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
+                let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                session.commit_bytes(format!("Update annotation {annot_ref}"), new_bytes)?;
+                Ok(CommandResult::ok(format!("Updated annotation {annot_ref}"))
+                    .with_session(session_id))
+            } else {
+                Err(AppCoreError::InvalidOperation(format!(
+                    "Invalid annotation ref: {annot_ref}"
+                )))
+            }
+        }
+
         AppCommand::SetFormField { field_name, value } => {
             let session = manager
                 .active_session_mut()
@@ -528,6 +587,19 @@ pub fn dispatch_command(
             let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
             let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
             session.commit_bytes(format!("Set field {field_name} = \"{value}\""), new_bytes)?;
+            if let crate::selection::SelectionState::FormField {
+                field_name: fn_sel,
+                value: val_sel,
+                ..
+            } = &mut session.selection
+            {
+                if fn_sel.as_str() == field_name
+                    || fn_sel.as_str() == field.partial_name.as_str()
+                    || fn_sel.as_str() == field.fully_qualified_name.as_str()
+                {
+                    *val_sel = value.clone();
+                }
+            }
             Ok(CommandResult::ok(format!("Field \"{field_name}\" updated successfully"))
                 .with_session(session_id))
         }

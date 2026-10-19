@@ -144,6 +144,14 @@ pub enum SelectionState {
         bounds: Rect,
     },
 
+    FormField {
+        field_ref: String,
+        field_name: String,
+        field_type: String,
+        value: String,
+        bounds: Rect,
+    },
+
     Page {
         page_index: u32,
     },
@@ -165,6 +173,7 @@ impl SelectionState {
             Self::Image { .. } => "Image",
             Self::Vector { .. } => "Vector",
             Self::Annotation { .. } => "Annotation",
+            Self::FormField { .. } => "FormField",
             Self::Page { .. } => "Page",
         }
     }
@@ -183,7 +192,8 @@ impl SelectionState {
             Self::Text { bounds, .. }
             | Self::Image { bounds, .. }
             | Self::Vector { bounds, .. }
-            | Self::Annotation { bounds, .. } => Some(*bounds),
+            | Self::Annotation { bounds, .. }
+            | Self::FormField { bounds, .. } => Some(*bounds),
             _ => None,
         }
     }

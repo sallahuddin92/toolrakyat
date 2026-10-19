@@ -1566,9 +1566,11 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 Some(&resolved_font),
             )?;
             rotation.apply_to_stream(rect, &mut stream)?;
+            let stream_ref = self.allocate_object_ref()?;
+            modified.insert(stream_ref, PdfObject::Stream(stream));
             let generated = PdfObject::Dictionary(BTreeMap::from([(
                 "N".to_string(),
-                PdfObject::Stream(stream),
+                PdfObject::Reference(stream_ref),
             )]));
             let merged = self.merge_generated_appearance(widget_dict.get("AP"), &generated)?;
             widget_dict.insert("AP".to_string(), merged);
@@ -1598,8 +1600,9 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         let state_name = if checked { on_state.as_str() } else { "Off" };
         field_dict.insert("V".to_string(), PdfObject::Name(state_name.to_string()));
 
+        let has_field_ap = self.widget_has_appearance_states(&field_dict, &on_state);
         let rect = self.extract_rect_from_dict(&field_dict)?;
-        if rect[2] > rect[0] && rect[3] > rect[1] {
+        if !has_field_ap && rect[2] > rect[0] && rect[3] > rect[1] {
             let da = DefaultAppearance::default();
             let rotation = self.resolve_widget_rotation(&field_dict)?;
             let layout_rect = rotation.layout_rect(rect)?;
@@ -1613,10 +1616,12 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 checked,
             )?;
             Self::rotate_appearance_object(&mut ap_obj, rect, rotation)?;
+            let ap_obj = self.extract_streams_to_indirect(ap_obj, modified)?;
             let merged = self.merge_generated_appearance(field_dict.get("AP"), &ap_obj)?;
             field_dict.insert("AP".to_string(), merged);
             field_dict.insert("AS".to_string(), PdfObject::Name(state_name.to_string()));
         } else if field_dict.contains_key("AS")
+            || has_field_ap
             || effective_widgets.is_empty()
             || effective_widgets.contains(&field_ref)
         {
@@ -1632,8 +1637,9 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
             let mut w_dict = self.get_dict_for_modification(w_ref, modified)?;
             w_dict.insert("AS".to_string(), PdfObject::Name(state_name.to_string()));
 
+            let has_w_ap = self.widget_has_appearance_states(&w_dict, &on_state) || has_field_ap;
             let w_rect = self.extract_rect_from_dict(&w_dict)?;
-            if w_rect[2] > w_rect[0] && w_rect[3] > w_rect[1] {
+            if !has_w_ap && w_rect[2] > w_rect[0] && w_rect[3] > w_rect[1] {
                 let da = DefaultAppearance::default();
                 let rotation = self.resolve_widget_rotation(&w_dict)?;
                 let layout_rect = rotation.layout_rect(w_rect)?;
@@ -1647,6 +1653,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                     checked,
                 )?;
                 Self::rotate_appearance_object(&mut ap_obj, w_rect, rotation)?;
+                let ap_obj = self.extract_streams_to_indirect(ap_obj, modified)?;
                 let merged = self.merge_generated_appearance(w_dict.get("AP"), &ap_obj)?;
                 w_dict.insert("AP".to_string(), merged);
             }
@@ -1682,8 +1689,9 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                 let mut kid_dict = self.get_dict_for_modification(kid_ref, modified)?;
                 kid_dict.insert("AS".to_string(), PdfObject::Name(state_to_set.to_string()));
 
+                let has_k_ap = self.widget_has_appearance_states(&kid_dict, on_state);
                 let k_rect = self.extract_rect_from_dict(&kid_dict)?;
-                if k_rect[2] > k_rect[0] && k_rect[3] > k_rect[1] {
+                if !has_k_ap && k_rect[2] > k_rect[0] && k_rect[3] > k_rect[1] {
                     let da = DefaultAppearance::default();
                     let rotation = self.resolve_widget_rotation(&kid_dict)?;
                     let layout_rect = rotation.layout_rect(k_rect)?;
@@ -1697,6 +1705,7 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
                         is_selected,
                     )?;
                     Self::rotate_appearance_object(&mut ap_obj, k_rect, rotation)?;
+                    let ap_obj = self.extract_streams_to_indirect(ap_obj, modified)?;
                     let merged = self.merge_generated_appearance(kid_dict.get("AP"), &ap_obj)?;
                     kid_dict.insert("AP".to_string(), merged);
                 }
@@ -3596,4 +3605,60 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
 
         Ok("Yes".to_string())
     }
+
+    fn extract_streams_to_indirect(
+        &mut self,
+        obj: PdfObject,
+        modified: &mut BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<PdfObject> {
+        match obj {
+            PdfObject::Stream(s) => {
+                let r = self.allocate_object_ref()?;
+                modified.insert(r, PdfObject::Stream(s));
+                Ok(PdfObject::Reference(r))
+            }
+            PdfObject::Dictionary(dict) => {
+                let mut new_dict = BTreeMap::new();
+                for (k, v) in dict {
+                    new_dict.insert(k, self.extract_streams_to_indirect(v, modified)?);
+                }
+                Ok(PdfObject::Dictionary(new_dict))
+            }
+            PdfObject::Array(arr) => {
+                let mut new_arr = Vec::with_capacity(arr.len());
+                for v in arr {
+                    new_arr.push(self.extract_streams_to_indirect(v, modified)?);
+                }
+                Ok(PdfObject::Array(new_arr))
+            }
+            other => Ok(other),
+        }
+    }
+
+    fn widget_has_appearance_states(
+        &mut self,
+        dict: &BTreeMap<String, PdfObject>,
+        on_state: &str,
+    ) -> bool {
+        let Some(ap_obj) = dict.get("AP") else {
+            return false;
+        };
+        let Ok(ap_resolved) = self.store.resolve_object(ap_obj) else {
+            return false;
+        };
+        let Some(ap_dict) = ap_resolved.as_dict() else {
+            return false;
+        };
+        let Some(n_obj) = ap_dict.get("N") else {
+            return false;
+        };
+        let Ok(n_resolved) = self.store.resolve_object(n_obj) else {
+            return false;
+        };
+        let Some(n_dict) = n_resolved.as_dict() else {
+            return false;
+        };
+        n_dict.contains_key("Off") && (n_dict.contains_key(on_state) || n_dict.len() >= 2)
+    }
 }
+
