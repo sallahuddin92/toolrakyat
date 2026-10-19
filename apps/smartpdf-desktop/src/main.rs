@@ -767,10 +767,11 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
             app.set_render_engine_badge(format!("GPU ({short_name})").into());
             app.set_gpu_metrics_detail(
                 format!(
-                    "Frame: {:.1}ms (Draws: {}, GPU Paths: {}, Images: {}, CPU fallback: {})",
+                    "Frame: {:.1}ms (Draws: {}, GPU Paths: {}, Glyphs: {}, Images: {}, CPU fallback: {})",
                     gpu_res.metrics.total_frame_duration_ms,
                     gpu_res.metrics.gpu_draw_calls,
                     gpu_res.metrics.gpu_paths_rendered,
+                    gpu_res.metrics.gpu_glyphs_rendered,
                     gpu_res.metrics.gpu_images_rendered,
                     gpu_res.metrics.fallback_cpu_items
                 )

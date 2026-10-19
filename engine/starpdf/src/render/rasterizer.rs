@@ -48,7 +48,8 @@ impl RenderedPage {
     }
 }
 
-struct FallbackFontCache {
+#[derive(Clone)]
+pub(crate) struct FallbackFontCache {
     arabic: Option<Vec<u8>>,
     hebrew: Option<Vec<u8>>,
     devanagari: Option<Vec<u8>>,
@@ -57,7 +58,7 @@ struct FallbackFontCache {
 }
 
 impl FallbackFontCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             arabic: Self::load_font("NotoSansArabic-Regular.ttf"),
             hebrew: Self::load_font("NotoSansHebrew-Regular.ttf"),
@@ -100,7 +101,7 @@ impl FallbackFontCache {
         None
     }
 
-    fn font_for_char(&self, ch: char) -> Option<&[u8]> {
+    pub(crate) fn font_for_char(&self, ch: char) -> Option<&[u8]> {
         let cp = ch as u32;
         match cp {
             0x0600..=0x06FF
