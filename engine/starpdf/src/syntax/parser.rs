@@ -67,9 +67,10 @@ impl<'a> Parser<'a> {
                 let saved_pos = self.lexer.position();
                 if let Ok(Some(Token::Integer(gen))) = self.lexer.next_token() {
                     if let Ok(Some(Token::KeywordR)) = self.lexer.next_token() {
-                        if num >= 0 && gen >= 0 && gen <= u16::MAX as i64 {
+                        if num >= 0 && gen >= 0 {
                             return Ok(PdfObject::Reference(ObjectRef::new(
-                                num as u64, gen as u16,
+                                num as u64,
+                                (gen.min(u16::MAX as i64)) as u16,
                             )));
                         }
                     }
@@ -251,7 +252,7 @@ impl<'a> Parser<'a> {
         };
 
         let gen = match self.lexer.next_token()? {
-            Some(Token::Integer(g)) if g >= 0 && g <= u16::MAX as i64 => g as u16,
+            Some(Token::Integer(g)) if g >= 0 => (g.min(u16::MAX as i64)) as u16,
             Some(other) => {
                 return Err(PdfError::InvalidSyntax(format!(
                     "Expected generation number integer, found {other:?}"

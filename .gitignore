@@ -50,6 +50,7 @@ yarn-error.log*
 next-env.d.ts
 
 # cargo target & lock
-/target/
+target/
+**/target/
 /Cargo.lock
 

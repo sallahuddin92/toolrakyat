@@ -93,3 +93,27 @@ fn test_xref_entry_predicates() {
     assert_eq!(in_use.byte_offset(), Some(1234));
     assert_eq!(free.byte_offset(), None);
 }
+
+#[test]
+fn test_parse_xref_table_out_of_range_generation_resilience() {
+    // Some producers (e.g. PyMuPDF/Ghostscript) output generation 65536 for object 0
+    let header = b"%PDF-1.7\n";
+    let xref_offset = header.len();
+    let body = format!(
+        "xref\n0 2\n0000000000 65536 f \n0000000120 00000 n \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF"
+    );
+    let mut pdf = Vec::new();
+    pdf.extend_from_slice(header);
+    pdf.extend_from_slice(body.as_bytes());
+
+    let source = ByteSource::new(&pdf);
+    let table = XrefResolver::load_xref_and_trailer(source).expect("xref with gen 65536 must parse cleanly");
+
+    assert_eq!(table.get_offset(1), Some(120));
+    assert_eq!(table.get_offset(0), None);
+    if let Some(XrefEntry::Free { generation, .. }) = table.get_entry(0) {
+        assert_eq!(*generation, u16::MAX);
+    } else {
+        panic!("expected Free entry for object 0");
+    }
+}

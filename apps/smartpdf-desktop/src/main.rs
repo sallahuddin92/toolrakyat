@@ -1008,6 +1008,22 @@ mod tests {
         i_slint_backend_testing::init_no_event_loop();
     }
 
+    fn resolve_fixture(rel: &str) -> PathBuf {
+        let p = PathBuf::from(rel);
+        if p.exists() {
+            return p;
+        }
+        let p2 = PathBuf::from("../../").join(rel);
+        if p2.exists() {
+            return p2;
+        }
+        let p3 = PathBuf::from("../").join(rel);
+        if p3.exists() {
+            return p3;
+        }
+        p
+    }
+
     #[test]
     fn test_ui_initialization_and_sync() {
         init_testing();
@@ -1256,4 +1272,305 @@ mod tests {
             assert!(first_span.height > 0.0);
         }
     }
+
+    #[test]
+    fn test_phase8_real_world_document_open_and_render_all_categories() {
+        init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+
+        let test_fixtures = [
+            "test-assets/realworld_corpus/office-invoice-enterprise.pdf",
+            "test-assets/realworld_corpus/scanned-multires-archive.pdf",
+            "test-assets/realworld_corpus/forms-employment-application.pdf",
+            "test-assets/realworld_corpus/complex-infographic-graphics.pdf",
+            "test-assets/realworld_corpus/annotations-markup-review.pdf",
+        ];
+
+        for fix in test_fixtures {
+            let path = resolve_fixture(fix);
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("Could not read fixture {:?}: {e}", path));
+            let mut manager = SessionManager::new();
+            manager
+                .dispatch(AppCommand::OpenDocument {
+                    path: Some(path.clone()),
+                    bytes,
+                    title: fix.to_string(),
+                })
+                .unwrap_or_else(|e| panic!("Failed to open fixture {:?}: {e}", path));
+
+            sync_ui(&app, &manager, "select", false);
+
+            assert!(app.get_has_rendered_page_image(), "Must have rendered image for {fix}");
+            assert!(app.get_page_width() > 0.0, "Page width must be positive for {fix}");
+            assert!(app.get_page_height() > 0.0, "Page height must be positive for {fix}");
+            assert!(app.get_render_engine_badge().len() > 0);
+        }
+    }
+
+    #[test]
+    fn test_phase8_large_document_scrolling_and_page_switching() {
+        init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let path = resolve_fixture("test-assets/realworld_corpus/large-manual-20page.pdf");
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read 20-page manual at {:?}: {e}", path));
+
+        let mut manager = SessionManager::new();
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(path),
+                bytes,
+                title: "large-manual-20page.pdf".into(),
+            })
+            .expect("open 20-page manual");
+
+        assert_eq!(manager.active_session().unwrap().total_pages, 20);
+
+        for target_page in [0u32, 1, 5, 10, 19] {
+            manager
+                .dispatch(AppCommand::SetPage { page_index: target_page })
+                .expect("SetPage");
+
+            sync_ui(&app, &manager, "select", false);
+
+            assert_eq!(app.get_active_page(), target_page as i32);
+            assert_eq!(
+                app.get_page_info_text(),
+                format!("Page {} of 20", target_page + 1)
+            );
+            assert!(app.get_has_rendered_page_image());
+
+            // Check thumbnails
+            let thumbs = app.get_thumbnails();
+            assert_eq!(thumbs.row_count(), 20);
+            let thumb = thumbs.row_data(target_page as usize).unwrap();
+            assert!(thumb.is_active, "Active page thumbnail must have is_active == true");
+            if target_page > 0 {
+                let prev_thumb = thumbs.row_data(0).unwrap();
+                assert!(!prev_thumb.is_active, "Inactive page thumbnail must have is_active == false");
+            }
+        }
+    }
+
+    #[test]
+    fn test_phase8_in_place_text_edit_undo_redo_and_save_reopen_lifecycle() {
+        init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let manager = Rc::new(RefCell::new(SessionManager::new()));
+        let active_tool = Rc::new(RefCell::new("text".to_string()));
+        let is_editing = Rc::new(RefCell::new(true));
+
+        let path = resolve_fixture("test-assets/realworld_corpus/office-invoice-enterprise.pdf");
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read invoice at {:?}: {e}", path));
+
+        manager
+            .borrow_mut()
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(path),
+                bytes,
+                title: "invoice.pdf".into(),
+            })
+            .expect("open invoice");
+
+        let (span_id, original_text) = {
+            let mgr = manager.borrow();
+            let session = mgr.active_session().unwrap();
+            let mut doc = session.pdf_document().unwrap();
+            let pages = doc.extract_all_text().unwrap();
+            (
+                pages[0].spans[0].span_id.clone(),
+                pages[0].spans[0].text.clone(),
+            )
+        };
+
+        let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &span_id).unwrap();
+        let sel = SelectionState::Text {
+            star_node_id,
+            render_node_id: None,
+            text: original_text.clone(),
+            bounds: Rect::new(40.0, 40.0, 200.0, 30.0),
+            font_info: Some(FontInfo::new("Helvetica", 18.0)),
+            is_editable: true,
+        };
+
+        manager
+            .borrow_mut()
+            .dispatch(AppCommand::SetSelection { selection: sel })
+            .expect("SetSelection");
+
+        sync_ui(&app, &manager.borrow(), "text", true);
+
+        // Edit text
+        let modified_text = "TOOLRAKYAT QUANTUM ENTERPRISE CLOUD";
+        app.set_editing_text_buffer(modified_text.into());
+
+        // Auto-commit on blur / selection change
+        commit_active_text_edit(&app, &manager, &active_tool, &is_editing);
+
+        {
+            let mgr = manager.borrow();
+            let session = mgr.active_session().unwrap();
+            assert!(session.is_dirty(), "Session must be marked dirty after text commit");
+            assert_eq!(session.evidence_level(), "MUTATION_STAGED");
+        }
+
+        // Test Undo
+        manager.borrow_mut().dispatch(AppCommand::Undo).expect("Undo");
+        sync_ui(&app, &manager.borrow(), "select", false);
+
+        // Test Redo
+        manager.borrow_mut().dispatch(AppCommand::Redo).expect("Redo");
+        sync_ui(&app, &manager.borrow(), "select", false);
+
+        // Export and Reopen Verification
+        let exported_bytes = {
+            let mut mgr = manager.borrow_mut();
+            let res = mgr
+                .dispatch(AppCommand::ExportDocument {
+                    profile: ExportProfile::StandardPdf,
+                })
+                .expect("Export mutated PDF");
+            res.exported_bytes.expect("exported bytes")
+        };
+
+        assert!(exported_bytes.len() > 100);
+
+        // Reopen in a clean session
+        let mut reopen_mgr = SessionManager::new();
+        reopen_mgr
+            .dispatch(AppCommand::OpenDocument {
+                path: None,
+                bytes: exported_bytes,
+                title: "reopened.pdf".into(),
+            })
+            .expect("Reopen exported document");
+
+        assert_eq!(reopen_mgr.session_count(), 1);
+        let mut reopened_doc = reopen_mgr.active_session().unwrap().pdf_document().unwrap();
+        let reopened_pages = reopened_doc.extract_all_text().unwrap();
+        assert!(
+            reopened_pages[0].spans.iter().any(|s| s.text.contains(modified_text)),
+            "Modified text must be semantically present in reopened PDF"
+        );
+    }
+
+    #[test]
+    fn test_phase8_multi_document_tab_lifecycle() {
+        init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let mut manager = SessionManager::new();
+
+        let doc1_path = resolve_fixture("test-assets/realworld_corpus/office-invoice-enterprise.pdf");
+        let doc2_path = resolve_fixture("test-assets/realworld_corpus/scanned-multires-archive.pdf");
+        let doc1_bytes = std::fs::read(&doc1_path).unwrap();
+        let doc2_bytes = std::fs::read(&doc2_path).unwrap();
+
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(doc1_path),
+                bytes: doc1_bytes,
+                title: "Invoice".into(),
+            })
+            .unwrap();
+
+        let tab1_id = manager.active_session().unwrap().id.clone();
+
+        manager
+            .dispatch(AppCommand::OpenDocument {
+                path: Some(doc2_path),
+                bytes: doc2_bytes,
+                title: "Scan".into(),
+            })
+            .unwrap();
+
+        let tab2_id = manager.active_session().unwrap().id.clone();
+
+        assert_eq!(manager.session_count(), 2);
+        sync_ui(&app, &manager, "select", false);
+
+        let tabs = app.get_tabs();
+        assert_eq!(tabs.row_count(), 2);
+        assert_eq!(app.get_active_tab_id(), tab2_id);
+
+        // Switch to tab 1
+        manager
+            .dispatch(AppCommand::SwitchTab { session_id: tab1_id.clone() })
+            .unwrap();
+        sync_ui(&app, &manager, "select", false);
+        assert_eq!(app.get_active_tab_id(), tab1_id);
+
+        // Close tab 2
+        manager
+            .dispatch(AppCommand::CloseSession { session_id: tab2_id })
+            .unwrap();
+        sync_ui(&app, &manager, "select", false);
+        assert_eq!(manager.session_count(), 1);
+        assert_eq!(app.get_tabs().row_count(), 1);
+    }
+
+    #[test]
+    fn test_phase8_malformed_document_graceful_refusal() {
+        init_testing();
+        let _app = AppWindow::new().expect("Slint AppWindow");
+        let mut manager = SessionManager::new();
+
+        let malformed_bytes = b"%PDF-1.4\nCorrupted binary payload\n%%EOF".to_vec();
+        let res = manager.dispatch(AppCommand::OpenDocument {
+            path: None,
+            bytes: malformed_bytes,
+            title: "corrupt.pdf".into(),
+        });
+
+        // Must refuse fail-closed with typed error, not crash or panic
+        assert!(res.is_err(), "Opening malformed PDF must return Err");
+        assert_eq!(manager.session_count(), 0);
+    }
+
+    #[test]
+    fn test_phase8_capture_desktop_qualification_screenshots() {
+        init_testing();
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let screenshot_dir = resolve_fixture("target/desktop_qualification_screenshots");
+        let _ = std::fs::create_dir_all(&screenshot_dir);
+
+        let targets = [
+            ("test-assets/realworld_corpus/office-invoice-enterprise.pdf", "desktop_office_invoice.png"),
+            ("test-assets/realworld_corpus/complex-infographic-graphics.pdf", "desktop_complex_infographic.png"),
+            ("test-assets/realworld_corpus/scanned-multires-archive.pdf", "desktop_scanned_archive.png"),
+            ("test-assets/realworld_corpus/large-manual-20page.pdf", "desktop_large_manual_p0.png"),
+        ];
+
+        for (pdf_rel, out_name) in targets {
+            let pdf_path = resolve_fixture(pdf_rel);
+            let bytes = std::fs::read(&pdf_path).unwrap_or_else(|e| panic!("read screenshot pdf {:?}: {e}", pdf_path));
+            let mut manager = SessionManager::new();
+            manager
+                .dispatch(AppCommand::OpenDocument {
+                    path: Some(pdf_path.clone()),
+                    bytes,
+                    title: out_name.to_string(),
+                })
+                .expect("open doc for screenshot");
+
+            sync_ui(&app, &manager, "select", false);
+
+            let session = manager.active_session().unwrap();
+            let rendered = session.render_page(0, 1.0).expect("render page");
+
+            let out_path = screenshot_dir.join(out_name);
+            image::save_buffer(
+                &out_path,
+                &rendered.rgba_pixels,
+                rendered.width,
+                rendered.height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .expect("save screenshot png");
+
+            assert!(out_path.exists());
+            println!("  [Screenshot Captured] Saved: {:?}", out_path);
+        }
+    }
 }
+

@@ -323,7 +323,7 @@ impl XrefResolver {
                         };
 
                         let gen_tok = match lexer.next_token()? {
-                            Some(Token::Integer(g)) if g >= 0 && g <= u16::MAX as i64 => g as u16,
+                            Some(Token::Integer(g)) if g >= 0 => (g.min(u16::MAX as i64)) as u16,
                             Some(other) => {
                                 return Err(PdfError::InvalidXref(format!(
                                     "Expected generation for object {obj_num}, found {other:?}"
