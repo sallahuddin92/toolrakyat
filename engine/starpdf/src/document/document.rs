@@ -900,11 +900,10 @@ impl<'a> PdfDocument<'a> {
     }
 
     pub fn duplicate_page(&mut self, page_index: usize, insert_at: usize) -> PdfResult<Vec<u8>> {
-        self.apply_page_operations(
-            &crate::page_ops::PageOperationPlan::new(crate::page_ops::PageEdit::DuplicatePage {
-                index: page_index,
-                insert_at,
-            }),
+        crate::page_ops::DocumentBuilder::duplicate_page(
+            self.source.as_bytes(),
+            page_index,
+            insert_at,
             &crate::page_ops::PageOperationLimits::default(),
         )
     }

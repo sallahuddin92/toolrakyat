@@ -150,7 +150,7 @@ echo "CLI help invocation: $LAUNCH_HELP_OUTPUT"
 rm -f "$TMP_PDF" /tmp/codesign_out.txt /tmp/spctl_out.txt
 
 # 4. Generate Audit Report JSON
-REPORTS_DIR="$WORKSPACE_ROOT/target/phase11_reports"
+REPORTS_DIR="$WORKSPACE_ROOT/target/phase12_reports"
 mkdir -p "$REPORTS_DIR"
 cat << EOF > "$REPORTS_DIR/macos_packaging_audit.json"
 {
@@ -163,11 +163,19 @@ cat << EOF > "$REPORTS_DIR/macos_packaging_audit.json"
   "gatekeeper_details": "$SPCTL_OUTPUT",
   "cli_version_output": "$LAUNCH_VERSION_OUTPUT",
   "self_contained": true,
+  "cross_platform_status": {
+    "macos_arm64": "VERIFIED_NATIVE",
+    "macos_x86_64": "UNVERIFIED_REQUIRES_ROSETTA_OR_CROSS_CI",
+    "windows_x86_64": "UNVERIFIED_REQUIRES_WINDOWS_RUNNER",
+    "linux_x86_64": "UNVERIFIED_REQUIRES_LINUX_RUNNER"
+  },
   "release_blockers": [
     "Apple Developer ID signing certificate is not configured in local environment; bundle is unsigned/ad-hoc",
     "Notarization with Apple notarytool requires developer credentials"
   ]
 }
 EOF
+mkdir -p "$WORKSPACE_ROOT/target/phase11_reports"
+cp "$REPORTS_DIR/macos_packaging_audit.json" "$WORKSPACE_ROOT/target/phase11_reports/macos_packaging_audit.json"
 
 echo "==> Packaging audit complete. Report written to $REPORTS_DIR/macos_packaging_audit.json"

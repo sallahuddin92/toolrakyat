@@ -148,6 +148,9 @@ export component AppWindow inherits Window {
     callback add_annotation_clicked(string);
     callback update_annotation_text_clicked(string);
     callback add_image_clicked();
+    callback replace_image_clicked();
+    callback move_selected_clicked(float, float);
+    callback resize_selected_clicked(float, float);
     callback form_field_toggled(string, string);
     callback form_field_text_committed(string, string);
     callback insert_blank_page_clicked();
@@ -197,6 +200,24 @@ export component AppWindow inherits Window {
             if (event.text == Key.Delete || event.text == Key.Backspace) {
                 root.delete_selected_clicked();
                 return accept;
+            }
+            if (root.has_selection && !root.is_editing_text) {
+                if (event.text == Key.LeftArrow) {
+                    root.move_selected_clicked(-10.0, 0.0);
+                    return accept;
+                }
+                if (event.text == Key.RightArrow) {
+                    root.move_selected_clicked(10.0, 0.0);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.move_selected_clicked(0.0, -10.0);
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.move_selected_clicked(0.0, 10.0);
+                    return accept;
+                }
             }
             if (event.text == Key.PageUp) {
                 root.prev_page_clicked();
@@ -1084,8 +1105,23 @@ export component AppWindow inherits Window {
                         Rectangle { x: parent.width - 4px; y: -4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
                         // Bottom-Left
                         Rectangle { x: -4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
-                        // Bottom-Right
-                        Rectangle { x: parent.width - 4px; y: parent.height - 4px; width: 8px; height: 8px; background: #FFFFFF; border-width: 1.5px; border-color: #0EA5E9; border-radius: 1px; }
+                        // Bottom-Right (Interactive Resize Handle)
+                        Rectangle {
+                            x: parent.width - 5px;
+                            y: parent.height - 5px;
+                            width: 10px;
+                            height: 10px;
+                            background: #FFFFFF;
+                            border-width: 1.5px;
+                            border-color: #0EA5E9;
+                            border-radius: 1px;
+                            TouchArea {
+                                mouse-cursor: nwse-resize;
+                                clicked => {
+                                    root.resize_selected_clicked(15.0, 15.0);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1332,6 +1368,83 @@ export component AppWindow inherits Window {
                                             text: "Image Ref: " + root.selection_node_id;
                                             font-size: 11px;
                                             color: #CBD5E1;
+                                        }
+                                        Rectangle {
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: rep-img-ta.has-hover ? #0284C7 : #0EA5E9;
+                                            Text {
+                                                text: "🖼 Replace Image...";
+                                                font-size: 11px;
+                                                font-weight: 600;
+                                                color: #FFFFFF;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            rep-img-ta := TouchArea {
+                                                clicked => {
+                                                    root.replace_image_clicked();
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 5. Transform & Position Controls
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Position & Size:";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #94A3B8;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: mv-l-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "◀"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                mv-l-ta := TouchArea { clicked => { root.move_selected_clicked(-10.0, 0.0); } }
+                                            }
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: mv-r-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "▶"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                mv-r-ta := TouchArea { clicked => { root.move_selected_clicked(10.0, 0.0); } }
+                                            }
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: mv-u-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "▲"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                mv-u-ta := TouchArea { clicked => { root.move_selected_clicked(0.0, -10.0); } }
+                                            }
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: mv-d-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "▼"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                mv-d-ta := TouchArea { clicked => { root.move_selected_clicked(0.0, 10.0); } }
+                                            }
+                                        }
+                                        if root.selection_type == "Annotation" || root.selection_type == "Image" : HorizontalLayout {
+                                            spacing: 4px;
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: exp-sz-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "＋ Expand"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                exp-sz-ta := TouchArea { clicked => { root.resize_selected_clicked(15.0, 15.0); } }
+                                            }
+                                            Rectangle {
+                                                height: 24px;
+                                                border-radius: 4px;
+                                                background: shr-sz-ta.has-hover ? #0284C7 : #334155;
+                                                Text { text: "－ Shrink"; font-size: 10px; color: #FFFFFF; horizontal-alignment: center; vertical-alignment: center; }
+                                                shr-sz-ta := TouchArea { clicked => { root.resize_selected_clicked(-15.0, -15.0); } }
+                                            }
                                         }
                                     }
 

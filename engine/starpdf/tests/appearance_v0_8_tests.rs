@@ -432,7 +432,11 @@ fn embedded_true_type_resolves_from_field_resources_and_reuses_reference() {
             .and_then(|dict| dict.get("AP"))
             .and_then(PdfObject::as_dict)
             .and_then(|dict| dict.get("N"))
-            .and_then(PdfObject::as_stream)
+            .and_then(|n| match n {
+                PdfObject::Stream(s) => Some(s),
+                PdfObject::Reference(r) => plan.modified_objects.get(r).and_then(PdfObject::as_stream),
+                _ => None,
+            })
             .unwrap();
         assert_eq!(
             appearance
@@ -696,8 +700,12 @@ fn rotated_checkbox_and_choice_emit_supported_matrices() {
         .and_then(PdfObject::as_dict)
         .unwrap();
     for state in states.values() {
-        assert!(state
-            .as_stream()
+        let stream = match state {
+            PdfObject::Stream(s) => Some(s),
+            PdfObject::Reference(r) => plan.modified_objects.get(r).and_then(PdfObject::as_stream),
+            _ => None,
+        };
+        assert!(stream
             .and_then(|stream| stream.dict.get("Matrix"))
             .is_some());
     }
@@ -708,7 +716,11 @@ fn rotated_checkbox_and_choice_emit_supported_matrices() {
         .and_then(|dict| dict.get("AP"))
         .and_then(PdfObject::as_dict)
         .and_then(|dict| dict.get("N"))
-        .and_then(PdfObject::as_stream)
+        .and_then(|n| match n {
+            PdfObject::Stream(s) => Some(s),
+            PdfObject::Reference(r) => plan.modified_objects.get(r).and_then(PdfObject::as_stream),
+            _ => None,
+        })
         .and_then(|stream| stream.dict.get("Matrix"));
     assert!(choice_matrix.is_some());
 }

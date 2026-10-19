@@ -3178,20 +3178,44 @@ impl<'a, 'b> MutationEngine<'a, 'b> {
         Ok(())
     }
 
+    fn resolve_object_with_modified(
+        &mut self,
+        obj: &PdfObject,
+        modified: &BTreeMap<ObjectRef, PdfObject>,
+    ) -> PdfResult<PdfObject> {
+        match obj {
+            PdfObject::Reference(r) => {
+                if let Some(existing) = modified.get(r) {
+                    self.resolve_object_with_modified(existing, modified)
+                } else {
+                    let resolved = self.store.resolve(*r)?;
+                    Ok(resolved.clone())
+                }
+            }
+            other => Ok(other.clone()),
+        }
+    }
+
     fn has_normal_appearance(
         &mut self,
         reference: ObjectRef,
         modified: &BTreeMap<ObjectRef, PdfObject>,
     ) -> PdfResult<bool> {
-        let dict = self.get_dict_for_modification(reference, modified)?;
+        let Ok(dict) = self.get_dict_for_modification(reference, modified) else {
+            return Ok(false);
+        };
         let Some(appearance) = dict.get("AP") else {
             return Ok(false);
         };
-        let appearance = self.store.resolve_object(appearance)?;
+        let Ok(appearance) = self.resolve_object_with_modified(appearance, modified) else {
+            return Ok(false);
+        };
         let Some(normal) = appearance.as_dict().and_then(|dict| dict.get("N")) else {
             return Ok(false);
         };
-        let normal = self.store.resolve_object(normal)?;
+        let Ok(normal) = self.resolve_object_with_modified(normal, modified) else {
+            return Ok(false);
+        };
         if normal.as_stream().is_some() {
             return Ok(true);
         }

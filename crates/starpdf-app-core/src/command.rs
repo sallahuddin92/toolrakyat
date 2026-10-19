@@ -83,6 +83,19 @@ pub enum AppCommand {
         width: f64,
         height: f64,
     },
+    ReplaceImage {
+        page_index: u32,
+        image_ref: String,
+        image_bytes: Vec<u8>,
+    },
+    MoveElement {
+        dx: f64,
+        dy: f64,
+    },
+    ResizeElement {
+        dw: f64,
+        dh: f64,
+    },
     Undo,
     Redo,
     ExportDocument {
@@ -531,6 +544,28 @@ pub fn dispatch_command(
                 let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
                 let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
                 session.commit_bytes(format!("Update annotation {annot_ref}"), new_bytes)?;
+                if let crate::selection::SelectionState::Annotation {
+                    annot_ref: sel_ref,
+                    contents: sel_contents,
+                    bounds: sel_bounds,
+                    ..
+                } = &mut session.selection
+                {
+                    if sel_ref == &annot_ref {
+                        if contents.is_some() {
+                            *sel_contents = contents.clone();
+                        }
+                        if let Some(r) = rect {
+                            let page_h = 792.0;
+                            *sel_bounds = crate::selection::Rect::new(
+                                r[0],
+                                (page_h - r[3]).max(0.0),
+                                (r[2] - r[0]).abs().max(16.0),
+                                (r[3] - r[1]).abs().max(16.0),
+                            );
+                        }
+                    }
+                }
                 Ok(CommandResult::ok(format!("Updated annotation {annot_ref}"))
                     .with_session(session_id))
             } else {
@@ -633,6 +668,266 @@ pub fn dispatch_command(
             let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
             session.commit_bytes(format!("Add image to page {page_index}"), new_bytes)?;
             Ok(CommandResult::ok(format!("Image added to page {page_index}")).with_session(session_id))
+        }
+
+        AppCommand::ReplaceImage {
+            page_index,
+            image_ref,
+            image_bytes,
+        } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let spec = starpdf::image::ReplaceImageSpec {
+                page_index: page_index as usize,
+                image_id: image_ref.clone(),
+                new_image_bytes: image_bytes,
+                format: starpdf::image::ImageFormat::AutoDetect,
+                clone_if_shared: true,
+            };
+
+            let mut doc = session.pdf_document()?;
+            let plan = doc.replace_image(&spec).map_err(AppCoreError::from)?;
+            let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+            session.commit_bytes(format!("Replace image {image_ref}"), new_bytes)?;
+            Ok(CommandResult::ok(format!("Image {image_ref} replaced successfully"))
+                .with_session(session_id))
+        }
+
+        AppCommand::MoveElement { dx, dy } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let sel = session.selection.clone();
+            match sel {
+                crate::selection::SelectionState::Annotation {
+                    annot_ref, bounds, ..
+                } => {
+                    let annot_ref = annot_ref.clone();
+                    let page_h = 792.0;
+                    let new_x0 = (bounds.x as f64 + dx).max(0.0);
+                    let new_y_canvas = (bounds.y as f64 + dy).max(0.0);
+                    let new_w = bounds.width;
+                    let new_h = bounds.height;
+                    let new_x1 = new_x0 + new_w as f64;
+                    let new_y0 = (page_h - (new_y_canvas + new_h as f64)).max(0.0);
+                    let new_y1 = new_y0 + new_h as f64;
+                    let new_rect = [new_x0, new_y0, new_x1, new_y1];
+
+                    if let Some(target_ref) = parse_obj_ref(&annot_ref) {
+                        let update = starpdf::annotation::types::AnnotationUpdateSpec {
+                            rect: Some(new_rect),
+                            contents: None,
+                            color: None,
+                            fill_color: None,
+                            border_width: None,
+                            line_points: None,
+                            line_endings: None,
+                            quad_points: None,
+                            ink_list: None,
+                            font_family: None,
+                            font_size: None,
+                            bold: None,
+                            italic: None,
+                            text_color: None,
+                            underline: None,
+                            strikethrough: None,
+                            highlight_enabled: None,
+                            highlight_color: None,
+                        };
+                        let change = starpdf::mutation::PdfChange::UpdateAnnotation {
+                            annot_ref: target_ref,
+                            update,
+                        };
+                        let mut doc = session.pdf_document()?;
+                        let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
+                        let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                        session.commit_bytes(format!("Move annotation {annot_ref}"), new_bytes)?;
+
+                        if let crate::selection::SelectionState::Annotation { bounds: b, .. } =
+                            &mut session.selection
+                        {
+                            *b = crate::selection::Rect::new(
+                                new_x0,
+                                new_y_canvas,
+                                new_w,
+                                new_h,
+                            );
+                        }
+                        Ok(CommandResult::ok(format!("Moved annotation {annot_ref}"))
+                            .with_session(session_id))
+                    } else {
+                        Err(AppCoreError::InvalidOperation(format!(
+                            "Invalid annotation ref: {annot_ref}"
+                        )))
+                    }
+                }
+                crate::selection::SelectionState::Image {
+                    image_ref,
+                    bounds,
+                    ..
+                } => {
+                    let image_ref = image_ref.clone();
+                    let current_page = session.current_page as usize;
+                    let page_h = 792.0;
+                    let new_x0 = (bounds.x as f64 + dx).max(0.0);
+                    let new_y_canvas = (bounds.y as f64 + dy).max(0.0);
+                    let new_w = bounds.width as f64;
+                    let new_h = bounds.height as f64;
+                    let new_pdf_y = (page_h - (new_y_canvas + new_h)).max(0.0);
+
+                    let spec = starpdf::image::UpdateImageSpec {
+                        page_index: current_page,
+                        image_id: image_ref.clone(),
+                        new_x: new_x0,
+                        new_y: new_pdf_y,
+                        new_width: new_w,
+                        new_height: new_h,
+                        clone_if_shared: true,
+                    };
+                    let mut doc = session.pdf_document()?;
+                    let plan = doc.update_image(&spec).map_err(AppCoreError::from)?;
+                    let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                    session.commit_bytes(format!("Move image {image_ref}"), new_bytes)?;
+
+                    if let crate::selection::SelectionState::Image { bounds: b, .. } =
+                        &mut session.selection
+                    {
+                        *b = crate::selection::Rect::new(new_x0, new_y_canvas, new_w, new_h);
+                    }
+                    Ok(CommandResult::ok(format!("Moved image {image_ref}")).with_session(session_id))
+                }
+                crate::selection::SelectionState::Text { star_node_id, .. } => {
+                    let target_node = star_node_id.to_string();
+                    let current_page = session.current_page as usize;
+                    let (page_idx, span_id) = {
+                        let mut doc = session.pdf_document()?;
+                        resolve_text_target(&mut doc, current_page, &target_node)?
+                    };
+                    let mut doc = session.pdf_document()?;
+                    let plan = doc
+                        .move_text_span(page_idx, &span_id, dx, dy)
+                        .map_err(AppCoreError::from)?;
+                    let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                    session.commit_bytes(format!("Move text ({dx}, {dy})"), new_bytes)?;
+                    Ok(CommandResult::ok(format!("Moved text {target_node}")).with_session(session_id))
+                }
+                _ => Err(AppCoreError::InvalidOperation(
+                    "Selected element cannot be moved".into(),
+                )),
+            }
+        }
+
+        AppCommand::ResizeElement { dw, dh } => {
+            let session = manager
+                .active_session_mut()
+                .ok_or(AppCoreError::NoActiveSession)?;
+            session.require_can_edit()?;
+            let session_id = session.id.clone();
+
+            let sel = session.selection.clone();
+            match sel {
+                crate::selection::SelectionState::Annotation {
+                    annot_ref, bounds, ..
+                } => {
+                    let annot_ref = annot_ref.clone();
+                    let page_h = 792.0;
+                    let new_w = (bounds.width as f64 + dw).max(16.0);
+                    let new_h = (bounds.height as f64 + dh).max(16.0);
+                    let x0 = bounds.x as f64;
+                    let x1 = x0 + new_w;
+                    let y0 = (page_h - (bounds.y as f64 + new_h)).max(0.0);
+                    let y1 = y0 + new_h;
+                    let new_rect = [x0, y0, x1, y1];
+
+                    if let Some(target_ref) = parse_obj_ref(&annot_ref) {
+                        let update = starpdf::annotation::types::AnnotationUpdateSpec {
+                            rect: Some(new_rect),
+                            contents: None,
+                            color: None,
+                            fill_color: None,
+                            border_width: None,
+                            line_points: None,
+                            line_endings: None,
+                            quad_points: None,
+                            ink_list: None,
+                            font_family: None,
+                            font_size: None,
+                            bold: None,
+                            italic: None,
+                            text_color: None,
+                            underline: None,
+                            strikethrough: None,
+                            highlight_enabled: None,
+                            highlight_color: None,
+                        };
+                        let change = starpdf::mutation::PdfChange::UpdateAnnotation {
+                            annot_ref: target_ref,
+                            update,
+                        };
+                        let mut doc = session.pdf_document()?;
+                        let plan = doc.apply_mutation(&[change]).map_err(AppCoreError::from)?;
+                        let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                        session.commit_bytes(format!("Resize annotation {annot_ref}"), new_bytes)?;
+
+                        if let crate::selection::SelectionState::Annotation { bounds: b, .. } =
+                            &mut session.selection
+                        {
+                            *b = crate::selection::Rect::new(x0, bounds.y as f64, new_w, new_h);
+                        }
+                        Ok(CommandResult::ok(format!("Resized annotation {annot_ref}"))
+                            .with_session(session_id))
+                    } else {
+                        Err(AppCoreError::InvalidOperation(format!(
+                            "Invalid annotation ref: {annot_ref}"
+                        )))
+                    }
+                }
+                crate::selection::SelectionState::Image {
+                    image_ref,
+                    bounds,
+                    ..
+                } => {
+                    let image_ref = image_ref.clone();
+                    let current_page = session.current_page as usize;
+                    let page_h = 792.0;
+                    let new_w = (bounds.width as f64 + dw).max(16.0);
+                    let new_h = (bounds.height as f64 + dh).max(16.0);
+                    let x0 = bounds.x as f64;
+                    let y_canvas = bounds.y as f64;
+                    let new_pdf_y = (page_h - (y_canvas + new_h)).max(0.0);
+
+                    let spec = starpdf::image::UpdateImageSpec {
+                        page_index: current_page,
+                        image_id: image_ref.clone(),
+                        new_x: x0,
+                        new_y: new_pdf_y,
+                        new_width: new_w,
+                        new_height: new_h,
+                        clone_if_shared: true,
+                    };
+                    let mut doc = session.pdf_document()?;
+                    let plan = doc.update_image(&spec).map_err(AppCoreError::from)?;
+                    let new_bytes = doc.export_incremental(&plan).map_err(AppCoreError::from)?;
+                    session.commit_bytes(format!("Resize image {image_ref}"), new_bytes)?;
+
+                    if let crate::selection::SelectionState::Image { bounds: b, .. } =
+                        &mut session.selection
+                    {
+                        *b = crate::selection::Rect::new(x0, y_canvas, new_w, new_h);
+                    }
+                    Ok(CommandResult::ok(format!("Resized image {image_ref}")).with_session(session_id))
+                }
+                _ => Err(AppCoreError::InvalidOperation(
+                    "Selected element cannot be resized".into(),
+                )),
+            }
         }
 
         AppCommand::Undo => {

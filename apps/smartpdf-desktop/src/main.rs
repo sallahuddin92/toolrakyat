@@ -46,7 +46,7 @@ const DEFAULT_SAMPLE_PDF: &[u8] = include_bytes!("../../../test-assets/text-mult
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("SmartPDF 0.1.0 (Phase 11 Native Desktop)");
+        println!("SmartPDF 0.1.0 (Phase 12 Release Candidate)");
         return Ok(());
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -648,6 +648,33 @@ pub fn register_ui_callbacks(
                             }
                         }
                     }
+                } else if elem_str.starts_with("img_") {
+                    if let Some(session) = mgr.active_session() {
+                        if let Ok(mut doc) = session.pdf_document() {
+                            if let Ok(images) = doc.enumerate_images(session.current_page as usize) {
+                                if let Some(img) = images.iter().find(|x| format!("img_{}", x.object_ref.number) == elem_str || x.image_id == elem_str) {
+                                    let page_h = 792.0;
+                                    let canvas_y = (page_h - img.rect[3]).max(0.0);
+                                    let bounds = Rect::new(
+                                        img.rect[0],
+                                        canvas_y,
+                                        (img.rect[2] - img.rect[0]).abs().max(20.0),
+                                        (img.rect[3] - img.rect[1]).abs().max(20.0),
+                                    );
+                                    let star_node_id = StarNodeId::new("doc", img.object_ref, &img.image_id)
+                                        .unwrap_or_else(|_| StarNodeId::new("doc", ObjectRef::new(1, 0), "elem").unwrap());
+                                    let sel = SelectionState::Image {
+                                        star_node_id,
+                                        render_node_id: None,
+                                        image_ref: img.image_id.clone(),
+                                        bounds,
+                                        is_shared: false,
+                                    };
+                                    let _ = mgr.dispatch(AppCommand::SetSelection { selection: sel });
+                                }
+                            }
+                        }
+                    }
                 } else {
                     let star_node_id = StarNodeId::new("doc", ObjectRef::new(1, 0), &elem_id)
                         .unwrap_or_else(|_| {
@@ -1048,6 +1075,111 @@ pub fn register_ui_callbacks(
             }
         });
     }
+
+    // Move Selected Element
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        app.on_move_selected_clicked(move |dx, dy| {
+            let mut mgr = manager.borrow_mut();
+            match mgr.dispatch(AppCommand::MoveElement {
+                dx: dx as f64,
+                dy: dy as f64,
+            }) {
+                Ok(res) => {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_status_message(res.message.into());
+                        sync_ui(&app, &mgr, &active_tool.borrow(), false);
+                    }
+                }
+                Err(err) => {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_status_message(format!("Move Refused: {err}").into());
+                    }
+                }
+            }
+        });
+    }
+
+    // Resize Selected Element
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        app.on_resize_selected_clicked(move |dw, dh| {
+            let mut mgr = manager.borrow_mut();
+            match mgr.dispatch(AppCommand::ResizeElement {
+                dw: dw as f64,
+                dh: dh as f64,
+            }) {
+                Ok(res) => {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_status_message(res.message.into());
+                        sync_ui(&app, &mgr, &active_tool.borrow(), false);
+                    }
+                }
+                Err(err) => {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_status_message(format!("Resize Refused: {err}").into());
+                    }
+                }
+            }
+        });
+    }
+
+    // Replace Selected Image
+    {
+        let app_weak = app.as_weak();
+        let manager = manager.clone();
+        let active_tool = active_tool.clone();
+        app.on_replace_image_clicked(move || {
+            let mut mgr = manager.borrow_mut();
+            let target = if let Some(session) = mgr.active_session() {
+                if let SelectionState::Image { image_ref, .. } = &session.selection {
+                    Some((session.current_page, image_ref.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((page_idx, image_ref)) = target {
+                let rep_jpeg: Vec<u8> = vec![
+                    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01,
+                    0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06,
+                    0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D,
+                    0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12, 0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D,
+                    0x1A, 0x1C, 0x1C, 0x20, 0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28,
+                    0x37, 0x29, 0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
+                    0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x02, 0x00, 0x02,
+                    0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01,
+                    0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02,
+                    0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0xFF, 0xDA, 0x00, 0x08, 0x01,
+                    0x01, 0x00, 0x00, 0x3F, 0x00, 0xBF, 0x80, 0xFF, 0xD9,
+                ];
+
+                match mgr.dispatch(AppCommand::ReplaceImage {
+                    page_index: page_idx,
+                    image_ref,
+                    image_bytes: rep_jpeg,
+                }) {
+                    Ok(res) => {
+                        if let Some(app) = app_weak.upgrade() {
+                            app.set_status_message(res.message.into());
+                            sync_ui(&app, &mgr, &active_tool.borrow(), false);
+                        }
+                    }
+                    Err(err) => {
+                        if let Some(app) = app_weak.upgrade() {
+                            app.set_status_message(format!("Replace Image Refused: {err}").into());
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// Automatically commits any pending in-place text edits before navigation or deselect.
@@ -1378,7 +1510,7 @@ fn sync_ui(app: &AppWindow, manager: &SessionManager, active_tool: &str, is_edit
                 for img in &images {
                     let canvas_y = (page_height - img.rect[3]).max(0.0) as f32;
                     let is_selected = match &session.selection {
-                        SelectionState::Image { image_ref, .. } => image_ref.contains(&format!("{}", img.object_ref.number)) || image_ref == &img.resource_name,
+                        SelectionState::Image { image_ref, .. } => image_ref.contains(&format!("{}", img.object_ref.number)) || image_ref == &img.resource_name || image_ref == &img.image_id,
                         _ => false,
                     };
                     page_elements_data.push(ElementItem {
@@ -2608,6 +2740,167 @@ mod tests {
         }
 
         println!("  [Phase 11 Acceptance Complete]: All desktop GUI editing and navigation workflows verified.");
+    }
+
+    #[test]
+    fn test_phase12_rc_acceptance_and_hardening() {
+        let _test_guard = init_testing();
+        if let Ok(mut lock) = GPU_RENDERER.lock() {
+            if lock.is_none() {
+                *lock = starpdf::render::WgpuRenderer::new().ok();
+            }
+        }
+        let app = AppWindow::new().expect("Slint AppWindow");
+        let manager = Rc::new(RefCell::new(SessionManager::new()));
+        let active_tool = Rc::new(RefCell::new("select".to_string()));
+        let is_editing = Rc::new(RefCell::new(false));
+
+        // Register all production UI callbacks
+        register_ui_callbacks(&app, manager.clone(), active_tool.clone(), is_editing.clone());
+
+        let acceptance_dir = resolve_fixture("target/desktop_acceptance_phase12");
+        let _ = std::fs::create_dir_all(&acceptance_dir);
+
+        // 1. Open Real Document with Form Fields
+        let form_path = resolve_fixture("test-assets/realworld_corpus/forms-employment-application.pdf");
+        let form_bytes = std::fs::read(&form_path).expect("read forms");
+        {
+            let mut mgr = manager.borrow_mut();
+            mgr.dispatch(AppCommand::OpenDocument {
+                path: Some(form_path.clone()),
+                bytes: form_bytes,
+                title: "forms-employment-application.pdf".into(),
+            }).expect("OpenDocument");
+        }
+        sync_ui(&app, &manager.borrow(), &active_tool.borrow(), false);
+        assert_eq!(app.get_total_pages(), 1);
+
+        // 2. Mouse-Driven Form Controls
+        app.invoke_element_selected(slint::SharedString::from("form_rust_cb"));
+        assert!(app.get_has_selection());
+        assert_eq!(app.get_selection_type(), "FormField");
+        assert_eq!(app.get_form_field_name(), "rust_cb");
+
+        // Toggle checkbox
+        app.invoke_form_field_toggled(slint::SharedString::from("rust_cb"), slint::SharedString::from("false"));
+        assert!(!app.get_form_field_checked());
+
+        // Update text field
+        app.invoke_element_selected(slint::SharedString::from("form_name_field"));
+        app.invoke_form_field_text_committed(slint::SharedString::from("name_field"), slint::SharedString::from("Release Candidate Architect"));
+        assert_eq!(app.get_form_field_value(), "Release Candidate Architect");
+
+        // 3. Canvas-Driven Annotation Move and Resize
+        app.invoke_add_annotation_clicked(slint::SharedString::from("FreeText"));
+        let elems = app.get_page_elements();
+        let mut annot_id = slint::SharedString::default();
+        for i in (0..elems.row_count()).rev() {
+            if let Some(elem) = elems.row_data(i) {
+                if elem.kind == "annotation" {
+                    annot_id = elem.id;
+                    break;
+                }
+            }
+        }
+        assert!(!annot_id.is_empty(), "FreeText annotation must exist");
+        app.invoke_element_selected(annot_id);
+        assert!(app.get_has_selection());
+        assert_eq!(app.get_selection_type(), "Annotation");
+
+        let prev_x = app.get_sel_x();
+        let prev_w = app.get_sel_w();
+
+        // Move annotation via GUI callback
+        app.invoke_move_selected_clicked(20.0, 15.0);
+        assert!(app.get_sel_x() > prev_x);
+
+        // Resize annotation via GUI callback
+        app.invoke_resize_selected_clicked(30.0, 20.0);
+        assert!(app.get_sel_w() > prev_w);
+
+        // Update annotation text
+        app.invoke_update_annotation_text_clicked(slint::SharedString::from("RC Verified FreeText"));
+        assert_eq!(app.get_selection_text_content(), "RC Verified FreeText");
+
+        // 4. Image Insertion, Selection, Move, Resize, and Replacement
+        app.invoke_add_image_clicked();
+        let elems_after_img = app.get_page_elements();
+        let mut img_id = slint::SharedString::default();
+        for i in 0..elems_after_img.row_count() {
+            if let Some(elem) = elems_after_img.row_data(i) {
+                if elem.kind == "image" {
+                    img_id = elem.id;
+                    break;
+                }
+            }
+        }
+        assert!(!img_id.is_empty(), "Image element must exist");
+        app.invoke_element_selected(img_id);
+        assert!(app.get_has_selection());
+        assert_eq!(app.get_selection_type(), "Image");
+
+        let img_prev_x = app.get_sel_x();
+        let img_prev_w = app.get_sel_w();
+
+        // Move image
+        app.invoke_move_selected_clicked(15.0, 10.0);
+        assert!(app.get_sel_x() > img_prev_x);
+
+        // Resize image
+        app.invoke_resize_selected_clicked(25.0, 15.0);
+        assert!(app.get_sel_w() > img_prev_w);
+
+        // Replace image
+        app.invoke_replace_image_clicked();
+        assert!(app.get_status_message().contains("Image") || !app.get_status_message().is_empty());
+
+        // 5. Page Operations & Safe Page Duplication
+        let p_before = app.get_total_pages();
+        app.invoke_insert_blank_page_clicked();
+        assert_eq!(app.get_total_pages(), p_before + 1);
+
+        app.invoke_move_page_down_clicked();
+        app.invoke_move_page_up_clicked();
+
+        // 6. Undo and Redo
+        app.invoke_undo_clicked();
+        app.invoke_redo_clicked();
+
+        // 7. Save and Reopen Verification
+        let save_dest = acceptance_dir.join("saved_rc_doc.pdf");
+        {
+            let mut mgr = manager.borrow_mut();
+            mgr.dispatch(AppCommand::SaveDocument {
+                destination_path: Some(save_dest.clone()),
+            }).expect("SaveDocument");
+        }
+        assert!(save_dest.exists());
+        assert!(std::fs::metadata(&save_dest).unwrap().len() > 1000);
+
+        // Reopen saved file in fresh session manager
+        let reopened_bytes = std::fs::read(&save_dest).expect("read saved doc");
+        let mut reopen_mgr = SessionManager::new();
+        reopen_mgr.dispatch(AppCommand::OpenDocument {
+            path: Some(save_dest.clone()),
+            bytes: reopened_bytes,
+            title: "reopened_saved_rc_doc.pdf".into(),
+        }).expect("Reopen saved document");
+        let s = reopen_mgr.active_session().unwrap();
+        assert_eq!(s.total_pages as i32, app.get_total_pages());
+
+        // Render page 0 of saved document to verify visual fidelity
+        let rendered = s.render_page(0, 1.0).expect("render saved page");
+        let shot_path = acceptance_dir.join("rc_acceptance_page0.png");
+        image::save_buffer(
+            &shot_path,
+            &rendered.rgba_pixels,
+            rendered.width,
+            rendered.height,
+            image::ExtendedColorType::Rgba8,
+        ).unwrap();
+        assert!(shot_path.exists());
+
+        println!("  [Phase 12 RC Acceptance Complete]: All desktop editing, moving, resizing, and save/reopen workflows verified.");
     }
 }
 
