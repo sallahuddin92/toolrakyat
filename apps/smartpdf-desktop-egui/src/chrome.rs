@@ -1,6 +1,6 @@
 //! Top chrome and window controls directly adopting upstream PdfCraft geometry and styling.
 
-use egui::{vec2, Align, Align2, CornerRadius, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{vec2, Align, Align2, Color32, CornerRadius, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use starpdf_app_core::command::AppCommand;
 use starpdf_app_core::session::SessionManager;
 
@@ -119,7 +119,12 @@ pub fn render_tab_strip(
                 );
 
                 // Title label
-                let mut title = tab.title.clone();
+                let raw_title = if tab.is_dirty {
+                    format!("• {}", tab.title)
+                } else {
+                    tab.title.clone()
+                };
+                let mut title = raw_title;
                 if title.chars().count() > 18 {
                     title = format!("{}…", title.chars().take(17).collect::<String>());
                 }
@@ -354,6 +359,15 @@ pub fn render_bottom_status_bar(
                 .size(11.5)
                 .color(t.text_muted),
         );
+
+        let is_dirty = manager.active_session().map(|s| s.is_dirty()).unwrap_or(false);
+        if is_dirty {
+            ui.label(
+                egui::RichText::new("● Unsaved")
+                    .size(11.0)
+                    .color(Color32::from_rgb(220, 140, 20)),
+            );
+        }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 6.0;

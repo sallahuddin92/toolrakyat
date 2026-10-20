@@ -166,6 +166,7 @@ impl EguiEngineAdapter {
     }
 
     pub fn switch_tab(&mut self, session_id: &str) -> Result<(), String> {
+        self.auto_commit_draft_if_needed()?;
         self.dispatch(AppCommand::SwitchTab {
             session_id: session_id.to_string(),
         })?;
@@ -174,6 +175,7 @@ impl EguiEngineAdapter {
     }
 
     pub fn save_active_document(&mut self, dest: Option<PathBuf>) -> Result<PathBuf, String> {
+        self.auto_commit_draft_if_needed()?;
         let path = match dest.or_else(|| {
             self.manager
                 .active_session()
@@ -196,6 +198,7 @@ impl EguiEngineAdapter {
         profile: ExportProfile,
         dest: PathBuf,
     ) -> Result<PathBuf, String> {
+        self.auto_commit_draft_if_needed()?;
         let res = self.dispatch(AppCommand::ExportDocument { profile })?;
         if let Some(bytes) = res.exported_bytes {
             std::fs::write(&dest, bytes).map_err(|e| format!("Failed to write export: {e}"))?;
@@ -209,6 +212,7 @@ impl EguiEngineAdapter {
     // --- WORKFLOW 2: Navigation & Zoom ---
 
     pub fn set_page(&mut self, page_index: u32) -> Result<(), String> {
+        self.auto_commit_draft_if_needed()?;
         self.dispatch(AppCommand::SetPage { page_index })?;
         Ok(())
     }
@@ -422,11 +426,13 @@ impl EguiEngineAdapter {
     }
 
     pub fn select(&mut self, selection: SelectionState) -> Result<(), String> {
+        self.auto_commit_draft_if_needed()?;
         self.dispatch(AppCommand::SetSelection { selection })?;
         Ok(())
     }
 
     pub fn clear_selection(&mut self) -> Result<(), String> {
+        self.auto_commit_draft_if_needed()?;
         self.dispatch(AppCommand::ClearSelection)?;
         self.editing_text_buffer.clear();
         self.editing_annotation_buffer.clear();
@@ -434,28 +440,65 @@ impl EguiEngineAdapter {
         Ok(())
     }
 
+    /// Whether the active text selection has uncommitted draft modifications.
+    pub fn has_unsaved_text(&self) -> bool {
+        if let Some(session) = self.manager.active_session() {
+            if let SelectionState::Text { text, .. } = &session.selection {
+                return text != &self.editing_text_buffer;
+            }
+        }
+        false
+    }
+
+    /// Automatically commits any pending draft text changes before switching or clearing selection.
+    /// Guarantees that if auto-commit fails, the draft text in `editing_text_buffer` is NEVER lost.
+    pub fn auto_commit_draft_if_needed(&mut self) -> Result<bool, String> {
+        if self.has_unsaved_text() {
+            let draft = self.editing_text_buffer.clone();
+            match self.commit_text_edit(&draft) {
+                Ok(()) => Ok(true),
+                Err(err) => {
+                    self.editing_text_buffer = draft;
+                    let msg = format!("Auto-commit draft text failed: {err}");
+                    self.error_banner = Some(msg.clone());
+                    self.status_message = format!("Refused: {msg}");
+                    Err(msg)
+                }
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
     pub fn commit_text_edit(&mut self, new_text: &str) -> Result<(), String> {
-        let target_node = {
+        let (target_node, is_single_line) = {
             let session = self.manager.active_session().ok_or("No active session")?;
             match &session.selection {
                 SelectionState::Text {
                     star_node_id,
                     is_editable,
+                    text,
                     ..
                 } => {
                     if !is_editable {
                         return Err("Selected text is read-only (unsupported font encoding or complex layout)".to_string());
                     }
                     let (_, _, occ) = star_node_id.parts();
-                    occ
+                    (occ, !text.contains('\n'))
                 }
                 _ => return Err("No text selected for editing".to_string()),
             }
         };
 
+        let sanitized = if is_single_line {
+            new_text.trim_end_matches(['\r', '\n']).to_string()
+        } else {
+            new_text.to_string()
+        };
+
         self.dispatch(AppCommand::ReplaceText {
             target_node,
-            new_text: new_text.to_string(),
+            new_text: sanitized,
         })?;
         Ok(())
     }

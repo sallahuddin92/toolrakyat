@@ -49,6 +49,7 @@ pub struct SmartPdfEguiApp {
     pub save_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     pub export_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     pub screenshot_target: Option<PathBuf>,
+    pub test_workflow_target: Option<PathBuf>,
     pub frame_count: u64,
 }
 
@@ -106,6 +107,7 @@ impl SmartPdfEguiApp {
             save_dialog_rx: None,
             export_dialog_rx: None,
             screenshot_target: None,
+            test_workflow_target: None,
             frame_count: 0,
         }
     }
@@ -336,7 +338,19 @@ impl SmartPdfEguiApp {
                     self.zoom_percent = z;
                 }
             } else if !cmd {
-                if i.key_pressed(Key::V) {
+                if i.key_pressed(Key::Escape) {
+                    if self.adapter.has_unsaved_text() {
+                        self.adapter.cancel_text_edit();
+                    } else if self
+                        .adapter
+                        .manager
+                        .active_session()
+                        .map(|s| s.selection != SelectionState::None)
+                        .unwrap_or(false)
+                    {
+                        let _ = self.adapter.clear_selection();
+                    }
+                } else if i.key_pressed(Key::V) {
                     self.active_tool = ActiveTool::Select;
                 } else if i.key_pressed(Key::H) {
                     self.active_tool = ActiveTool::Hand;
@@ -468,6 +482,33 @@ impl SmartPdfEguiApp {
         self.check_render_update(&ctx);
 
         self.frame_count += 1;
+
+        // Automated GUI test workflow for native AppKit / Metal execution
+        if let Some(target) = self.test_workflow_target.clone() {
+            ctx.request_repaint();
+            if self.frame_count == 2 {
+                // Frame 2: Hit-test and select heading text span, modify draft buffer
+                if let Some(session) = self.manager.active_session() {
+                    if let Ok(spans) = session.extract_page_text_spans(0) {
+                        if let Some(span) = spans.first() {
+                            let hit = self.adapter.hit_test(span.x + 4.0, span.y + 4.0, 792.0);
+                            if let Some(sel) = hit {
+                                let _ = self.adapter.select(sel);
+                                self.adapter.editing_text_buffer = "NovaHeading\n".to_string();
+                            }
+                        }
+                    }
+                }
+            } else if self.frame_count >= 4 {
+                // Frame 4+: Auto-commit and save active document, then capture screenshot
+                match self.save_active_document(Some(target.clone())) {
+                    Ok(saved) => println!("[WORKFLOW_TEST_SAVED] {}", saved.display()),
+                    Err(e) => eprintln!("[WORKFLOW_TEST_ERROR] {}", e),
+                }
+                self.screenshot_target = Some(target.with_extension("png"));
+                self.test_workflow_target = None;
+            }
+        }
 
         // Screenshot capture logic
         if self.screenshot_target.is_some() {

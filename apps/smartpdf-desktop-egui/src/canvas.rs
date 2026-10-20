@@ -316,7 +316,15 @@ pub fn render_document_canvas(
                 let page_x = ((ptr.x - page_rect.left()) / scale) as f64;
                 let page_y = ((page_rect.bottom() - ptr.y) / scale) as f64;
 
-                if let Some(sel) = adapter.hit_test(page_x, page_y, page_dims.1 as f64) {
+                let hit_opt = adapter.hit_test(page_x, page_y, page_dims.1 as f64);
+
+                // Auto-commit uncommitted draft text changes before switching or clearing selection.
+                // If auto-commit fails, refuse to change selection or clear draft so user edits are NEVER lost.
+                if let Err(_) = adapter.auto_commit_draft_if_needed() {
+                    return (response, CanvasAction::None);
+                }
+
+                if let Some(sel) = hit_opt {
                     let is_checkbox = match &sel {
                         SelectionState::FormField { field_type, .. } => field_type == "Checkbox",
                         _ => false,

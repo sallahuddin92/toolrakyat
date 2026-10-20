@@ -24,6 +24,7 @@ fn main() -> eframe::Result<()> {
     }
 
     let mut screenshot_out: Option<PathBuf> = None;
+    let mut test_workflow_out: Option<PathBuf> = None;
     let mut initial_mode = panels::AcrobatMode::AllTools;
     let mut initial_panel = panels::LeftPanelMode::AllTools;
     let mut initial_theme = theme::ThemeKind::Light;
@@ -37,6 +38,10 @@ fn main() -> eframe::Result<()> {
             "--screenshot" if i + 1 < args.len() => {
                 i += 1;
                 screenshot_out = Some(PathBuf::from(&args[i]));
+            }
+            "--test-workflow-edit" if i + 1 < args.len() => {
+                i += 1;
+                test_workflow_out = Some(PathBuf::from(&args[i]));
             }
             "--mode" if i + 1 < args.len() => {
                 i += 1;
@@ -108,6 +113,7 @@ fn main() -> eframe::Result<()> {
             app.left_panel = initial_panel;
             app.theme_kind = initial_theme;
             app.screenshot_target = screenshot_out;
+            app.test_workflow_target = test_workflow_out;
 
             if file_args.is_empty() {
                 app.load_document_bytes(

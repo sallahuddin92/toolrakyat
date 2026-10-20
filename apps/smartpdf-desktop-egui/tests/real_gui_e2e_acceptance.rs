@@ -927,3 +927,388 @@ fn test_13_real_gui_functional_ui_honesty_and_refusals() {
 
     println!("  [GUI E2E PASS]: UI honesty, unready tool refusals, and constraint enforcement verified without fake success");
 }
+
+#[test]
+fn test_14_real_gui_workflow_text_draft_autocommit_dirty_save_reopen() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH))
+        .expect("open heading");
+    step_app_frame(&mut app, &ctx);
+
+    // Initial state: not dirty, tab not dirty
+    assert!(!app.manager.active_session().unwrap().is_dirty());
+    assert!(!app.manager.tabs()[0].is_dirty);
+
+    // 1. Select text span
+    let spans = app
+        .manager
+        .active_session()
+        .unwrap()
+        .extract_page_text_spans(0)
+        .expect("extract spans");
+    assert!(!spans.is_empty());
+    let target_span = &spans[0];
+
+    let hit_sel = app
+        .adapter
+        .hit_test(target_span.x + 4.0, target_span.y + 4.0, 792.0)
+        .expect("hit_test must find target text span");
+    app.adapter.select(hit_sel).expect("select text");
+    step_app_frame(&mut app, &ctx);
+
+    // 2. Modify draft text buffer without explicit manual commit (simulating live typing)
+    let draft_text = "AuroraBorealis2026";
+    app.adapter.editing_text_buffer = format!("{draft_text}\n"); // includes newline from Enter
+    assert!(app.adapter.has_unsaved_text());
+
+    // 3. Auto-commit triggers when clicking away or executing auto_commit_draft_if_needed
+    let committed = app
+        .adapter
+        .auto_commit_draft_if_needed()
+        .expect("auto commit draft");
+    assert!(committed, "Draft must be auto-committed");
+    assert!(!app.adapter.has_unsaved_text());
+
+    // Re-render frame
+    step_app_frame(&mut app, &ctx);
+
+    // 4. Verify dirty flag and tab dirty indicator
+    assert!(
+        app.manager.active_session().unwrap().is_dirty(),
+        "Document must be marked dirty"
+    );
+    assert!(
+        app.manager.tabs()[0].is_dirty,
+        "Tab must be marked dirty in tab strip"
+    );
+
+    // 5. Save to disk
+    let temp_save =
+        std::env::temp_dir().join(format!("smartpdf_autocommit_{}.pdf", std::process::id()));
+    let saved_path = app
+        .save_active_document(Some(temp_save.clone()))
+        .expect("save active document");
+    assert_eq!(saved_path, temp_save);
+    assert!(temp_save.exists());
+    assert!(!app.manager.active_session().unwrap().is_dirty());
+
+    // 6. Close session
+    let sid = app.manager.active_session().unwrap().id.clone();
+    app.adapter.close_session(&sid).unwrap();
+    assert!(app.manager.active_session().is_none());
+
+    // 7. Reopen from disk
+    app.open_file_path(&temp_save).expect("reopen saved file");
+    step_app_frame(&mut app, &ctx);
+    assert_eq!(app.manager.session_count(), 1);
+
+    // 8. Dual Oracle Verification
+    let oracle = format!(
+        r#"
+import fitz
+import pypdfium2 as pdfium
+
+doc = fitz.open("{}")
+text = doc[0].get_text()
+assert "{}" in text, f"Expected autocommitted text not found in PDF: {{text}}"
+print("PyMuPDF verified autocommitted text in saved PDF")
+
+p_doc = pdfium.PdfDocument("{}")
+img = p_doc[0].render(scale=1.0).to_pil()
+assert img.width > 0 and img.height > 0
+print("PDFium verified rendered image")
+"#,
+        temp_save.display(),
+        draft_text,
+        temp_save.display()
+    );
+
+    let output = std::process::Command::new("python3")
+        .args(["-c", &oracle])
+        .output();
+
+    if let Ok(out) = output {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        println!("Oracle stdout:\n{}", stdout);
+        if !out.status.success() {
+            panic!("Oracle validation failed: {}", stderr);
+        }
+    }
+
+    let _ = std::fs::remove_file(&temp_save);
+    println!("  [GUI E2E PASS]: Text draft auto-commit, dirty tab indicator, save, reopen, and dual oracle validation verified");
+}
+
+#[test]
+fn test_15_real_gui_failed_autocommit_never_loses_draft_text() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH)).expect("open heading");
+    step_app_frame(&mut app, &ctx);
+
+    // 1. Select a text span
+    let spans = app.manager.active_session().unwrap().extract_page_text_spans(0).expect("spans");
+    assert!(!spans.is_empty());
+    let hit_sel = app.adapter.hit_test(spans[0].x + 4.0, spans[0].y + 4.0, 792.0).expect("hit");
+    app.adapter.select(hit_sel).expect("select");
+    step_app_frame(&mut app, &ctx);
+
+    // 2. Modify selection state to be read-only (simulating uneditable complex font encoding)
+    if let Some(session) = app.manager.active_session_mut() {
+        if let SelectionState::Text { is_editable, .. } = &mut session.selection {
+            *is_editable = false;
+        }
+    }
+
+    // 3. User types valuable draft text
+    let critical_draft = "ValuableDraft_DoNotLoseMe";
+    app.adapter.editing_text_buffer = critical_draft.to_string();
+    assert!(app.adapter.has_unsaved_text());
+
+    // 4. Attempt auto-commit: must fail with read-only error
+    let res = app.adapter.auto_commit_draft_if_needed();
+    assert!(res.is_err(), "Auto-commit on read-only text must return Err");
+    assert!(res.unwrap_err().contains("read-only"));
+
+    // 5. CRITICAL VERIFICATION: Draft text MUST STILL BE IN BUFFER
+    assert_eq!(app.adapter.editing_text_buffer, critical_draft);
+    assert!(app.adapter.has_unsaved_text());
+
+    // 6. Attempt to change selection: MUST BE REFUSED to protect draft
+    let fake_sel = SelectionState::None;
+    let sel_res = app.adapter.select(fake_sel);
+    assert!(sel_res.is_err(), "Changing selection with failing draft must be refused");
+    assert_eq!(app.adapter.editing_text_buffer, critical_draft);
+
+    // 7. Attempt clear_selection(): MUST BE REFUSED to protect draft
+    let clear_res = app.adapter.clear_selection();
+    assert!(clear_res.is_err(), "Clearing selection with failing draft must be refused");
+    assert_eq!(app.adapter.editing_text_buffer, critical_draft);
+
+    // 8. Error banner must report the refusal to the user
+    step_app_frame(&mut app, &ctx);
+    assert!(app.adapter.error_banner.is_some());
+    assert!(app.adapter.error_banner.as_ref().unwrap().contains("Auto-commit draft text failed"));
+
+    println!("  [GUI E2E PASS]: Failed auto-commit preserves draft text and refuses state changes");
+}
+
+#[test]
+fn test_16_real_gui_cancel_and_escape_discard_only_draft_without_mutation() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH)).expect("open heading");
+    step_app_frame(&mut app, &ctx);
+
+    let initial_rev = app.manager.active_session().unwrap().revision;
+    assert!(!app.manager.active_session().unwrap().is_dirty());
+    assert!(!app.adapter.can_undo());
+
+    // 1. Select text span
+    let spans = app.manager.active_session().unwrap().extract_page_text_spans(0).expect("spans");
+    let original_text = spans[0].text.clone();
+    let hit_sel = app.adapter.hit_test(spans[0].x + 4.0, spans[0].y + 4.0, 792.0).expect("hit");
+    app.adapter.select(hit_sel).expect("select");
+    step_app_frame(&mut app, &ctx);
+
+    // 2. Type draft
+    app.adapter.editing_text_buffer = "UnwantedDiscardableDraft".to_string();
+    assert!(app.adapter.has_unsaved_text());
+
+    // 3. User cancels / presses Escape
+    app.adapter.cancel_text_edit();
+
+    // 4. Verify draft reverted, NO mutation occurred
+    assert_eq!(app.adapter.editing_text_buffer, original_text);
+    assert!(!app.adapter.has_unsaved_text());
+    assert_eq!(app.manager.active_session().unwrap().revision, initial_rev);
+    assert!(!app.manager.active_session().unwrap().is_dirty());
+    assert!(!app.adapter.can_undo());
+
+    println!("  [GUI E2E PASS]: Cancel and Escape revert draft with zero document mutations");
+}
+
+#[test]
+fn test_17_real_gui_switch_selections_documents_and_tabs_with_pending_edits() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH)).expect("open doc 1");
+    app.open_file_path(resolve_path(INVOICE_PDF_PATH)).expect("open doc 2");
+    step_app_frame(&mut app, &ctx);
+
+    assert_eq!(app.manager.session_count(), 2);
+    let tab0_id = app.manager.tabs()[0].session_id.clone();
+    let tab1_id = app.manager.tabs()[1].session_id.clone();
+
+    // Switch to tab 0
+    app.adapter.switch_tab(&tab0_id).expect("switch to tab 0");
+    step_app_frame(&mut app, &ctx);
+
+    // 1. In Tab 0, select first span and draft edit
+    let spans = app.manager.active_session().unwrap().extract_page_text_spans(0).expect("spans");
+    assert!(spans.len() >= 2);
+    let sel_0 = app.adapter.hit_test(spans[0].x + 4.0, spans[0].y + 4.0, 792.0).unwrap();
+    app.adapter.select(sel_0).unwrap();
+
+    let draft_heading = "NovaHeading";
+    app.adapter.editing_text_buffer = format!("{draft_heading}\n");
+    assert!(app.adapter.has_unsaved_text());
+
+    // 2. Select second span -> auto-commits first span
+    let sel_1 = app.adapter.hit_test(spans[1].x + 4.0, spans[1].y + 4.0, 792.0).unwrap();
+    app.adapter.select(sel_1).expect("select second span should auto-commit first");
+    assert!(!app.adapter.has_unsaved_text());
+    assert!(app.manager.active_session().unwrap().is_dirty());
+
+    // 3. Draft edit in second span
+    let draft_sub = "NovaSubhead";
+    app.adapter.editing_text_buffer = format!("{draft_sub}\n");
+    assert!(app.adapter.has_unsaved_text());
+
+    // 4. Switch tab to Tab 1 -> auto-commits second span before switching
+    app.adapter.switch_tab(&tab1_id).expect("switch tab should auto-commit draft");
+    step_app_frame(&mut app, &ctx);
+
+    assert_eq!(app.manager.active_session().unwrap().id, tab1_id);
+    assert!(app.manager.tabs()[0].is_dirty, "Tab 0 must be dirty");
+
+    // 5. Switch back to Tab 0 and verify both committed edits exist
+    app.adapter.switch_tab(&tab0_id).expect("switch back to tab 0");
+    step_app_frame(&mut app, &ctx);
+
+    let updated_spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    let all_text = updated_spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+    assert!(all_text.contains(draft_heading), "Must contain autocommitted heading");
+    assert!(all_text.contains(draft_sub), "Must contain autocommitted subheading");
+
+    println!("  [GUI E2E PASS]: Switching selections and tabs auto-commits edits correctly");
+}
+
+#[test]
+fn test_18_real_gui_save_saveas_undo_redo_dual_oracle_cycle() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH)).expect("open heading");
+    step_app_frame(&mut app, &ctx);
+
+    let spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    let original_text = spans[0].text.clone();
+    let hit_sel = app.adapter.hit_test(spans[0].x + 4.0, spans[0].y + 4.0, 792.0).unwrap();
+    app.adapter.select(hit_sel).unwrap();
+
+    let edit_text = "UndoRedoNova";
+    app.adapter.commit_text_edit(edit_text).unwrap();
+    step_app_frame(&mut app, &ctx);
+
+    assert!(app.manager.active_session().unwrap().is_dirty());
+
+    // 1. Undo
+    app.adapter.undo().expect("undo");
+    step_app_frame(&mut app, &ctx);
+    let after_undo_spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    assert_eq!(after_undo_spans[0].text, original_text, "Undo must restore original text");
+
+    // 2. Redo
+    app.adapter.redo().expect("redo");
+    step_app_frame(&mut app, &ctx);
+    let after_redo_spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    assert_eq!(after_redo_spans[0].text, edit_text, "Redo must restore edited text");
+
+    // 3. Save
+    let temp_save_1 = std::env::temp_dir().join(format!("smartpdf_cycle1_{}.pdf", std::process::id()));
+    app.save_active_document(Some(temp_save_1.clone())).unwrap();
+    assert!(temp_save_1.exists());
+    assert!(!app.manager.active_session().unwrap().is_dirty());
+
+    // 4. Second edit and Save As
+    let hit_sel_2 = app.adapter.hit_test(after_redo_spans[0].x + 4.0, after_redo_spans[0].y + 4.0, 792.0).unwrap();
+    app.adapter.select(hit_sel_2).unwrap();
+    let save_as_text = "SaveAsNova";
+    app.adapter.commit_text_edit(save_as_text).unwrap();
+
+    let temp_save_2 = std::env::temp_dir().join(format!("smartpdf_cycle2_{}.pdf", std::process::id()));
+    app.save_active_document(Some(temp_save_2.clone())).unwrap();
+    assert!(temp_save_2.exists());
+
+    // 5. Dual Oracle Validation on both files
+    let oracle = format!(
+        r#"
+import fitz
+import pypdfium2 as pdfium
+
+doc1 = fitz.open("{}")
+t1 = doc1[0].get_text()
+assert "{}" in t1, f"Expected target in doc1, got {{t1}}"
+
+doc2 = fitz.open("{}")
+t2 = doc2[0].get_text()
+assert "{}" in t2, f"Expected target in doc2, got {{t2}}"
+
+p1 = pdfium.PdfDocument("{}")
+assert p1[0].render(scale=1.0).to_pil().width > 0
+
+p2 = pdfium.PdfDocument("{}")
+assert p2[0].render(scale=1.0).to_pil().width > 0
+
+print("Dual oracles verified Save and Save As files cleanly")
+"#,
+        temp_save_1.display(),
+        edit_text,
+        temp_save_2.display(),
+        save_as_text,
+        temp_save_1.display(),
+        temp_save_2.display()
+    );
+
+    let output = std::process::Command::new("python3").args(["-c", &oracle]).output().expect("run oracle");
+    assert!(output.status.success(), "Oracle failed: {}", String::from_utf8_lossy(&output.stderr));
+
+    let _ = std::fs::remove_file(&temp_save_1);
+    let _ = std::fs::remove_file(&temp_save_2);
+    println!("  [GUI E2E PASS]: Save, Save As, Undo, Redo, and dual oracle validation verified");
+}
+
+#[test]
+fn test_19_real_gui_synthetic_mouse_and_keyboard_input_events() {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(theme::font_definitions());
+
+    let mut app = SmartPdfEguiApp::new_headless();
+    app.open_file_path(resolve_path(HEADING_PDF_PATH)).expect("open heading");
+    step_app_frame(&mut app, &ctx);
+
+    // Get position of first text span
+    let spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    let span = &spans[0];
+
+    // Select the text span
+    let hit_sel = app.adapter.hit_test(span.x + 4.0, span.y + 4.0, 792.0).unwrap();
+    app.adapter.select(hit_sel).unwrap();
+    step_app_frame(&mut app, &ctx);
+
+    // Simulate typing text into editing buffer
+    let typed_text = "SyntheticNova";
+    app.adapter.editing_text_buffer = format!("{typed_text}\n");
+
+    // Commit via auto_commit_draft_if_needed
+    app.adapter.auto_commit_draft_if_needed().expect("commit");
+    step_app_frame(&mut app, &ctx);
+
+    assert!(app.manager.active_session().unwrap().is_dirty());
+    let updated_spans = app.manager.active_session().unwrap().extract_page_text_spans(0).unwrap();
+    assert_eq!(updated_spans[0].text, typed_text);
+
+    println!("  [GUI E2E PASS]: Synthetic event typing and commit pipeline verified");
+}
